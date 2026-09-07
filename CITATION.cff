@@ -1,0 +1,57 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: zipnative-mcp
+type: software
+authors:
+  - name: Nizoka
+    website: "https://github.com/Nizoka"
+repository-code: "https://github.com/Nizoka/zipnative-mcp"
+url: "https://github.com/Nizoka/zipnative-mcp"
+abstract: >-
+  Model Context Protocol (MCP) server bridging the zero-dependency zipnative
+  ZIP engine to AI clients. Provides 13 tools for deterministic, reproducible
+  archive creation (store / deflate, a pinned pure-TypeScript encoder for
+  identical bytes on every runtime, worker-parallel and streamed writers),
+  listing and forensic inspection without extraction (with determinism and
+  security assertions for CI), random-access reads of single entries,
+  secure-by-default extraction (zip-slip, decompression-bomb, symlink,
+  duplicate-path and Windows-device-name refusals with frozen ZIP_* error
+  codes), one-call deep integrity verification, forward scanning of truncated
+  or unseekable streams, incremental modification without recompression,
+  CRC-32, bounded raw-DEFLATE inflation, an offline capability preflight and
+  human-in-the-loop governance issue drafting. Every archive the server writes
+  is validated against ISO/IEC 21320-1:2015 by an engine-independent validator
+  in continuous integration. Speaks MCP 2026-07-28 with automatic fallback for
+  2025-era clients and makes no network call, ever.
+license: MIT
+version: 1.0.0
+date-released: "2026-09-07"
+keywords:
+  - mcp
+  - model-context-protocol
+  - zip
+  - unzip
+  - zip64
+  - archive
+  - compression
+  - deflate
+  - deterministic
+  - reproducible-builds
+  - secure-by-default
+  - zip-slip
+  - zip-bomb
+  - iso-21320
+  - conformance
+  - verazip
+  - crc32
+  - ai-tools
+  - ai-governance
+  - human-in-the-loop
+references:
+  - type: software
+    title: "zipnative — A safe, deterministic, streaming ZIP engine for modern apps"
+    version: 1.0.0
+    authors:
+      - name: Nizoka
+    repository-code: "https://github.com/Nizoka/zipnative"
+    url: "https://zipnative.dev"

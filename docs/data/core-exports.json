@@ -1,0 +1,547 @@
+{
+  "$comment": "Derived from zipnative docs/assets/api.json (1.0.0). One row per export of the two entry points; docs/KNOWLEDGE_BASE.md section 8 maps every name to an MCP touchpoint (tool + input/output field) and tests/docs-consistency.test.ts may enforce it. kind is derived from the export signature. reach grades the row per the 1.0.0 coverage audit: \"capability\" = the behaviour behind the export is exercisable through a tool, \"type\" = re-exported (or aliased) upstream for typing only, \"unexposed\" = deliberately not reachable from a tool argument (via names the reason; describe_engine.unexposed reports the same list at runtime); via names the touchpoint.",
+  "zipnativeVersion": "1.0.0",
+  "exportCount": 77,
+  "exports": [
+    {
+      "name": "AddEntryOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create_zip entries[] and modify_zip add/replace: compression, date, comment, externalAttributes | unixMode (mode bits → (S_IFREG|mode)<<16), extraFields[] { id, dataBase64 } (toAddEntryOptions in src/entry-spec.ts)"
+    },
+    {
+      "name": "ByteSource",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "built internally by openArchiveSource (zipBase64 chunked / zipPath streamed) for scan_zip_forward and by fileChunks() for create_zip stream:true entries; an external ByteSource / ReadableStream is unexposed (JSON-RPC has no stream channel)"
+    },
+    {
+      "name": "CodecCompressOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: only handed to an injected codec's compressSync, and no codec can be injected (registerCodec is unexposed)"
+    },
+    {
+      "name": "CreateZipOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create_zip: order, defaultDate (ISO instant | 'now'), compression, comment, limits, strict (+ the always-installed diagnostics sink)"
+    },
+    {
+      "name": "DEFAULT_ZIP_LIMITS",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "describe_engine.defaultLimits; the baseline resolveCallLimits / effectiveLimits merge over (src/limits.ts); quoted in the limits input description"
+    },
+    {
+      "name": "DeflateTier",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the value set of create_zip summary.deflateTier and describe_engine engine.deflateTier { default, deterministic } ('injected' never occurs in this server)"
+    },
+    {
+      "name": "EntryVerification",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "read_zip_entry mode:'verify' → verification { ok, crcMatch, sizeMatch, localHeaderMatch }"
+    },
+    {
+      "name": "ExtractOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract_zip: rejectTraversal, rejectSymlinks, onDuplicate, filter (names/prefix/glob → filter(entry)), limits, strict"
+    },
+    {
+      "name": "ExtractedEntry",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract_zip base64 mode rows (extractZip): path, entryName, index, sizeBytes, crc32, method, dataBase64"
+    },
+    {
+      "name": "ExtractedStreamEntry",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract_zip dry-run plan (includeData:false) and file-mode rows (extractZipStream; stream() into the sandbox sink → filePath)"
+    },
+    {
+      "name": "FLAG_DATA_DESCRIPTOR",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() → flags.dataDescriptor on every EntryView row; viewFromHeader usesDataDescriptor (scan_zip_forward)"
+    },
+    {
+      "name": "FLAG_ENCRYPTED",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() → flags.encrypted on every EntryView row"
+    },
+    {
+      "name": "FLAG_STRONG_ENCRYPTION",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() → flags.strongEncryption on every EntryView row"
+    },
+    {
+      "name": "FLAG_UTF8",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "decodeFlags() → flags.utf8; inspect_zip determinism.utf8Flags and check:'utf8-names'"
+    },
+    {
+      "name": "Inflator",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inflate_raw: push / finished / leftover / bytesConsumed / end → summary.bytesConsumed, leftover, finished"
+    },
+    {
+      "name": "IterateZipOptions",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "scan_zip_forward: limits, strict + the diagnostics sink passed to iterateZipEntries"
+    },
+    {
+      "name": "METHOD_DEFLATE",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "methodName() on EntryView rows, inspect_zip check:'deflate-only' / assert.method, inflate_raw method:'deflate', describe_engine.codecs"
+    },
+    {
+      "name": "METHOD_STORE",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "methodName() on EntryView rows, inspect_zip check:'store-only' / assert.method, inflate_raw method:'store' (bounded pass-through), describe_engine.codecs"
+    },
+    {
+      "name": "OpenZipOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip.validate ('eager' default) and list_zip_entries.validate ('lazy' default); limits / strict / onDiagnostic on every random-access tool"
+    },
+    {
+      "name": "ReadEntryOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "read_zip_entry.verifyCrc → readEntry(entry, { verifyCrc }); { verifyCrc:false } on readEntryStream for a range"
+    },
+    {
+      "name": "StreamOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create_zip.chunkSize → writer.stream({ chunkSize }) (file mode, 1 KiB … 16 MiB)"
+    },
+    {
+      "name": "StreamedZipEntry",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "scan_zip_forward: header / data() (data:'verify'|'include') / skip() (data:'none', filtered-out and directory entries)"
+    },
+    {
+      "name": "StreamedZipHeader",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "viewFromHeader() → scan_zip_forward.entries[] (isSymlink / usesZip64 / unixMode null; rawName → rawNameHex; descriptor headers carry zero sizes)"
+    },
+    {
+      "name": "VERSION",
+      "kind": "const",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "describe_engine.engine.version; serverInfo.instructions and __serverMetadata.engineVersion; the cache key namespace (CACHE_API_VERSION); pins docs/data/*.json in the docs-consistency test"
+    },
+    {
+      "name": "VerifiedEntry",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify_zip.entries[] (name, ok, crcMatch, sizeMatch, localHeaderMatch, skipped?: 'encrypted' | 'stream-only-codec'), selected by entries:'all'|'failed'|'skipped'|'none'"
+    },
+    {
+      "name": "VerifyZipOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify_zip.limits → { limits }"
+    },
+    {
+      "name": "ZipBaseErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 7 base-code rows of ZIP_ERROR_CLASS (ZIP_API_MISUSE and ZIP_INTERNAL unreachable by design; ZIP_INPUT_TOO_LARGE needs > 2 GiB in one deflate call, above the inline caps)"
+    },
+    {
+      "name": "ZipCodec",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: a codec is executable code; JSON cannot carry one and zipnative ships no extra codec by policy (the built-in store/deflate codecs are visible through describe_engine.codecs)"
+    },
+    {
+      "name": "ZipCommonOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "strict and limits on every engine-touching tool (EngineOptionsShape); onDiagnostic is unexposed — the server always installs its own sink so every result carries diagnostics[]"
+    },
+    {
+      "name": "ZipCompressionOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "compression { method: 'store'|'deflate', level 0–9, deterministic } at archive level (create_zip, modify_zip) and per entry"
+    },
+    {
+      "name": "ZipDataError",
+      "kind": "class",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError → _meta.error.data.errorClass 'data' with entryName and { expectedCrc, actualCrc } (8-hex)"
+    },
+    {
+      "name": "ZipDataErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 5 data-code rows of ZIP_ERROR_CLASS (all reachable)"
+    },
+    {
+      "name": "ZipDiagnostic",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "createDiagnosticSink() → DiagnosticRow { code, severity, message, entryName? } in every result's diagnostics[] (dedup by code + entryName, cap 200)"
+    },
+    {
+      "name": "ZipDiagnosticCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "ZIP_DIAGNOSTIC_CODES → describe_engine.diagnosticCodes; diagnostics[].code; inspect_zip.prependedData / multipleEocd derived from two of them"
+    },
+    {
+      "name": "ZipDiagnosticHandler",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the sink's onDiagnostic (src/diagnostics.ts)"
+    },
+    {
+      "name": "ZipEntry",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "viewFromEntry() → EntryView rows (list_zip_entries, read_zip_entry.entry, extract_zip) incl. rawNameHex / commentHex; inspect_zip statistics and determinism verdict; modify_zip planning"
+    },
+    {
+      "name": "ZipError",
+      "kind": "class",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError() instanceof root; err.code → _meta.error.code verbatim, err.name → _meta.error.data.engineError"
+    },
+    {
+      "name": "ZipErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "ZIP_ERROR_CLASS satisfies Record<ZipErrorCode, …> compile-time guard (the codes reach _meta.error.code and describe_engine.errorCodes)"
+    },
+    {
+      "name": "ZipExtraField",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "read: extraFields[] { id, idHex, name, length, dataBase64? } on EntryView rows (list_zip_entries.includeExtraData adds the payload); write: extraFields[] { id, dataBase64 } on create_zip entries and modify_zip add/replace (id 0x0001 refused)"
+    },
+    {
+      "name": "ZipFormatError",
+      "kind": "class",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError → _meta.error.data.errorClass 'parse' ('input' for the two entry-name codes)"
+    },
+    {
+      "name": "ZipFormatErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 13 format-code rows of ZIP_ERROR_CLASS (all reachable through the hostile fixtures)"
+    },
+    {
+      "name": "ZipLimitError",
+      "kind": "class",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError → _meta.error.data.errorClass 'limit' with { limit, configured, observed }"
+    },
+    {
+      "name": "ZipLimitErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 2 limit-code rows of ZIP_ERROR_CLASS (ZIP_LIMIT_INVALID pre-empted by the Zod limits schema)"
+    },
+    {
+      "name": "ZipLimits",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the limits input (eight keys) on every engine-touching tool; describe_engine.defaultLimits; the operator ceilings ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES / ZIPNATIVE_MCP_MAX_ENTRIES bound three of the keys"
+    },
+    {
+      "name": "ZipModifier",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify_zip.operations[]: addEntry (add), replaceEntry (replace), removeEntry (remove), renameEntry (rename), setComment (setComment), save (mode:'append') / saveCompact (mode:'compact'); .reader is unexposed (the input itself)"
+    },
+    {
+      "name": "ZipModifierOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify_zip: compression, defaultDate (new payloads), limits, strict"
+    },
+    {
+      "name": "ZipReader",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "entries() (every read tool), getEntry (read_zip_entry.name), readEntry / readEntryStream / readEntryRaw (read_zip_entry data / range / raw), verifyEntry (read_zip_entry mode:'verify'), entryCount / isZip64 / comment (inspect_zip, list_zip_entries; comment → commentHex); .bytes only for modify_zip summary.noOp — unexposed as a field"
+    },
+    {
+      "name": "ZipSecurityError",
+      "kind": "class",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError → _meta.error.data.errorClass 'security' with entryName"
+    },
+    {
+      "name": "ZipSecurityErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 6 security-code rows of ZIP_ERROR_CLASS (all reachable)"
+    },
+    {
+      "name": "ZipUnsupportedError",
+      "kind": "class",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "mapZipError → _meta.error.data.errorClass 'unsupported' with { feature }"
+    },
+    {
+      "name": "ZipUnsupportedErrorCode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "type",
+      "via": "the 6 unsupported-code rows of ZIP_ERROR_CLASS (ZIP_UNSUPPORTED_ZIP64_STREAMING needs a streamed sourcePath > 4 GiB)"
+    },
+    {
+      "name": "ZipUnsupportedFeature",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "_meta.error.data.feature ('zipcrypto' | 'strong-encryption' | 'multi-disk' | 'zip64-streaming' | 'cd-less-descriptor' | 'method:<n>')"
+    },
+    {
+      "name": "ZipVerificationReport",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the verify_zip result body: ok, error { code, message } | null, entryCount, entries, diagnostics (+ the wrapper's verifiedCount / failedCount / skippedCount / entriesTruncated)"
+    },
+    {
+      "name": "ZipWriter",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create_zip.entries[] → add / addDirectory (directory:true) / addStream (stream:true) / toBytes (base64 mode) / stream({ chunkSize }) (file mode or when an entry is streamed); the comment via CreateZipOptions.comment"
+    },
+    {
+      "name": "activeDeflateTier",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create_zip summary.deflateTier (activeDeflateTier(compression.deterministic === true)); describe_engine engine.deflateTier { default, deterministic }"
+    },
+    {
+      "name": "crc32",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "compute_crc32 (dataBase64 | text | sourcePath streamed in 1 MiB chunks; seed chaining; expect → matches)"
+    },
+    {
+      "name": "createInflator",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inflate_raw method:'deflate' — the resumable bounded path (maxOutput mandatory) fed in 64 KiB chunks"
+    },
+    {
+      "name": "createZip",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "create_zip (sequential writer)"
+    },
+    {
+      "name": "createZipModifier",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify_zip over the opened reader"
+    },
+    {
+      "name": "extractZip",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract_zip base64 mode with includeData:true (in-memory extractor)"
+    },
+    {
+      "name": "extractZipStream",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "extract_zip plan phase (includeData:false = dry run) and file mode (streamed into the sandbox sink)"
+    },
+    {
+      "name": "getCodec",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inflate_raw numeric method (decompressSync), methodName() on EntryView rows, describe_engine.codecs[] { sync, stream }"
+    },
+    {
+      "name": "getUnixMode",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "unixMode (four octal digits or null) on every central-directory EntryView row (list_zip_entries, read_zip_entry.entry)"
+    },
+    {
+      "name": "initNodeZipCodecs",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: a startup concern — ensureEngineReady() (src/engine.ts) calls it once before serving so every sync codec path (the worker pool included) runs on the node-zlib tier; not a tool input"
+    },
+    {
+      "name": "isSymlinkEntry",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "isSymlink on every EntryView row; inspect_zip.symlinkCount and check:'no-symlinks'"
+    },
+    {
+      "name": "iterateZipEntries",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "scan_zip_forward (the forward reader over the ByteSource built by openArchiveSource)"
+    },
+    {
+      "name": "openZip",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip, list_zip_entries, read_zip_entry, extract_zip (index pre-flight), modify_zip — every random-access tool"
+    },
+    {
+      "name": "registerCodec",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: a codec is executable code; JSON cannot carry one and zipnative ships no extra codec by policy — inflate_raw with a method beyond 0/8 answers ZIP_UNSUPPORTED_METHOD"
+    },
+    {
+      "name": "sanitizeEntryPath",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "sanitize_entry_paths.results[].sanitized; sanitizedPath on every EntryView row; inspect_zip.unsafeNameCount / check:'safe-names'; extract_zip skipped list (rejectTraversal:false) and emptyDirectories"
+    },
+    {
+      "name": "setDeflateImpl",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: runtime code injection; the server owns tier selection and reports it (create_zip summary.deflateTier, describe_engine engine.deflateTier)"
+    },
+    {
+      "name": "setInflateImpl",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: runtime code injection; the reader paths run on the tier initNodeZipCodecs selected"
+    },
+    {
+      "name": "verifyZip",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify_zip (the report returned verbatim; never isError for an archive problem)"
+    },
+    {
+      "name": "ByteSource",
+      "kind": "type",
+      "subpath": "./worker",
+      "reach": "type",
+      "via": "the worker subpath re-exports the root declaration; the server imports ByteSource from the root entry only"
+    },
+    {
+      "name": "ParallelZipOptions",
+      "kind": "interface",
+      "subpath": "./worker",
+      "reach": "capability",
+      "via": "create_zip.parallel { workers (≤ ZIPNATIVE_MCP_WORKERS), minWorkerJobSize, jobTimeout } + every CreateZipOptions field; workerUrl is unexposed (a path from a tool argument would point the worker at arbitrary code; the packaged worker resolves itself)"
+    },
+    {
+      "name": "ParallelZipWriter",
+      "kind": "interface",
+      "subpath": "./worker",
+      "reach": "capability",
+      "via": "the create_zip writer under parallel (toBytes awaited; stream() in file mode); summary.parallel { requested, workers }"
+    },
+    {
+      "name": "StreamOptions",
+      "kind": "interface",
+      "subpath": "./worker",
+      "reach": "type",
+      "via": "the worker subpath re-exports the root declaration; the server imports StreamOptions from the root entry only (create_zip.chunkSize also applies under parallel)"
+    },
+    {
+      "name": "createParallelZip",
+      "kind": "function",
+      "subpath": "./worker",
+      "reach": "capability",
+      "via": "create_zip.parallel via dynamic import('zipnative/worker'); byte-identical to createZip per tier"
+    }
+  ],
+  "verifiedOn": "2026-09-07"
+}
