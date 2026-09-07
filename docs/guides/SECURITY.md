@@ -39,8 +39,8 @@ server never re-implements a byte of ZIP parsing that could reintroduce them.
 | Zip-slip path traversal (`../`, absolute paths, drive letters, backslashes, UNC, NUL, NTFS alternate data streams) and Windows reserved device names (`CON`, `NUL`, `COM1`…) | `rejectTraversal: true` by default in `extract_zip`; the engine's `sanitizeEntryPath()` is the only path ever joined onto `outputDir`, and is exported as `sanitize_entry_paths` for external sinks | CWE-22 / CWE-67 | `ZIP_PATH_TRAVERSAL`; `rejectTraversal: false` **skips** such entries (listed in `skipped`), never emits them; `sanitizedPath` on every entry row |
 | Decompression bombs (high ratio, nesting, entry floods) | per-entry and total output caps, compression-ratio bound, entry-count cap, name / extra / comment / central-directory byte bounds — the eight `ZipLimits`, enforced **during** inflation, not after | CWE-400 / CWE-409 | `ZIP_LIMIT_EXCEEDED` with `data.limit` / `configured` / `observed`; raised per call through `limits`, bounded by the operator ceilings |
 | Symlink entries redirecting extraction | `rejectSymlinks: true` by default; a symlink accepted through `rejectSymlinks: false` is written as a **regular file holding the target text**, never materialised as a link | CWE-59 | `ZIP_SYMLINK_REJECTED`; `isSymlink` on entry rows; `inspect_zip check: 'no-symlinks'` |
-| Overlapping entries (one payload claimed by many entries, smuggling) | always-on region-boundary checks over central-directory ranges; **no opt-out** | CWE-405 | `ZIP_ENTRY_OVERLAP` |
-| Parser-differential smuggling (central directory disagreeing with local headers) | the central directory is authoritative; method / size / CRC divergence is fatal, name divergence is diagnosed | CWE-436 | `ZIP_CD_LFH_MISMATCH`, `ZIP_SIZE_MISMATCH`; `ZIP_NAME_MISMATCH` diagnostic; `verify_zip` `localHeaderMatch` |
+| Overlapping entries (one payload claimed by many entries, smuggling), entries reaching into the central directory or past EOF | always-on region-boundary checks over central-directory ranges — up front under `validate: 'eager'` (`inspect_zip` by default, the `extract_zip` pre-flight in both modes, `verify_zip`), at first read otherwise; **no opt-out** | CWE-405 | `ZIP_ENTRY_OVERLAP`, `ZIP_RECORD_TRUNCATED` |
+| Parser-differential smuggling (central directory disagreeing with local headers) | the central directory is authoritative; method / size / CRC divergence is fatal **when the entry is read** (the eager extent pass does not compare them), name divergence is diagnosed | CWE-436 | `ZIP_CD_LFH_MISMATCH`, `ZIP_SIZE_MISMATCH` on `read_zip_entry` / `extract_zip`; `ZIP_NAME_MISMATCH` diagnostic; `verify_zip` `localHeaderMatch` is the one-call gate |
 | Ambiguous EOCD (trailing garbage, several candidate records) | only a self-consistent EOCD closest to EOF is accepted; ambiguity is refused, never guessed | — | `ZIP_EOCD_NOT_FOUND`, `ZIP_EOCD_INCONSISTENT`; `ZIP_MULTIPLE_EOCD` / `ZIP_PREPENDED_DATA` diagnostics |
 | Zip64 field spoofing (sentinel values masking lying 64-bit fields) | Zip64 records cross-checked against every non-sentinel classic field; divergence is fatal | CWE-1288 | `ZIP_ZIP64_CONTRADICTION`; `ZIP_ZIP64_EXTRA_IGNORED` diagnostic |
 | Duplicate entry names shadowing each other during extraction | `onDuplicate: 'error'` by default | CWE-694 | `ZIP_EXTRACT_DUPLICATE_PATH`; `'first'` / `'last'` resolve deliberately; `inspect_zip check: 'no-duplicates'` |
@@ -58,7 +58,7 @@ remedy. The machine-readable registry is [`../data/errors.json`](../data/errors.
 | Threat | Defence | CWE |
 |---|---|---|
 | The LLM naming a file outside the sandbox (`zipPath`, `sourcePath`, `outputPath`, `outputDir`) | `src/sandbox.ts` is the single boundary: relative paths only; NUL, absolute, Windows-absolute and UNC rejected (also on POSIX); `path.relative` containment; container-extension allow-list on archive paths; `INPUT_NOT_FOUND` messages carry the relative path only | CWE-22 / CWE-73 |
-| A symlinked directory pre-planted inside the sandbox redirecting a write outside it | after every `mkdir -p`, the **real** path of the parent must still lie inside the real sandbox (`assertRealpathInside`) — `SECURITY_VIOLATION` otherwise | CWE-59 |
+| A symlink or junction pre-planted inside the sandbox redirecting a write **or a read** outside it | writes: after every `mkdir -p`, the **real** path of the parent must still lie inside the real sandbox; reads (`zipPath`, `sourcePath`, `resources/read`): the **real** path of the file itself must lie inside it — the check is on the file, not only its parent, so a file symlink cannot slip past (`assertRealpathInside`) — `SECURITY_VIOLATION` otherwise, `INPUT_NOT_FOUND` for a dangling link, and no absolute path ever leaves in the message | CWE-59 |
 | Arbitrary file overwrite | every write opens with `wx` (`OUTPUT_EXISTS` when the target exists); a partial file is removed on failure; the input archive is never touched | CWE-73 |
 | Resource exhaustion through the JSON-RPC exchange | the `src/caps.ts` envelope: 256 MiB stdio frame / HTTP body (413), 128 MiB decoded base64 input per call, 1 GiB buffered path input, 16 MiB per inline entry, 32 MiB per inline extraction, 50 MiB per inline output, 4 GiB streamed file output (enforced while writing), bounded JSON shapes (entries, operations, names, globs, extra fields, `fields` paths), 200 diagnostics per result; `inflate_raw` requires `maxOutput` | CWE-400 |
 | The LLM raising engine limits to disable the bomb guards | per-call `limits` are capped by the **operator ceilings** `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS` (`LIMIT_CEILING_EXCEEDED` names the variable); a ceiling below an engine default tightens it silently; an invalid ceiling refuses to start | CWE-400 / CWE-409 |
@@ -96,13 +96,14 @@ an unbounded stream) and `create_zip.parallel.workers` are ceiling-bound the sam
 ## 6. The sandbox — reads and writes
 
 `ZIPNATIVE_MCP_OUTPUT_DIR` is the **only** directory the server touches, for reading
-(`zipPath`, `sourcePath`) as much as for writing (`outputMode: 'file'`, `outputDir`,
-governance drafts). Unset, the server has no filesystem access at all and works on
-base64 only — the recommended posture when the host does not need files.
+(`zipPath`, `sourcePath`, `resources/read`) as much as for writing (`outputMode: 'file'`,
+`outputDir`, governance drafts). Unset, the server performs no file I/O except the
+opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR` and works on base64 only — the
+recommended posture when the host does not need files.
 
 When set: give it a directory the host owns, keep it empty or trusted (a
-pre-existing symlink or junction inside it is detected by the realpath check, but
-"use an empty destination" is the documented posture), and remember that everything
+pre-existing symlink or junction inside it is detected by the realpath check on reads
+and writes alike, but "use an empty destination" is the documented posture), and remember that everything
 in it is enumerable through `resources/list` and readable through `resources/read`
 (≤ 50 MiB per read) by the same host. Extracted files are written with the
 sanitized `/`-relative path only; `unixMode` bits are never applied to the
@@ -116,8 +117,11 @@ filesystem; no timestamps are restored.
   file — the server never creates a link.
 - Writing: a symlink **on disk** inside the sandbox is followed by `realpath` before
   any write, and a parent whose real location leaves the sandbox is refused
-  (`SECURITY_VIOLATION`). `zipPath` / `sourcePath` reads go through the same
-  resolver (containment is lexical for reads; the file is opened in place).
+  (`SECURITY_VIOLATION`).
+- Reading: `zipPath` / `sourcePath` / `resources/read` go through the same resolver
+  **and** the same realpath check, applied to the file itself: a file or directory
+  link whose real location leaves the sandbox is refused (`SECURITY_VIOLATION`), a
+  dangling link is `INPUT_NOT_FOUND`, and a regular file still reads.
 - The forward scanner (`scan_zip_forward`) cannot see symlink attributes (they live
   only in the central directory): `isSymlink` is `null` there.
 
@@ -126,7 +130,9 @@ filesystem; no timestamps are restored.
 `scan_zip_forward` reads local headers **alone** — there is no central directory to
 cross-check names, sizes or methods, so a hostile archive can present different
 content there than `inspect_zip` / `list_zip_entries` authoritatively report (the
-upload-scanner differential, CWE-436 adjacent). All size limits are enforced by
+upload-scanner differential, CWE-436 adjacent). The stream must start at a local
+header: an SFX / prepended prefix is refused (`ZIP_SIGNATURE_MISMATCH`) — route it to
+`inspect_zip`, which reports `prependedData`. All size limits are enforced by
 output counting and CRCs are verified when a payload is read, but treat forward-read
 metadata as unverified: use it only for streams you cannot seek, compare with the
 authoritative readers whenever the whole archive is available, and never feed its

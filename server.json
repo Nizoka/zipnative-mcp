@@ -34,7 +34,7 @@
       "environmentVariables": [
         {
           "name": "ZIPNATIVE_MCP_OUTPUT_DIR",
-          "description": "Absolute path of the one sandbox directory: zipPath / sourcePath inputs are read from it and outputMode='file' / outputDir outputs are written under it (never overwritten). Unset: every tool works on base64 only (file I/O disabled).",
+          "description": "Absolute path of the one sandbox directory: zipPath / sourcePath inputs are read from it and outputMode='file' / outputDir outputs are written under it (never overwritten; the real path of every file read and of every parent written must stay inside — a planted symlink or junction is SECURITY_VIOLATION). Unset: every tool works on base64 only (no file I/O beyond the opt-in cache).",
           "isRequired": false,
           "isSecret": false,
           "format": "filepath"
@@ -68,14 +68,14 @@
         },
         {
           "name": "ZIPNATIVE_MCP_MAX_ENTRIES",
-          "description": "Operator ceiling for limits.maxEntries and scan_zip_forward maxEntries (default 100000, the engine default). Integer >= 1, read once at startup; an invalid value refuses to start.",
+          "description": "Operator ceiling for limits.maxEntries and scan_zip_forward maxEntries (default 100000, the engine default; the scanner's default budget of 10000 is clamped to it, only an explicit value above it is refused). Integer >= 1, read once at startup; an invalid value refuses to start.",
           "isRequired": false,
           "isSecret": false,
           "format": "number"
         },
         {
           "name": "ZIPNATIVE_MCP_WORKERS",
-          "description": "Operator ceiling for create_zip parallel.workers (default 8; 0 disables worker threads and keeps compression on the calling thread). Integer >= 0, read once at startup; an invalid value refuses to start.",
+          "description": "Operator ceiling for create_zip parallel.workers (default 8; with no explicit workers the engine default max(1, min(cores - 1, 8)) applies, bounded by this ceiling; 0 disables worker threads and keeps compression on the calling thread). Integer >= 0, read once at startup; an invalid value refuses to start.",
           "isRequired": false,
           "isSecret": false,
           "format": "number"

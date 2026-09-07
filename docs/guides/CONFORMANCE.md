@@ -96,9 +96,11 @@ instead of pretending the profile catches what it does not.
 
 ## 3. The corpus
 
-`npm run corpus:zip` (`scripts/generate-zip-corpus.mjs`) drives the **built** tool
-handlers (`dist/`, through `callToolDirect`) plus the engine-independent raw builder
-(`tests/_fixtures/raw-zip-builder.ts`, vendored from zipnative) to write
+`npm run corpus:zip` (`scripts/generate-zip-corpus.mjs`, the corpus itself defined in
+`scripts/helpers/zip-corpus.mjs`) drives the **built** tool handlers (`dist/`, through
+`callToolDirect`) plus the engine-independent raw builder
+(`scripts/helpers/raw-zip-builder.mjs`, vendored from zipnative — the test suite uses
+its TypeScript twin `tests/_fixtures/raw-zip-builder.ts`) to write
 38 archives to `test-output/zip/` with a `manifest.json`:
 
 ```jsonc

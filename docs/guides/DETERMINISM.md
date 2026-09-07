@@ -21,8 +21,16 @@ The `reproducible_archive` MCP prompt is the short form of this page.
 | **3 — bitwise deterministic everywhere** | The pure-TS encoder is pinned: `SHA256(A) === SHA256(B)` for identical inputs on every runtime (Node versions, Bun, Deno, browsers). The mode for content addressing, reproducible builds, caching and signatures. Changing these bytes is semver-major, upstream and here. | `compression: { deterministic: true }` at archive level (or on every entry). Slower than zlib. | `summary.deflateTier: 'pure-pinned'`, `summary.deterministic: true` (only when every entry is pinned and no wall-clock date is used), `summary.sha256` with `includeSha256: true` |
 
 `summary.deterministic` therefore answers "are these bytes reproducible *across
-runtimes*?" — the strict question. `inspect_zip.determinism.deterministic` answers the
-structural question (level 1) for any archive, whoever wrote it.
+runtimes*?" — the strict question — and is `true` **only** under
+`compression: { deterministic: true }` (on every entry) with no wall-clock date. A
+default `create_zip` call is reproducible on the runtime that made it (level 2) and
+reports `summary.deterministic: false` with `summary.deflateTier: 'node-zlib'`: that is
+the honest answer, not a defect. `inspect_zip.determinism.deterministic` answers the
+structural question (level 1) for any archive, whoever wrote it — and because it
+requires epoch timestamps, a pinned non-epoch date reproduces but reports `false`
+there (§3). Three verdicts, three questions: `summary.deterministic` = identical on
+every runtime; `summary.sha256` = the proof; `inspect_zip.determinism` = canonical
+structure.
 
 ## 2. Canonical layout (level 1 rules, always)
 
@@ -73,7 +81,8 @@ tripwire, and a byte change is semver-major there and here
 
 - Set it at archive level to pin every entry; a per-entry `compression.deterministic`
   may override in either direction, and `summary.deterministic` is `true` only when
-  no entry is left unpinned.
+  no entry is left unpinned and no wall-clock date is used — never for a call that
+  relies on the default tier, however reproducible its bytes are on one runtime.
 - `level` still applies (0–9, default 6) — it is part of the input, not of the
   environment.
 - `summary.deflateTier` reports `pure-pinned`; `describe_engine.engine.deflateTier`
@@ -88,8 +97,10 @@ tripwire, and a byte change is semver-major there and here
 (`zipnative/worker`). The output is **byte-identical** to the sequential writer for
 the same tier: the pool only moves the `compressSync` calls to worker threads and the
 segment generator that lays out the archive is the same. `summary.parallel` reports
-`{ requested, workers }`; `summary.deflateTier` is `node-zlib` or `pure-pinned`, never
-`injected`. The engine falls back to inline compression on a worker timeout
+`{ requested, workers }` — with no explicit `workers` the engine default
+`max(1, min(cores − 1, 8))` applies, bounded by `ZIPNATIVE_MCP_WORKERS`, and the value
+actually used is what `workers` reports; `summary.deflateTier` is `node-zlib` or
+`pure-pinned`, never `injected`. The engine falls back to inline compression on a worker timeout
 (`jobTimeout`) or for small entries (`minWorkerJobSize`) without changing a byte.
 Because the fallbacks are timing-dependent the *response* is never cached, but the
 bytes are the same. `ZIPNATIVE_MCP_WORKERS=0` keeps everything on the calling thread —
@@ -131,7 +142,9 @@ and therefore whatever layout they had.
 
 With `ZIPNATIVE_MCP_CACHE_DIR` set the second call may be a cache hit
 (`_meta.cached: true`) — run it on another machine, or vary something irrelevant
-such as `chunkSize`, to make the comparison meaningful.
+such as `chunkSize`, to make the comparison meaningful. `includeSha256` works in file
+mode too (the archive is hashed while it streams to disk), so a `create_zip`
+`outputMode: 'file'` build carries the same `summary.sha256` as its base64 twin.
 
 **Any archive, whoever wrote it:**
 

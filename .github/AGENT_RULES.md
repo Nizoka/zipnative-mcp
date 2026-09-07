@@ -51,10 +51,12 @@ filesystem boundary is the opt-in sandbox `ZIPNATIVE_MCP_OUTPUT_DIR`.
    the engine, or any network capability.
 8. **Human-in-the-loop gate (ethics).** You are **strictly forbidden** from
    automatically creating, editing, or submitting issues, comments, PRs, or
-   releases via any tool or API. Produce a local markdown draft in
-   [.github/drafts/](drafts/) (the `draft_governance_issue` tool does this for
-   you) and present it to the user together with a **compliance report**. The
-   user must explicitly approve and trigger any submission.
+   releases via any tool or API. Produce a local markdown draft — the
+   `draft_governance_issue` tool returns it inline, and with `outputMode: 'file'`
+   writes the `.md` inside the `ZIPNATIVE_MCP_OUTPUT_DIR` sandbox (it never writes
+   anywhere else) — copy it to [.github/drafts/](drafts/) for review, and present
+   it to the user together with a **compliance report**. The user must explicitly
+   approve and trigger any submission.
 9. **Identity integrity.** Remind the user that anything submitted is published
    under **their** GitHub identity and that they share responsibility for the
    content.
@@ -74,7 +76,10 @@ filesystem boundary is the opt-in sandbox `ZIPNATIVE_MCP_OUTPUT_DIR`.
  [Decide targetRepo: engine → Nizoka/zipnative, wrapper → Nizoka/zipnative-mcp]
             │
             ▼
- [draft_governance_issue → draft markdown in .github/drafts/ + compliance report]
+ [draft_governance_issue → draft markdown (inline, or a .md in the sandbox) + compliance report]
+            │
+            ▼
+ [Copy the draft to .github/drafts/ for review]
             │
             ▼
 [Present draft + compliance report to user]
@@ -88,15 +93,18 @@ filesystem boundary is the opt-in sandbox `ZIPNATIVE_MCP_OUTPUT_DIR`.
 
 ## Compliance report (present with every draft)
 
-The `draft_governance_issue` tool returns these fields in `structuredContent`;
-present them verbatim:
+The `draft_governance_issue` tool returns exactly these eight keys in
+`structuredContent.compliance` (the snake_case names in parentheses are the
+cross-project vocabulary shared with the engine and the CLI); present them verbatim:
 
-- **zero_dependency_confirmed** — no new runtime dependency introduced.
-- **reproduction_command** — the exact command / tool call you ran.
-- **reproduction_result** — the observed failure/regression.
-- **duplicate_search_performed** — you searched open and closed issues.
-- **affected_packages** — which packages are impacted.
-- **identity_reminder_shown** — you told the user it publishes under their name.
+- **zeroDependencyConfirmed** (`zero_dependency_confirmed`) — no new runtime dependency introduced.
+- **reproductionCommand** (`reproduction_command`) — the exact command / tool call you ran.
+- **reproductionResult** (`reproduction_result`) — the observed failure/regression.
+- **duplicateSearchPerformed** (`duplicate_search_performed`) — you searched open and closed issues.
+- **affectedPackages** (`affected_packages`) — which packages are impacted.
+- **identityReminderShown** (`identity_reminder_shown`) — you told the user it publishes under their name.
+- **humanGate** — the human-gate statement, carried verbatim.
+- **environment** — `{ node, os, zipnativeMcp }` as captured at draft time.
 
 ## Validate a draft before presenting it
 

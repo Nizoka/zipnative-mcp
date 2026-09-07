@@ -31,16 +31,16 @@ You will receive an acknowledgement within **7 days**. We aim to ship a fix and 
 - The **operator** who sets the environment variables is trusted.
 - The **LLM controlling the host is untrusted** — it may send arbitrary, malicious tool arguments (names, paths, limits, base64).
 - **Archive inputs are untrusted** — every header, name, size, flag and payload may lie.
-- The **filesystem outside `ZIPNATIVE_MCP_OUTPUT_DIR` must remain inaccessible** — for reads as much as for writes; with the variable unset the server has no filesystem access at all.
+- The **filesystem outside `ZIPNATIVE_MCP_OUTPUT_DIR` must remain inaccessible** — for reads as much as for writes; with the variable unset the server performs no file I/O except the opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR` (see below).
 
 In particular we defend against (details and CWE ids in [docs/guides/SECURITY.md](docs/guides/SECURITY.md)):
 
 - **Zip-slip path traversal and Windows reserved device names** (`../`, absolute paths, drive letters, backslashes, UNC, NUL, NTFS alternate data streams, `CON` / `NUL` / `COM1`…) — the engine's `rejectTraversal: true` default in `extract_zip`; the engine's sanitized path is the only thing ever joined onto the output directory; `sanitize_entry_paths` exposes the same gate for external sinks. Relaxing it *skips* unsafe names, never emits them.
 - **Decompression bombs** (high ratio, nesting, entry floods) — the engine's eight `ZipLimits` bounds, enforced *during* inflation; per-call `limits` can never exceed the operator ceilings `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS` (`LIMIT_CEILING_EXCEEDED`; an invalid ceiling refuses to start); `inflate_raw` requires a `maxOutput` bound.
-- **Symlink entries** — `rejectSymlinks: true` by default; a symlink accepted through `rejectSymlinks: false` is written as a regular file holding the link target text, never materialised as a link. A symlinked directory pre-planted inside the sandbox cannot redirect a write outside it (realpath re-check after every `mkdir -p`).
+- **Symlink entries** — `rejectSymlinks: true` by default; a symlink accepted through `rejectSymlinks: false` is written as a regular file holding the link target text, never materialised as a link. A symlink or junction pre-planted inside the sandbox cannot redirect a write outside it (realpath re-check after every `mkdir -p`) nor a read (realpath re-check of the file itself on `zipPath`, `sourcePath` and `resources/read` — `SECURITY_VIOLATION`; a dangling link is `INPUT_NOT_FOUND`).
 - **Overlapping entries, central-vs-local header differentials, Zip64 sentinel spoofing, ambiguous EOCD records** — always-on engine checks with no opt-out (`ZIP_ENTRY_OVERLAP`, `ZIP_CD_LFH_MISMATCH`, `ZIP_ZIP64_CONTRADICTION`, `ZIP_EOCD_NOT_FOUND`).
 - **Duplicate entry names shadowing each other** — `onDuplicate: 'error'` by default.
-- **Sandbox escape through tool arguments** — every path (`zipPath`, `sourcePath`, `outputPath`, `outputDir`) resolves through one module: relative only, NUL / absolute / UNC / `..` rejected, container-extension allow-list on archive paths, absolute paths never echoed.
+- **Sandbox escape through tool arguments** — every path (`zipPath`, `sourcePath`, `outputPath`, `outputDir`, a `resources/read` URI) resolves through one module: relative only, NUL / absolute / UNC / `..` rejected, container-extension allow-list on archive paths, the real path of the file read or of the parent written checked against the real sandbox, absolute paths never echoed.
 - **Arbitrary file overwrite** — every write opens with `wx` (`OUTPUT_EXISTS`); partial files are removed on failure; the input archive is never touched.
 - **Resource exhaustion through the exchange** — 256 MiB stdio frame / HTTP body cap (413), 128 MiB decoded base64 input per call, 1 GiB buffered path input, 16 MiB per inline entry, 32 MiB per inline extraction, 50 MiB per inline output, 4 GiB streamed file output (enforced while writing), bounded JSON shapes, 200 diagnostics per result.
 - **Prototype pollution** — `additionalProperties: false` on every JSON Schema input object; Zod strict objects at every nesting level (unknown keys are rejected with `VALIDATION_ERROR`, never silently stripped).
@@ -66,7 +66,7 @@ We do **not** currently defend against:
 
 The server makes **no outbound network call, ever**. There is no network code path: no `fetch`, no socket other than the opt-in loopback listener that *receives* MCP requests. No tool argument, environment variable or archive content can name a URL; nothing is sent to GitHub or to a telemetry endpoint; `draft_governance_issue` produces a local draft and stops. `describe_engine.network` is the constant `'none'` and every tool advertises `openWorldHint: false`.
 
-The seven environment variables carry no egress role: `ZIPNATIVE_MCP_OUTPUT_DIR` (the sandbox for reads and writes; unset = no file I/O), `ZIPNATIVE_MCP_CACHE_DIR` (opt-in response cache), `ZIPNATIVE_MCP_PORT` (loopback HTTP transport), `ZIPNATIVE_MCP_HTTP_TOKEN` (**secret**, bearer token for that transport), `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS` (operator ceilings).
+The seven environment variables carry no egress role: `ZIPNATIVE_MCP_OUTPUT_DIR` (the sandbox for reads and writes; unset = no file I/O beyond the cache), `ZIPNATIVE_MCP_CACHE_DIR` (opt-in response cache), `ZIPNATIVE_MCP_PORT` (loopback HTTP transport), `ZIPNATIVE_MCP_HTTP_TOKEN` (**secret**, bearer token for that transport), `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS` (operator ceilings).
 
 ## Release integrity
 

@@ -160,13 +160,18 @@ contract-breaking issue.
 
 ## 6. Verifying a draft on disk
 
-When `outputMode: 'file'` is used, the draft `.md` lands in the sandbox (and is
-listed under `resources/list` as `zipnative://output/<path>`). A human (or CI) can
-re-check it with the same policy the tool applied:
+When `outputMode: 'file'` is used, the draft `.md` lands in the sandbox
+`ZIPNATIVE_MCP_OUTPUT_DIR` (and is listed under `resources/list` as
+`zipnative://output/<path>`) — the tool never writes anywhere else. Copy it to
+`.github/drafts/` (the human's review staging area, git-ignored) and re-check it with
+the same policy the tool applied:
 
 ```bash
 npm run verify:issue -- .github/drafts/<draft>.md
 ```
+
+No CI job runs this verifier over `.github/drafts/` (drafts are work in progress);
+run it locally before presenting a draft.
 
 `scripts/verify-issue.mjs` mirrors `validateIssueMarkdown()` in
 [`src/governance.ts`](../../src/governance.ts) byte-for-byte, so the CLI and the

@@ -28,7 +28,7 @@ applyTo: "src/server.ts,src/tools/**,src/cli.ts,src/http.ts,src/auth.ts,src/reso
 
 ## Safety
 - Never trust tool arguments — validate at the boundary with Zod; every path goes through `src/sandbox.ts`; every size through `src/caps.ts`.
-- Keep output bounded (50 MiB inline, 4 GiB file, 16 MiB per inline entry, 32 MiB per inline extraction) and deterministic by default.
+- Keep output bounded (50 MiB inline, 4 GiB file, 16 MiB per inline entry, 32 MiB per inline extraction) and reproducible by default (byte-identical on one runtime; `compression.deterministic: true` is the cross-runtime pin and the only case reporting `summary.deterministic: true`).
 - Never echo `ZIPNATIVE_MCP_HTTP_TOKEN` or absolute sandbox paths in error messages or stderr.
 
 ## Compatibility

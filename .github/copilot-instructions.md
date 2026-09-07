@@ -49,7 +49,7 @@ ISO/IEC 21320-1 conformance validated in CI — the veraZIP gate).
 - src/output.ts — `emitArchive` / `emitArchiveStream` (base64 ≤ 50 MiB or exclusive sandbox file ≤ 4 GiB, streamed) + `writeSandboxedText`.
 - src/projection.ts — token-frugal `verbosity:'summary'` / `fields:[…]` projection (`selectFields`, `_meta.unmatchedFields`).
 - src/resources.ts — native MCP resources `zipnative://output/{+path}` over the sandbox (any regular file, MIME by extension) + `resource_link`s.
-- src/sandbox.ts — the single filesystem boundary (`ZIPNATIVE_MCP_OUTPUT_DIR`): NUL / absolute / UNC / `..` guards, `ZIP_CONTAINER_EXTENSIONS` allow-list, realpath check on the parent, `wx` exclusive writes (never overwrites).
+- src/sandbox.ts — the single filesystem boundary (`ZIPNATIVE_MCP_OUTPUT_DIR`): NUL / absolute / UNC / `..` guards, `ZIP_CONTAINER_EXTENSIONS` allow-list, realpath check on the parent for writes and on the file itself for reads (`zipPath` / `sourcePath` / `resources/read`), `wx` exclusive writes (never overwrites).
 - src/version.ts — `ZIPNATIVE_MCP_VERSION` and `TOOL_API_VERSION` (both 1.0.0; in lock-step with package.json / server.json / CITATION.cff).
 - src/zip-errors.ts — the ONLY place that reads `err.code`: 39 frozen `ZIP_*` codes passed through verbatim (`mapZipError`, `guard`, `guardAsync`), 11 diagnostic codes.
 - src/index.ts — public library entry (server factory + types).

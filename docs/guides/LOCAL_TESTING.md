@@ -34,7 +34,7 @@ npm run typecheck:all && npm run lint && npm run test && npm run test:coverage &
 | `npm run typecheck:all` | Strict TypeScript over `src/` and `tests/`, no `any`, schemas compile. |
 | `npm run lint` | ESLint over `src/` with `--max-warnings 0` — a warning fails. |
 | `npm run test` | Full vitest suite (unit + protocol + examples-as-tests + catalogue parity + docs consistency). |
-| `npm run test:coverage` | Same, with v8 coverage; must stay above the thresholds in [vitest.config.ts](../../vitest.config.ts) (85 / 78 / 85 / 85). |
+| `npm run test:coverage` | Same, with v8 coverage; must stay above the thresholds in [vitest.config.ts](../../vitest.config.ts) (statements 94 / branches 90 / functions 95 / lines 94). |
 | `npm run build` | Emits `dist/` via `tsc -p tsconfig.build.json`. |
 
 Use `npm run test:watch` for a fast inner loop while developing. Tests are
@@ -135,7 +135,11 @@ counts and names quoted in README, AGENTS.md, `llms.txt`, `server.json`,
 `CITATION.cff`, `CLAUDE.md` and `docs/data/*.json` to the code — 13 tools in
 registration order, 7 prompts, 7 environment variables, every wrapper code and every
 `ZIP_*` / diagnostic code in AGENTS.md §6, the 77-export ledger, the veraZIP corpus
-counts. Update the docs, not the tests.
+counts, the rule that every mention of an SFX prefix next to `scan_zip_forward` says the tool refuses it, and the
+README project-structure block naming every `docs/**/*.md` and workflow. Update the
+docs, not the tests. Its sibling `tests/schema-lockstep.test.ts` compares the Zod
+input schemas (`z.toJSONSchema`) with the advertised `inputSchema`s so a `pattern`,
+enum, default or bound can never exist on one side only.
 
 ### 3.5 Inspecting an archive you produced by hand
 
@@ -252,7 +256,86 @@ to confirm a new or changed tool behaves before writing assertions. Remember the
 stdio frame cap (256 MiB) and that a request sent before the opening exchange is
 dropped. The stdio smoke test in the suite drives the built CLI the same way (legacy
 handshake and the 2026-07-28 `server/discover` probe), so run `npm run build` before
-`npm test`.
+`npm test`. `tests/protocol-revisions.test.ts` opens the built CLI and the HTTP
+transport with every legacy revision the SDK negotiates (2024-10-07, 2024-11-05,
+2025-03-26, 2025-06-18, 2025-11-25); `tests/stdio-modern.test.ts` drives the
+2026-07-28 envelope over stdio; `tests/http-shutdown.test.ts` sends SIGTERM to the HTTP
+mode; `tests/autonomy.test.ts` replays the scripted agent scenario below on all four
+transport × era combinations.
+
+## 6a. Drive it from Claude Code / Claude Desktop / MCP Inspector
+
+The repository ships a [`.mcp.json`](../../.mcp.json) so the **built** server can be
+driven by a real MCP host without any installation step:
+
+```json
+{
+  "mcpServers": {
+    "zipnative": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["${CLAUDE_PROJECT_DIR}/dist/cli.js"],
+      "env": { "ZIPNATIVE_MCP_OUTPUT_DIR": "${CLAUDE_PROJECT_DIR}/test-output/mcp-sandbox" }
+    }
+  }
+}
+```
+
+**Claude Code.** Run `npm run build` first (the entry is `dist/cli.js`; nothing is
+published from `src/`). Open the repository in Claude Code: the project-scoped
+`.mcp.json` is discovered automatically, `${CLAUDE_PROJECT_DIR}` is injected by Claude
+Code (it is not a shell variable), and the first use asks you to approve the server
+for this project — approve it once. The sandbox lands under
+`test-output/mcp-sandbox/` (git-ignored); create the directory if your host does not.
+`/mcp` in Claude Code lists the server, its 13 tools, the seven prompts and the
+`zipnative://output/{+path}` resource template.
+
+**Claude Desktop.** Same shape without `${CLAUDE_PROJECT_DIR}` — absolute paths only
+(`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS,
+`%APPDATA%\Claude\claude_desktop_config.json` on Windows):
+
+```json
+{
+  "mcpServers": {
+    "zipnative-dev": {
+      "command": "node",
+      "args": ["/abs/path/to/zipnative-mcp/dist/cli.js"],
+      "env": { "ZIPNATIVE_MCP_OUTPUT_DIR": "/abs/path/to/zipnative-mcp/test-output/mcp-sandbox" }
+    }
+  }
+}
+```
+
+Restart Claude Desktop after editing the file; the tools appear under the server name.
+
+**MCP Inspector.** No configuration at all — one command lists the catalogue, another
+calls a tool:
+
+```bash
+npx @modelcontextprotocol/inspector --cli node dist/cli.js --method tools/list
+npx @modelcontextprotocol/inspector --cli node dist/cli.js --method tools/call --tool-name describe_engine --tool-arg 'fields=["ceilings","sandbox"]'
+npx @modelcontextprotocol/inspector node dist/cli.js      # the interactive UI (set ZIPNATIVE_MCP_OUTPUT_DIR in the environment for file mode)
+```
+
+**The scenario to replay** — the same chain `tests/autonomy.test.ts` runs unattended;
+ask the host to perform it step by step and compare with the expected results:
+
+| Step | Ask for | Expected |
+| --- | --- | --- |
+| 1 | `describe_engine` | `server.name: zipnative-mcp`, `network: 'none'`, `sandbox.enabled: true`, the three `ceilings`, every cap under `caps`. |
+| 2 | `create_zip` with two text entries, `compression: { deterministic: true }`, `includeSha256: true`, `outputMode: 'file'`, `outputPath: 'demo/build.zip'` | a `resource_link` `zipnative://output/demo/build.zip`; `summary.deterministic: true`, `deflateTier: 'pure-pinned'`, a `sha256`. |
+| 3 | `verify_zip` with `zipPath: 'demo/build.zip'`, `verbosity: 'summary'` | `ok: true`, `error: null`, `failedCount: 0`, `skippedCount: 0`. |
+| 4 | `inspect_zip` with the same `zipPath` and `check: ['deterministic', 'canonical-layout', 'safe-names', 'no-encryption']` | `checksPassed: true`, four `checks[]` rows with `ok: true`. |
+| 5 | `list_zip_entries` with `fields: ['entries.name', 'entries.methodName', 'hasMore']` | the two names in canonical order, `hasMore: false`. |
+| 6 | `read_zip_entry` with `name` of the first entry and `encoding: 'utf8'` | the `text` you wrote in step 2, `crcVerified: true`. |
+| 7 | `modify_zip` with `zipPath`, `operations: [{ op: 'remove', name: <second entry> }]`, `mode: 'compact'`, `outputMode: 'file'`, `outputPath: 'demo/build-v2.zip'` | `summary.saveMode: 'compact'`, `entryCountAfter: 1`; `inspect_zip` on it reports `multipleEocd: false`, `canonicalLayout: true`. |
+| 8 | `extract_zip` with `zipPath: 'demo/build-v2.zip'`, `outputMode: 'file'`, `outputDir: 'demo/unpacked'` | one `resource_link` per file, `fileCount: 1`, nothing overwritten (a second run is `OUTPUT_EXISTS`). |
+| 9 | `resources/list` (the host's resource browser) | `zipnative://output/demo/build.zip`, `demo/build-v2.zip` and the extracted file, readable through `resources/read`. |
+
+Every step is a single tool call with no human input other than the approval in step
+0; every refusal you can provoke on the way (an absolute `outputPath`, a `zipPath`
+outside the sandbox, `maxEntries` above the ceiling) carries a code in
+`_meta.error.code` and, where one applies, a `data.remedy`.
 
 To exercise the Streamable HTTP transport instead, set `ZIPNATIVE_MCP_PORT` (the
 server binds loopback only and checks `Host` / `Origin`, with the Origin port pinned).

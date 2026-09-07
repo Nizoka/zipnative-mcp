@@ -6,7 +6,7 @@ applyTo: "src/sandbox.ts,src/output.ts,src/archive-input.ts,src/caps.ts,src/limi
 
 ## Filesystem confinement
 - ONE boundary: `ZIPNATIVE_MCP_OUTPUT_DIR` (`src/sandbox.ts`). Every read (`zipPath`, `sourcePath`) and write (`outputPath`, `outputDir`, extracted files, governance drafts) resolves through it; unset ⇒ file I/O is disabled and the tools work on base64 only.
-- Reject: NUL bytes, absolute / Windows drive / UNC paths, `..` traversal, an output name outside `ZIP_CONTAINER_EXTENSIONS` (`.md` for drafts); check the parent's realpath after `mkdir -p` (a symlinked directory must not redirect a write); write exclusively (`wx`) — the server never overwrites (`OUTPUT_EXISTS`).
+- Reject: NUL bytes, absolute / Windows drive / UNC paths, `..` traversal, an output name outside `ZIP_CONTAINER_EXTENSIONS` (`.md` for drafts); check the parent's realpath after `mkdir -p` (a symlinked directory must not redirect a write) **and** the realpath of every file read (`resolveInputFile`, `readResource` — a planted symlink or junction must not redirect a read; the check is on the file itself, not only its parent); write exclusively (`wx`) — the server never overwrites (`OUTPUT_EXISTS`).
 - Extraction joins ONLY the engine's sanitized path under `outputDir`; a symlink accepted through `rejectSymlinks:false` is written as a regular file holding the target text, never materialised as a link.
 - Never leak an absolute path in an error: use `relativeLabel`.
 
@@ -17,7 +17,7 @@ applyTo: "src/sandbox.ts,src/output.ts,src/archive-input.ts,src/caps.ts,src/limi
 - Weakening any default is a human decision recorded in the PR (`.github/AGENT_RULES.md` rule 6).
 
 ## Byte and count caps (`src/caps.ts`)
-- 256 MiB stdio frame / HTTP body; 128 MiB decoded base64 input; 1 GiB buffered `zipPath`; 50 MiB inline output; 4 GiB file output; 16 MiB inline entry; 32 MiB inline extraction total; list limit 200 / 2000; create ≤ 10 000 entries; modify ≤ 1000 ops; sanitize ≤ 10 000 names; diagnostics ≤ 200. Every constant is advertised by `describe_engine` and quoted in the docs — change both.
+- 256 MiB stdio frame / HTTP body; 128 MiB decoded base64 input; 1 GiB buffered `zipPath`; 50 MiB inline output; 4 GiB file output; 16 MiB inline entry; 32 MiB inline extraction total; list limit 200 / 2000; create ≤ 100 000 entries (aligned with the engine default `maxEntries` so Zip64 output stays reachable); modify ≤ 1000 ops; sanitize ≤ 10 000 names; filter names ≤ 1000 / globs ≤ 32; extra fields ≤ 16; `fields` ≤ 16; scan default `maxEntries` 10 000 (clamped to the ceiling); ≤ 50 resource links; `resources/list` ≤ 1000 entries / depth 8 / 50 MiB read; cache 3600 s / 256 MiB; diagnostics ≤ 200. Every constant is advertised by `describe_engine.caps` and quoted in the docs — change both.
 
 ## Network and HTTP
 - There is NO network code path in this server and none may be added — not behind an env var, not for telemetry, not for GitHub. A tool argument never carries a URL that is fetched.

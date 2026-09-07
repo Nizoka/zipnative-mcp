@@ -42,7 +42,7 @@
     "role_of_human": "reviewer and sole performer of GitHub writes",
     "gate": "A human MUST explicitly review, sign off on, and trigger any GitHub issue, comment, PR, or release. The agent's authority ends at producing a local draft plus a compliance report. The zipnative-mcp server contains NO code path that can write to GitHub and NO network code path at all: it makes no outbound network call, ever, and never accepts a URL from a tool argument.",
     "identity_integrity": "Any issue or PR is published under the human user's GitHub identity. The agent MUST remind the user of their shared responsibility for the content before submission.",
-    "draft_location": ".github/drafts/",
+    "draft_location": "ZIPNATIVE_MCP_OUTPUT_DIR (the draft_governance_issue tool with outputMode 'file' writes the .md inside the sandbox, nowhere else) -> .github/drafts/ (the human's review copy)",
     "target_repositories": {
       "zipnative": "engine behaviour — parsing, writing, DEFLATE, CRC, Zip64, ZipLimits bounds, codecs",
       "zipnative-mcp": "wrapper behaviour — schemas, sandbox, output modes, transport, projections, caps"
@@ -59,8 +59,18 @@
     "target_repository_chosen"
   ],
   "compliance_report": {
-    "description": "The structured summary an agent MUST present to the user alongside every draft. The `draft_governance_issue` tool returns exactly these fields in its structuredContent.",
+    "description": "The structured summary an agent MUST present to the user alongside every draft. The `draft_governance_issue` tool returns exactly these eight keys in structuredContent.compliance (camelCase, as returned; `cross_project_vocabulary` lists the snake_case names shared with zipnative and zipnative-cli).",
     "required_fields": [
+      "zeroDependencyConfirmed",
+      "reproductionCommand",
+      "reproductionResult",
+      "duplicateSearchPerformed",
+      "affectedPackages",
+      "identityReminderShown",
+      "humanGate",
+      "environment"
+    ],
+    "cross_project_vocabulary": [
       "zero_dependency_confirmed",
       "reproduction_command",
       "reproduction_result",
@@ -83,7 +93,8 @@
   },
   "verification": {
     "command": "npm run verify:issue -- .github/drafts/<draft>.md",
-    "advisory_in_ci": true,
+    "advisory_in_ci": false,
+    "advisory_in_ci_note": "No CI job runs the verifier over .github/drafts/ (drafts are git-ignored work in progress); tests/governance.test.ts asserts that scripts/verify-issue.mjs and src/governance.ts apply the same policy. Run the command locally before presenting a draft.",
     "blocks_submission_on_failure": true
   },
   "references": {
