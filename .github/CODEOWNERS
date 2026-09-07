@@ -1,0 +1,23 @@
+# CODEOWNERS
+
+# Default owner for everything
+* @Nizoka
+
+# MCP server runtime and tool surface
+src/ @Nizoka
+src/tools/ @Nizoka
+
+# Public API and package contract
+src/index.ts @Nizoka
+package.json @Nizoka
+
+# Corpus generator + vendored veraZIP validator (raw ZIP bytes live here)
+scripts/ @Nizoka
+
+# Declared corpus counts and error / export vocabularies quoted by the docs
+docs/data/ @Nizoka
+
+# CI/CD and release automation
+.github/workflows/ @Nizoka
+release-notes/ @Nizoka
+CHANGELOG.md @Nizoka

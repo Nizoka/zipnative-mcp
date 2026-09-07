@@ -1,0 +1,14 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Nizoka/zipnative-mcp/security/advisories/new
+    about: Never in a public issue. GitHub private vulnerability reporting is the channel today; SECURITY.md describes the disclosure procedure and the engine-vs-wrapper split.
+  - name: Engine defect (parsing, writing, DEFLATE, CRC, Zip64, limits)
+    url: https://github.com/Nizoka/zipnative/issues/new/choose
+    about: The server contains no ZIP logic of its own. A wrong byte, a wrong verdict or a ZIP_* code raised on a valid archive is an engine issue; zipnative-mcp ships the fixed engine in a patch release.
+  - name: Questions and discussions (zipnative ecosystem)
+    url: https://github.com/Nizoka/zipnative/discussions
+    about: How-to questions, design ideas and anything open-ended about the engine or its MCP server.
+  - name: AI agents drafting an issue
+    url: https://github.com/Nizoka/zipnative-mcp/blob/main/.github/AGENT_RULES.md
+    about: Agents are draftsmen, never submitters. Use the draft_governance_issue tool (or `npm run verify:issue -- <draft.md>`) and hand the draft to a human who submits it under their own identity.
