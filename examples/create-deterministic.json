@@ -1,0 +1,12 @@
+{
+  "description": "Byte-identical archive on every runtime: compression.deterministic pins the pure-TypeScript deflate encoder (summary.deflateTier 'pure-pinned') and includeSha256 adds summary.sha256 so two calls can be compared. Dates stay at the DOS epoch (omit defaultDate) — summary.deterministic is true.",
+  "tool": "create_zip",
+  "arguments": {
+    "entries": [
+      { "name": "README.md", "text": "# Hello\n" },
+      { "name": "src/index.js", "text": "export {};\n" }
+    ],
+    "compression": { "deterministic": true },
+    "includeSha256": true
+  }
+}

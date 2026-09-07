@@ -1,0 +1,10 @@
+{
+  "description": "Peek at a byte window of an entry through the chunked stream: bounded memory, no CRC for a window (crcVerified false), range.returned tells you how many bytes actually came back. The way around the 16 MiB inline cap (ENTRY_TOO_LARGE) for a large log or dump.",
+  "tool": "read_zip_entry",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "name": "docs/guide.md",
+    "encoding": "utf8",
+    "range": { "offset": 0, "length": 64 }
+  }
+}

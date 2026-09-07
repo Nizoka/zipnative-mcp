@@ -1,0 +1,8 @@
+{
+  "description": "Token-frugal archive facts: verbosity 'summary' keeps the scalar verdict only (archiveBytes, entryCount, isZip64, compressed / uncompressed bytes, encryptedCount, unsafeNameCount, duplicateNameCount, deterministic, canonicalLayout, diagnosticCount) and drops the per-method rows and the diagnostics array.",
+  "tool": "inspect_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "verbosity": "summary"
+  }
+}

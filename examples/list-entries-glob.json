@@ -1,0 +1,10 @@
+{
+  "description": "Paged inventory filtered by glob: a pattern without a '/' matches at any depth, so '*.md' keeps README.md and docs/guide.md. Nothing is decompressed. fields projects each row to the columns you branch on (an array segment maps over every element); hasMore tells you whether to page with offset.",
+  "tool": "list_zip_entries",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "filter": { "glob": ["*.md"] },
+    "limit": 50,
+    "fields": ["entryCount", "matchedCount", "hasMore", "entries.name", "entries.uncompressedSize", "entries.crc32", "entries.sanitizedPath"]
+  }
+}

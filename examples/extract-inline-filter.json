@@ -1,0 +1,8 @@
+{
+  "description": "Extract a subset inline: filter.prefix keeps the entries under src/ and each file comes back as dataBase64 (≤ 16 MiB per file, ≤ 32 MiB in total — switch to outputMode 'file' beyond that). The summary projection lists the extracted paths without the payloads.",
+  "tool": "extract_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "filter": { "prefix": "src/" }
+  }
+}

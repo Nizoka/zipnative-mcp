@@ -1,0 +1,7 @@
+{
+  "description": "Deep verification in one call: zipnative's verifyZip report verbatim — eager structural validation, then every entry's CRC-32 / size / local-header agreement. The tool NEVER returns isError for a problem with the archive: a structural refusal lands in error { code: ZIP_*, message } and encrypted entries are honestly skipped. Branch on ok and error.code.",
+  "tool": "verify_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>"
+  }
+}

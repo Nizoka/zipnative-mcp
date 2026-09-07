@@ -1,0 +1,18 @@
+{
+  "description": "Draft a governance-compliant GitHub issue for HUMAN review — never submitted (AI-governance / Human-In-The-Loop contract). draft_governance_issue assembles a local Markdown draft plus a structured compliance report and validates it against the zero-dependency + reproduction policy. The server has NO network code path and NO GitHub write path: present the returned draft and compliance report to the user, then STOP — they review and submit it manually under their own GitHub identity. Engine behaviour targets 'zipnative'; wrapper behaviour targets 'zipnative-mcp'. Fully self-contained (no archive needed).",
+  "tool": "draft_governance_issue",
+  "arguments": {
+    "title": "scan_zip_forward mis-detects the descriptor of a stored entry",
+    "summary": "A stored entry followed by a signed data descriptor is reported as truncated by the forward reader, while the same archive opens and verifies cleanly through the random-access path.",
+    "issueType": "bug",
+    "targetRepo": "zipnative",
+    "reproduction": {
+      "command": "scan_zip_forward on an archive written with compression.method 'store' and stream: true on one entry",
+      "result": "ZIP_STREAM_TRUNCATED at the stored entry; verify_zip on the same bytes reports ok: true"
+    },
+    "expectedBehavior": "The entry is read and its CRC verified, or refused with ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR rather than reported as truncated.",
+    "actualBehavior": "The scan stops with ZIP_STREAM_TRUNCATED although the stream is complete.",
+    "affectedPackages": ["zipnative", "zipnative-mcp"],
+    "duplicateSearchPerformed": true
+  }
+}

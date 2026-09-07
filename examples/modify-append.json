@@ -1,0 +1,11 @@
+{
+  "description": "Incremental edit without recompression, append mode (the default): the original bytes stay verbatim, the replaced README.md and the new CHANGELOG.md are appended and a new central directory follows. Fast and byte-preserving — but the superseded README payload REMAINS in the file (data remanence; ZIP_DEAD_BYTES_RATIO fires past 50 % dead bytes). Use mode 'compact' when deletion matters.",
+  "tool": "modify_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "operations": [
+      { "op": "replace", "name": "README.md", "text": "# Replaced\n" },
+      { "op": "add", "name": "CHANGELOG.md", "text": "## 1.0.1\n- README rewritten\n" }
+    ]
+  }
+}

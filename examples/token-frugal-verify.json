@@ -1,0 +1,9 @@
+{
+  "description": "The smallest 'is this archive intact?' probe: verbosity 'summary' drops the per-entry rows and fields projects to the three values you branch on. ok false with error null means content mismatches (CRC / size); error { code } means the structure itself was refused. Unmatched field paths would be reported in _meta.unmatchedFields.",
+  "tool": "verify_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "verbosity": "summary",
+    "fields": ["ok", "error", "failedCount"]
+  }
+}

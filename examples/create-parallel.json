@@ -1,0 +1,11 @@
+{
+  "description": "Compress with the worker pool (zipnative/worker): parallel.workers fans deflate out across worker threads, byte-identical to the sequential writer for the same tier. Only worth it for many large entries; the count is capped by ZIPNATIVE_MCP_WORKERS (0 keeps everything on the calling thread). Never served from the cache.",
+  "tool": "create_zip",
+  "arguments": {
+    "entries": [
+      { "name": "a.txt", "text": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n" },
+      { "name": "b.txt", "text": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n" }
+    ],
+    "parallel": { "workers": 2, "minWorkerJobSize": 1 }
+  }
+}

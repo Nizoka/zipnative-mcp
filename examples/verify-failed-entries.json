@@ -1,0 +1,8 @@
+{
+  "description": "Keep only the rows you act on: entries 'failed' returns the entries whose CRC / size / local header did not agree (ok false, not skipped) while the counts (entryCount, verifiedCount, failedCount, skippedCount) still cover every entry. On an intact archive the entries array is empty and ok is true.",
+  "tool": "verify_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "entries": "failed"
+  }
+}

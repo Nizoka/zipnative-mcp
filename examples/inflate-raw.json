@@ -1,0 +1,8 @@
+{
+  "description": "Inflate a raw DEFLATE (RFC 1951) stream under a mandatory output bound: zipnative's resumable inflater runs in constant memory, reports the exact bytesConsumed and any trailing bytes as leftover, and stops with ZIP_INFLATE_OUTPUT_OVERFLOW past maxOutput (the zip-bomb guard). The inflated bytes arrive as an embedded application/octet-stream resource.",
+  "tool": "inflate_raw",
+  "arguments": {
+    "dataBase64": "<raw-deflate-base64>",
+    "maxOutput": 1024
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "description": "Offline capability preflight — no archive needed: which engine version and deflate tier are in use, the engine's default limits, the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES, ZIPNATIVE_MCP_WORKERS), every server cap and whether the sandbox / cache are enabled. fields keeps the projection small; network is always 'none'. Never cached.",
+  "tool": "describe_engine",
+  "arguments": {
+    "fields": ["server", "engine", "defaultLimits", "ceilings", "caps", "sandbox", "network"]
+  }
+}

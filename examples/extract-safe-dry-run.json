@@ -1,0 +1,8 @@
+{
+  "description": "Dry run of a secure extraction: includeData false returns the plan — every sanitized path, entry name, size, CRC and method — without decompressing or returning a single payload byte (dryRun true). Every guard stays on (zip-slip / device names, symlinks, duplicate paths, bombs, overlaps), so a hostile archive is refused here with its ZIP_* code before anything would be written.",
+  "tool": "extract_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "includeData": false
+  }
+}

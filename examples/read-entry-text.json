@@ -1,0 +1,9 @@
+{
+  "description": "Read one entry as UTF-8 text without extracting the archive (random access, CRC-verified). Names are exact and case-sensitive; the last duplicate wins — pass index (from list_zip_entries) to pick another. Invalid UTF-8 is refused with ENTRY_NOT_UTF8 (read it as base64 instead).",
+  "tool": "read_zip_entry",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "name": "README.md",
+    "encoding": "utf8"
+  }
+}

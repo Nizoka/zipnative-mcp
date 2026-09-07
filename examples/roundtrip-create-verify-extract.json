@@ -1,0 +1,30 @@
+{
+  "description": "Round trip without a sandbox: create an archive, verify it in one call, then dry-run its extraction. Each later step takes the base64 of the archive produced in step 1 (the resource.blob of the embedded resource block). With ZIPNATIVE_MCP_OUTPUT_DIR set, the same chain runs on a zipPath without re-sending the bytes.",
+  "steps": [
+    {
+      "tool": "create_zip",
+      "arguments": {
+        "entries": [
+          { "name": "manifest.json", "text": "{ \"name\": \"roundtrip\", \"version\": \"1.0.0\" }\n" },
+          { "name": "docs/README.md", "text": "# Round trip\n" }
+        ],
+        "compression": { "deterministic": true },
+        "includeSha256": true
+      }
+    },
+    {
+      "tool": "verify_zip",
+      "arguments": {
+        "zipBase64": "<base64 from step 1>",
+        "verbosity": "summary"
+      }
+    },
+    {
+      "tool": "extract_zip",
+      "arguments": {
+        "zipBase64": "<base64 from step 1>",
+        "includeData": false
+      }
+    }
+  ]
+}

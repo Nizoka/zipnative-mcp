@@ -1,0 +1,7 @@
+{
+  "description": "The traversal gate over arbitrary names (no archive needed): each name maps to the safe '/'-relative path a secure extraction would use, or null with the rule that fired — traversal ('..'), drive letter, Windows reserved device name (aux), absolute path, NTFS alternate data stream. Join `sanitized` under your own extraction root, never the raw name.",
+  "tool": "sanitize_entry_paths",
+  "arguments": {
+    "names": ["docs/readme.md", "../../etc/passwd", "C:\\Windows\\win.ini", "aux.txt", "/etc/shadow", "file.txt:stream", "a/./b//c.txt"]
+  }
+}

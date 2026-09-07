@@ -1,0 +1,9 @@
+{
+  "description": "Forward scan of a complete archive with data 'verify': every kept entry is decompressed so its CRC-32 and sizes are checked (entries[].data.verified, bytesProduced) without returning any payload. stoppedAt 'central-directory' is the normal end. Compare the names with list_zip_entries — the forward reader trusts local headers alone.",
+  "tool": "scan_zip_forward",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "data": "verify",
+    "fields": ["trust", "entryCount", "keptCount", "stoppedAt", "truncated", "entries.name", "entries.data"]
+  }
+}

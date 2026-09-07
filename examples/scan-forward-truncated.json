@@ -1,0 +1,9 @@
+{
+  "description": "Forensics on a truncated download: the archive was cut mid-entry, so inspect_zip / list_zip_entries fail (no central directory). scan_zip_forward walks the local headers in stream order and, with tolerateTruncation true, returns the partial inventory plus error { code: ZIP_STREAM_TRUNCATED, ... } and stoppedAt 'error' instead of failing. NOT authoritative: trust is 'local-headers-only'.",
+  "tool": "scan_zip_forward",
+  "arguments": {
+    "zipBase64": "<truncated-zip-base64>",
+    "tolerateTruncation": true,
+    "verbosity": "summary"
+  }
+}

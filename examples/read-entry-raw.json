@@ -1,0 +1,9 @@
+{
+  "description": "The compressed payload of one entry, verbatim and zero-copy (mode 'raw', always base64 — no decompression, no CRC). Feed structuredContent.dataBase64 to inflate_raw with maxOutput set to entry.uncompressedSize; a stored entry's raw payload is already the plain bytes.",
+  "tool": "read_zip_entry",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "name": "docs/guide.md",
+    "mode": "raw"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "description": "Documentation-only (needs ZIPNATIVE_MCP_OUTPUT_DIR): stream a large sandbox file into the archive with bounded memory. sourcePath names a file relative to the sandbox and stream: true feeds it through addStream (data-descriptor layout — reproducible but inspect_zip reports canonicalLayout: false; entries above 4 GiB are refused with ZIP_UNSUPPORTED_ZIP64_STREAMING). outputMode 'file' streams the archive to disk (never overwrites) and returns a resource_link.",
+  "tool": "create_zip",
+  "arguments": {
+    "entries": [
+      { "name": "data/dump.bin", "sourcePath": "incoming/dump.bin", "stream": true },
+      { "name": "manifest.json", "text": "{ \"kind\": \"dump\" }\n" }
+    ],
+    "chunkSize": 1048576,
+    "outputMode": "file",
+    "outputPath": "builds/dump.zip"
+  }
+}

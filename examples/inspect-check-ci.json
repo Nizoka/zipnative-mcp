@@ -1,0 +1,9 @@
+{
+  "description": "CI gate in one call: named checks plus parametrised assertions become checks[] rows ({ check, ok, detail }) and a single checksPassed verdict. A failed check does NOT fail the call — branch on checksPassed. The archive is opened eagerly, so a hostile shape is refused with its ZIP_* code before any check runs.",
+  "tool": "inspect_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "check": ["deterministic", "canonical-layout", "no-encryption", "no-symlinks", "safe-names", "no-duplicates"],
+    "assert": { "maxEntries": 100, "maxRatio": 100, "has": ["README.md"] }
+  }
+}

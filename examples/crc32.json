@@ -1,0 +1,8 @@
+{
+  "description": "The ZIP checksum (IEEE 802.3 CRC-32, the engine's slice-by-8 implementation) of a string, compared against a known value: matches is true because CRC-32('hello world') = 0d4a1185. Pass seed to continue a running CRC over consecutive chunks, or sourcePath to stream a sandbox file in 1 MiB chunks.",
+  "tool": "compute_crc32",
+  "arguments": {
+    "text": "hello world",
+    "expect": "0d4a1185"
+  }
+}

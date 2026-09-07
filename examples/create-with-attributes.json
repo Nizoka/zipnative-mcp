@@ -1,0 +1,11 @@
+{
+  "description": "Per-entry attributes: a Unix mode ('0755' becomes the external attributes of a regular file), an entry comment, a pinned per-entry date (ISO-8601, UTC, 2-second DOS granularity — still reproducible), a raw extra field embedded verbatim (id 0x6a6a = 27242, payload bytes 01 02 03), plus an archive comment.",
+  "tool": "create_zip",
+  "arguments": {
+    "entries": [
+      { "name": "bin/run.sh", "text": "#!/bin/sh\necho hi\n", "unixMode": "0755", "comment": "entry comment", "date": "2024-06-01T12:34:56Z" },
+      { "name": "meta/info.txt", "text": "with an extra field", "extraFields": [{ "id": 27242, "dataBase64": "AQID" }] }
+    ],
+    "comment": "archive comment"
+  }
+}

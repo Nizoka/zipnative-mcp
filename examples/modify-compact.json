@@ -1,0 +1,12 @@
+{
+  "description": "Remove an entry for real: mode 'compact' (saveCompact) rewrites the archive canonically — still no recompression of the surviving entries — so the removed payload is truly gone (an SFX prefix would be dropped too). summary.entryCountBefore / entryCountAfter and grewByBytes show the effect; includeSha256 proves the result.",
+  "tool": "modify_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "operations": [
+      { "op": "remove", "name": "docs/guide.md" }
+    ],
+    "mode": "compact",
+    "includeSha256": true
+  }
+}

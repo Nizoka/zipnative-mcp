@@ -1,0 +1,11 @@
+{
+  "description": "Rename an entry and set the archive comment without touching any payload. rename never overwrites implicitly (ZIP_ENTRY_EXISTS if the target exists — remove it first); a missing source is ZIP_ENTRY_NOT_FOUND with data.operationIndex naming the failing operation. Operations run in order.",
+  "tool": "modify_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "operations": [
+      { "op": "rename", "from": "src/index.js", "to": "src/main.js" },
+      { "op": "setComment", "comment": "renamed by zipnative-mcp" }
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "description": "Create a small archive from inline text entries. Reproducible by default: canonical entry order (raw UTF-8 name bytes), DOS-epoch timestamps, UTF-8 names. The archive comes back once as an embedded resource block (data:application/zip;base64,...); structuredContent carries { mode, sizeBytes, summary, diagnostics }.",
+  "tool": "create_zip",
+  "arguments": {
+    "entries": [
+      { "name": "README.md", "text": "# Hello\n\nA small archive built by zipnative-mcp.\n" },
+      { "name": "src/index.js", "text": "export const answer = 42;\n" },
+      { "name": "assets/", "directory": true }
+    ]
+  }
+}

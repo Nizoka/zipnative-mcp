@@ -1,0 +1,8 @@
+{
+  "description": "A hostile archive whose only entry is named '../../evil.txt' (zip-slip, CWE-22). With the default rejectTraversal true, extract_zip refuses it with isError true and _meta.error.code ZIP_PATH_TRAVERSAL before a single payload byte is touched — the archive is spec-valid (ISO/IEC 21320-1 constrains the container, not the meaning of names), which is exactly why the guard exists on top of conformance. rejectTraversal false would SKIP the entry (listed in `skipped`), never emit it.",
+  "expectError": "ZIP_PATH_TRAVERSAL",
+  "tool": "extract_zip",
+  "arguments": {
+    "zipBase64": "<hostile-zip-slip-base64>"
+  }
+}

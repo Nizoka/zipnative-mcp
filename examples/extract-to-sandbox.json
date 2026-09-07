@@ -1,0 +1,10 @@
+{
+  "description": "Documentation-only (needs ZIPNATIVE_MCP_OUTPUT_DIR): stream every file under a relative outputDir inside the sandbox. Only the engine's sanitized path is ever joined, the parent's real path is checked, files are created exclusively (never overwritten), explicit empty directories are created with emptyDirectories, and the result carries a resource_link (zipnative://output/...) per written file. Guards stay at their defaults.",
+  "tool": "extract_zip",
+  "arguments": {
+    "zipPath": "incoming/report.zip",
+    "outputMode": "file",
+    "outputDir": "unpacked/report",
+    "emptyDirectories": true
+  }
+}
