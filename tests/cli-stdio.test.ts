@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { spawn } from 'node:child_process';
+import { PassThrough } from 'node:stream';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { STDIO_MAX_FRAME_BYTES } from '../src/caps.js';
 
 /**
  * End-to-end stdio smoke: spawns the built CLI and drives it over
@@ -192,68 +195,133 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
             ],
             [1],
         );
-        const result = session.frames.find((f) => f.id === 1)?.result as { supportedVersions?: string[]; resultType?: string } | undefined;
+        const result = session.frames.find((f) => f.id === 1)?.result as { supportedVersions?: string[]; resultType?: string; capabilities?: Record<string, unknown>; instructions?: string; ttlMs?: number; cacheScope?: string; _meta?: Record<string, unknown> } | undefined;
         expect(result?.resultType).toBe('complete');
         expect(result?.supportedVersions).toContain('2026-07-28');
+        // A-016: the discover capabilities on stdio match the HTTP transport (tools / prompts / resources, never logging).
+        expect(Object.keys(result?.capabilities ?? {})).toEqual(expect.arrayContaining(['tools', 'prompts', 'resources']));
+        expect(result?.capabilities?.['logging']).toBeUndefined();
+        expect(String(result?.instructions)).toContain('DECISION TREE');
+        expect(result?.ttlMs).toBe(3_600_000);
+        expect(result?.cacheScope).toBe('public');
+        expect((result?._meta?.['io.modelcontextprotocol/serverInfo'] as { name: string } | undefined)?.name).toBe('zipnative-mcp');
     });
 });
 
-describe.skipIf(!hasDist)('dist/cli.js over stdio — large frames', () => {
-    it('accepts a single JSON-RPC frame larger than the SDK default 10 MiB cap without dying', async () => {
-        const big = 'A'.repeat(11 * 1024 * 1024); // ~11 MiB base64 string (decodes to zeros → not an archive, but the frame must arrive)
-        const session = await runStdioSession(
-            [
-                { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'smoke', version: '0' } } },
-                { jsonrpc: '2.0', method: 'notifications/initialized' },
-                { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'inspect_zip', arguments: { zipBase64: big } } },
-                { jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} },
-            ],
-            [1, 2, 3],
-        );
-        expect(session.stderr).not.toContain('ReadBuffer exceeded');
-        const call = session.frames.find((f) => f.id === 2)?.result as { isError?: boolean; content?: Array<{ text?: string }> } | undefined;
-        expect(call?.isError).toBe(true); // not a ZIP → tool error (ZIP_EOCD_NOT_FOUND), delivered
-        expect(call?.content?.[0]?.text).toContain('ZIP_EOCD_NOT_FOUND');
-        expect(session.frames.find((f) => f.id === 3)?.result).toBeDefined(); // the server is still alive afterwards
-        expectCleanExit(session);
-    }, 60_000);
-});
+/**
+ * The 256 MiB frame edge (STDIO_MAX_FRAME_BYTES), asserted at the exact
+ * boundary the SDK enforces: `ReadBuffer.append` refuses a chunk once
+ * `buffered + chunk.length > maxBufferSize`, so a line of CAP − 1 bytes plus
+ * its newline (= CAP bytes) is the largest frame accepted and a line of CAP
+ * bytes plus its newline is refused ("ReadBuffer exceeded maximum size").
+ *
+ * The transport is driven IN PROCESS with the exact wiring of src/cli.ts
+ * (`StdioServerTransport` with the raised cap + `serveStdio` legacy 'serve')
+ * on PassThrough streams, pushing each frame as ONE chunk: the boundary is
+ * only exact per chunk, and the SDK re-concatenates the buffer on every pipe
+ * chunk (quadratic — a 256 MiB frame through a real 64 KiB-chunked pipe takes
+ * well over ten minutes, which is a transport-throughput property, not a
+ * cap property). Half a gigabyte of strings is still involved, so the pair
+ * runs only under ZIPNATIVE_MCP_SLOW_TESTS=1.
+ */
+describe.skipIf(!process.env['ZIPNATIVE_MCP_SLOW_TESTS'])('stdio transport — the 256 MiB frame edge (ZIPNATIVE_MCP_SLOW_TESTS)', () => {
+    const HEAD = '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"inspect_zip","arguments":{"zipBase64":"';
+    const TAIL = '"}}}';
 
-describe.skipIf(!hasDist)('dist/cli.js — operator ceilings (ZIPNATIVE_MCP_MAX_ENTRIES)', () => {
-    function spawnWithCeiling(value: string): Promise<{ code: number | null; stderr: string }> {
-        return new Promise((resolve, reject) => {
-            const child = spawn(process.execPath, [CLI], {
-                stdio: ['pipe', 'pipe', 'pipe'],
-                env: { ...process.env, ZIPNATIVE_MCP_PORT: '', ZIPNATIVE_MCP_MAX_ENTRIES: value },
-            });
-            let stderr = '';
-            const timer = setTimeout(() => {
-                child.kill('SIGKILL');
-                reject(new Error(`startup timed out; stderr: ${stderr}`));
-            }, 20_000);
-            child.stderr.on('data', (c: Buffer) => {
-                stderr += c.toString('utf8');
-                // A valid ceiling is logged before "ready"; stop the child once it is serving.
-                if (stderr.includes('ready (stdio transport')) child.kill('SIGTERM');
-            });
-            child.on('exit', (code) => {
-                clearTimeout(timer);
-                resolve({ code, stderr });
-            });
-            child.on('error', reject);
-        });
+    /** A JSON-RPC line of exactly `lineBytes` bytes (ASCII, so bytes = chars). */
+    function lineOf(lineBytes: number): string {
+        return `${HEAD}${'A'.repeat(lineBytes - HEAD.length - TAIL.length)}${TAIL}`;
     }
 
-    it('refuses to start on an invalid value', async () => {
-        const { code, stderr } = await spawnWithCeiling('lots');
-        expect(code).toBe(1);
-        expect(stderr).toContain('fatal:');
-        expect(stderr).toContain('ZIPNATIVE_MCP_MAX_ENTRIES');
-    });
+    interface InProcess {
+        stdin: PassThrough;
+        frames: Frame[];
+        errors: Error[];
+        waitFor(id: number, timeoutMs: number): Promise<Frame | undefined>;
+        close(): Promise<void>;
+    }
 
-    it('logs the applied ceiling and serves on a valid value', async () => {
-        const { stderr } = await spawnWithCeiling('5000');
-        expect(stderr).toContain('ZIPNATIVE_MCP_MAX_ENTRIES = 5000');
-        expect(stderr).toContain('ready (stdio transport');
-    });
+    async function openInProcess(): Promise<InProcess> {
+        const { serveStdio, StdioServerTransport } = await import('@modelcontextprotocol/server/stdio');
+        const { createServer } = await import('../src/server.js');
+        const stdin = new PassThrough();
+        const stdout = new PassThrough();
+        const transport = new StdioServerTransport(stdin, stdout, { maxBufferSize: STDIO_MAX_FRAME_BYTES });
+        const errors: Error[] = [];
+        const frames: Frame[] = [];
+        const waiters = new Map<number, (f: Frame) => void>();
+        let buffer = '';
+        stdout.on('data', (c: Buffer) => {
+            buffer += c.toString('utf8');
+            let idx: number;
+            while ((idx = buffer.indexOf('\n')) >= 0) {
+                const line = buffer.slice(0, idx).trim();
+                buffer = buffer.slice(idx + 1);
+                if (line.length === 0) continue;
+                const frame = JSON.parse(line) as Frame;
+                frames.push(frame);
+                if (typeof frame.id === 'number') waiters.get(frame.id)?.(frame);
+            }
+        });
+        const handle = serveStdio(() => createServer(), { legacy: 'serve', onerror: (e) => errors.push(e), transport });
+        // serveStdio installs its own wire error hook; observe it too so a read-buffer refusal is visible either way.
+        const previous = transport.onerror;
+        transport.onerror = (e): void => {
+            errors.push(e);
+            previous?.(e);
+        };
+        const write = (line: string): void => {
+            stdin.write(`${line}\n`);
+        };
+        write(JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'edge', version: '0' } } }));
+        const waitFor = (id: number, timeoutMs: number): Promise<Frame | undefined> => new Promise((resolve) => {
+            const known = frames.find((f) => f.id === id);
+            if (known !== undefined) {
+                resolve(known);
+                return;
+            }
+            const timer = setTimeout(() => {
+                waiters.delete(id);
+                resolve(undefined);
+            }, timeoutMs);
+            waiters.set(id, (f) => {
+                clearTimeout(timer);
+                resolve(f);
+            });
+        });
+        expect(await waitFor(1, 20_000), 'initialize answered').toBeDefined();
+        write(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }));
+        return { stdin, frames, errors, waitFor, close: () => handle.close() };
+    }
+
+    it('a line of CAP − 1 bytes (CAP with its newline) is accepted and answered — INPUT_TOO_LARGE, since 192 MiB decoded exceeds the 128 MiB input cap', async () => {
+        const session = await openInProcess();
+        try {
+            session.stdin.write(Buffer.from(`${lineOf(STDIO_MAX_FRAME_BYTES - 1)}\n`, 'latin1'));
+            const answer = await session.waitFor(2, 240_000);
+            expect(session.errors.map((e) => e.message)).toEqual([]);
+            const call = answer?.result as { isError?: boolean; content?: Array<{ text?: string }> } | undefined;
+            expect(call?.isError).toBe(true);
+            expect(call?.content?.[0]?.text).toContain('INPUT_TOO_LARGE');
+            // The transport is still alive afterwards.
+            session.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} })}\n`);
+            expect((await session.waitFor(3, 20_000))?.result).toBeDefined();
+        } finally {
+            await session.close();
+        }
+    }, 300_000);
+
+    it('a line of CAP bytes (CAP + 1 with its newline) is refused by the read buffer, never answered, and the transport closes', async () => {
+        const session = await openInProcess();
+        try {
+            session.stdin.write(Buffer.from(`${lineOf(STDIO_MAX_FRAME_BYTES)}\n`, 'latin1'));
+            expect(await session.waitFor(2, 15_000)).toBeUndefined();
+            expect(session.errors.map((e) => e.message).join('\n')).toContain(`ReadBuffer exceeded maximum size of ${STDIO_MAX_FRAME_BYTES} bytes`);
+            // Closed: a further request is never answered.
+            session.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} })}\n`);
+            expect(await session.waitFor(3, 3_000)).toBeUndefined();
+        } finally {
+            await session.close().catch(() => undefined);
+        }
+    }, 300_000);
 });

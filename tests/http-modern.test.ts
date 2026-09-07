@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
-import { ensureEngineReady, SERVER_CACHE_HINTS } from '../src/server.js';
+import { callToolDirect, ensureEngineReady, SERVER_CACHE_HINTS } from '../src/server.js';
+import { assertValidZip } from './_zip-assert.js';
 import { startHttpFixture, send, modernRequest, legacyInitBody, JSON_HEADERS, type HttpFixture } from './_http-fixture.js';
 import { connectLegacy } from './_mcp-harness.js';
 import { b64, basicZip } from './_zip-fixtures.js';
@@ -71,6 +75,34 @@ describe('HTTP transport — MCP 2026-07-28 clients', () => {
         expect(resources['cacheScope']).toBe('private');
         const templates = (await modern('resources/templates/list'))['result'] as Record<string, unknown>;
         expect(templates['cacheScope']).toBe('private');
+    });
+
+    it('A-016: resources/read carries the private / ttl 0 cache hints on the wire and serves the sandbox blob', async () => {
+        const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'zipnative-http-res-'));
+        process.env['ZIPNATIVE_MCP_OUTPUT_DIR'] = dir;
+        try {
+            const created = await callToolDirect('create_zip', { entries: [{ name: 'a.txt', text: 'wire' }], outputMode: 'file', outputPath: 'wire.zip' });
+            expect(created.isError).not.toBe(true);
+            const uri = 'zipnative://output/wire.zip';
+            const msg = await modern('resources/read', { uri });
+            const result = msg['result'] as Record<string, unknown>;
+            expect(result['resultType']).toBe('complete');
+            expect(result['ttlMs']).toBe(SERVER_CACHE_HINTS['resources/read'].ttlMs);
+            expect(result['cacheScope']).toBe('private');
+            expect(result['ttlMs']).toBe(0);
+            const contents = result['contents'] as Array<{ uri: string; mimeType: string; blob: string }>;
+            expect(contents).toHaveLength(1);
+            expect(contents[0]).toMatchObject({ uri, mimeType: 'application/zip' });
+            assertValidZip(contents[0]!.blob, 'wire.zip');
+            expect((result['_meta'] as Record<string, unknown>)[SERVER_INFO_KEY]).toBeDefined();
+            // The listing agrees (private, ttl 0) and names the same resource.
+            const list = (await modern('resources/list'))['result'] as { resources: Array<{ uri: string }>; cacheScope: string; ttlMs: number };
+            expect(list.resources.map((r) => r.uri)).toEqual([uri]);
+            expect(list.cacheScope).toBe('private');
+        } finally {
+            delete process.env['ZIPNATIVE_MCP_OUTPUT_DIR'];
+            await fs.rm(dir, { recursive: true, force: true });
+        }
     });
 
     it('tools/call returns resultType=complete with a payload identical to the legacy path', async () => {
