@@ -56,8 +56,9 @@ The full licence text of each dependency is shipped in its own package
 
 The `scripts/` and `tests/` directories carry code copied — not imported —
 from sibling repositories, because those repositories do not ship it in their
-npm tarballs. Each copy pins the upstream commit and blob it was taken from in
-its header (asserted by `tests/verazip-vendor.test.ts`):
+npm tarballs. The `scripts/` copies pin the upstream commit and blob in their
+header (asserted by `tests/verazip-vendor.test.ts`); the adapted `src/` modules and
+the `docs/data` files name their upstream file and version:
 
 | File | Upstream | Licence |
 | --- | --- | --- |

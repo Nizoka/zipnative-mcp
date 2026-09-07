@@ -134,10 +134,15 @@ that the superset gate compares against from 1.1.0 on.
 counts and names quoted in README, AGENTS.md, `llms.txt`, `server.json`,
 `CITATION.cff`, `CLAUDE.md` and `docs/data/*.json` to the code — 13 tools in
 registration order, 7 prompts, 7 environment variables, every wrapper code and every
-`ZIP_*` / diagnostic code in AGENTS.md §6, the 77-export ledger, the veraZIP corpus
-counts, the rule that every mention of an SFX prefix next to `scan_zip_forward` says the tool refuses it, and the
-README project-structure block naming every `docs/**/*.md` and workflow. Update the
-docs, not the tests. Its sibling `tests/schema-lockstep.test.ts` compares the Zod
+`ZIP_*` / diagnostic code in AGENTS.md §6, the 77-export ledger with its 62 / 9 / 6
+reach counts (`UNEXPOSED_EXPORTS` ⊆ the unexposed rows), the veraZIP corpus counts
+quoted in the docs against `docs/data/verazip.json` (pinned by both
+`tests/verazip-vendor.test.ts` and docs-consistency), the rule that every mention of an
+SFX prefix next to `scan_zip_forward` says the tool refuses it, the cache clause on
+every "no I/O outside the sandbox" statement in README / SECURITY.md /
+`docs/guides/SECURITY.md`, and the README project-structure block naming every
+`docs/**/*.md`, `docs/data/*.json`, workflow, `src/**/*.ts` and `scripts/**/*.{mjs,mts}`
+file. Update the docs, not the tests. Its sibling `tests/schema-lockstep.test.ts` compares the Zod
 input schemas (`z.toJSONSchema`) with the advertised `inputSchema`s so a `pattern`,
 enum, default or bound can never exist on one side only.
 
@@ -186,9 +191,9 @@ directory serves `zipPath` / `sourcePath` inputs and is listed under
 ## 5. External conformance (veraZIP) — level 0 always, level 1 optional
 
 `assertValidZip` already applies the ISO/IEC 21320-1 validator inside the test suite.
-The corpus gate runs the same validator over a manifest of 38 archives
-produced by the built tools (plus four raw-crafted negative canaries) and adds the
-foreign-integrity pass:
+The corpus gate runs the same validator over a manifest of 38 archives — the ones
+the built tools write plus the raw-crafted hostile shapes and four negative canaries —
+and adds the foreign-integrity pass:
 
 ```bash
 npm run validate:zip

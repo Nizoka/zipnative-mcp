@@ -29,7 +29,7 @@ server never re-implements a byte of ZIP parsing that could reintroduce them.
 | The **operator** who sets the environment variables | trusted | The sandbox directory, the ceilings and the HTTP token are their decisions. |
 | The **LLM** controlling the host | **untrusted** | Every tool argument may be malicious: names, paths, limits, base64. |
 | **Archive inputs** | **untrusted** | Every header, name, size, flag and payload may lie. |
-| The **filesystem outside `ZIPNATIVE_MCP_OUTPUT_DIR`** | must remain inaccessible | The server neither reads nor writes anywhere else. |
+| The **filesystem outside `ZIPNATIVE_MCP_OUTPUT_DIR`** | must remain inaccessible | The server neither reads nor writes anywhere else, except the opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR` (§6). |
 | The **network** | does not exist | There is no network code path. |
 
 ## 3. Threats and defences (engine guards, on by default)
@@ -141,9 +141,9 @@ names to a filesystem without `sanitize_entry_paths`.
 ## 9. Conformant does not mean safe
 
 Every archive the server writes conforms to ISO/IEC 21320-1:2015, validated in CI by
-an engine-independent validator ([`CONFORMANCE.md`](CONFORMANCE.md)). Three of the
-hostile refusal fixtures — zip-slip, a Windows device name, duplicate paths — are
-**perfectly conformant**: the standard constrains the container's structure, not the
+an engine-independent validator ([`CONFORMANCE.md`](CONFORMANCE.md)). Four of the
+hostile refusal fixtures — zip-slip, a Windows device name, duplicate paths, a
+symlink entry — are **perfectly conformant**: the standard constrains the container's structure, not the
 meaning of entry names. That is precisely why the extraction guards above exist on
 top of conformance, and why the conformance gate records those archives as
 "conformant but refused" instead of pretending the profile catches what it does not.
@@ -151,8 +151,9 @@ top of conformance, and why the conformance gate records those archives as
 ## 10. What the server never does
 
 No network egress of any kind (no telemetry, no GitHub, no URL from any source), no
-`eval`, no dynamic import of caller-named modules, no filesystem access outside the
-sandbox, no decryption, no overwrite, no silent fallback on a bad configuration (a
+`eval`, no dynamic import of caller-named modules,
+no filesystem access outside the sandbox except the opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR`,
+no decryption, no overwrite, no silent fallback on a bad configuration (a
 weak token or an invalid ceiling exits 1 with one `fatal:` line). The supply chain is
 three runtime dependencies; CI runs CodeQL, OpenSSF Scorecard, `npm audit`, the
 conformance gate on Linux and Windows, and the package is published with provenance

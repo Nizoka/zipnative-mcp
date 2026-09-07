@@ -43,7 +43,7 @@ ISO/IEC 21320-1 conformance validated in CI — the veraZIP gate).
 - src/entry.ts — the shared `EntryView` JSON row (`viewFromEntry` / `viewFromHeader`, `ENTRY_VIEW_SCHEMA`): decoded flags, methodName, CRC hex, unix mode, named extra fields, sanitizedPath.
 - src/entry-spec.ts — the per-entry payload for create/modify (`dataBase64` | `text` | `sourcePath` | `directory`, compression, date, comment, unixMode / externalAttributes, extraFields) → `AddEntryOptions`.
 - src/errors.ts — `ToolError(code, message, data?)`, `SecurityError`, `GovernanceError`.
-- src/filter.ts — entry filters (exact names / prefix / globs, vendored glob matcher) shared by list / extract / scan / verify.
+- src/filter.ts — entry filters (exact names / prefix / globs, vendored glob matcher) shared by list / extract / scan.
 - src/governance.ts — runtime source of truth for the AI-governance / HITL contract (`validateIssueMarkdown`, `DEPENDENCY_PATTERNS` byte-identical to `scripts/verify-issue.mjs`, prompt texts).
 - src/limits.ts — the `limits` input fragment (the eight `ZipLimits` keys) + `resolveCallLimits` → `LIMIT_CEILING_EXCEEDED` naming the env var.
 - src/output.ts — `emitArchive` / `emitArchiveStream` (base64 ≤ 50 MiB or exclusive sandbox file ≤ 4 GiB, streamed) + `writeSandboxedText`.

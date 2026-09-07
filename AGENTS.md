@@ -5,7 +5,7 @@ Operations manual for AI agents. Two audiences:
 1. **Agents *using* the server** (Copilot, Claude, Cursor, Cline, …) — read §1–§6.
 2. **Agents *contributing* to this repo** — read §7.
 
-The server also returns the §2 decision tree in `serverInfo.instructions`. Deeper
+The server also returns the §2 decision tree in the `instructions` field of the opening exchange (initialize / server/discover result). Deeper
 references: [docs/AI_GUIDE.md](docs/AI_GUIDE.md) (pitfalls + recipes),
 [docs/guides/CONFORMANCE.md](docs/guides/CONFORMANCE.md) (the veraZIP gate),
 [docs/data/errors.json](docs/data/errors.json) (the frozen error registry). Worked
@@ -29,7 +29,7 @@ invocations live under [examples/](examples/).
 | 10 | `compute_crc32` | IEEE 802.3 CRC-32 (the engine's slice-by-8) of exactly one of `text` / `dataBase64` / `sourcePath`¹ (streamed in 1 MiB chunks, ≤ 1 GiB). `seed` (0–0xffffffff) continues a running CRC; `expect` (1–8 hex digits, optional `0x`; `pattern` `^(?:0x)?[0-9a-fA-F]{1,8}$`) → `matches`. Result `crc32`, `hex`, `byteLength`, `seed`. | ✓ |
 | 11 | `inflate_raw` | Raw DEFLATE (RFC 1951) from `dataBase64` or `sourcePath`¹ with a MANDATORY `maxOutput` through the resumable inflater: constant memory, exact `bytesConsumed`, trailing bytes as `leftover` (`allowTrailing` silences the warning), `ZIP_INFLATE_OUTPUT_OVERFLOW` past the bound. `method` 'deflate' (default) / 'store' (bounded pass-through) / a numeric id (`pattern` `^(?:deflate\|store\|[0-9]+)$`; no codec registered here → `ZIP_UNSUPPORTED_METHOD`). Output base64 (≤ 50 MiB, `application/octet-stream`) or a sandbox file (`.bin .dat .txt .json .xml .md .csv .html .zip .tar .raw`). | ⁵ |
 | 12 | `describe_engine` | Offline preflight (no archive): `server` {name, version, toolApiVersion, protocol, toolCount}, `engine` {version, deflateTier {default, deterministic}}, `capabilities` (nodeZlib, compressionStream, decompressionStream, workerThreads, cpuCount, defaultWorkers), `codecs`, `defaultLimits`, `ceilings` (+ the env names), `caps`, `sandbox` {enabled, cacheEnabled}, `network: 'none'`, `errorCodes` (39), `diagnosticCodes` (11), `unexposed` engine exports with the rationale. Projection⁴. Never cached. | ✓ |
-| 13 | `draft_governance_issue` | Draft a governance-compliant GitHub issue for **human** review: `title`, `summary`, `issueType` (bug / feature / security / docs / performance), `targetRepo` ('zipnative-mcp' default, or 'zipnative' for engine behaviour), `reproduction` {command, result}, `expectedBehavior`, `actualBehavior`, `affectedPackages`, `duplicateSearchPerformed` (MUST be true). Returns `draftMarkdown` + `compliance` report + `warnings`; **never submits**, no network. `outputMode` 'inline' (default) / 'file' (+ `.md` `outputPath`). | ✓⁶ |
+| 13 | `draft_governance_issue` | Draft a governance-compliant GitHub issue for **human** review: `title`, `summary`, `issueType` (bug / feature / security / docs / performance), `targetRepo` ('zipnative-mcp' default, or 'zipnative' for engine behaviour), `reproduction` {command, result}, `expectedBehavior`, `actualBehavior`, `affectedPackages`, `duplicateSearchPerformed` (MUST be true). Returns `draftMarkdown` + `compliance` report + `warnings`; **never submits**, no network. `outputMode` 'inline' (default) / 'file' (+ `.md` `outputPath`). | ⁶ |
 
 ¹ **Input forms.** Archive input is exactly one of `zipBase64` (the raw archive as base64 exactly once; a `data:…;base64,` prefix is tolerated; decoded ≤ 128 MiB) or `zipPath` (a relative path inside `ZIPNATIVE_MCP_OUTPUT_DIR`; container extensions only — `.zip .jar .war .ear .docx .xlsx .pptx .odt .ods .odp .epub .vsix .nupkg .whl .apk .ipa .xpi .crx .kmz`; buffered ≤ 1 GiB; never cached). Payloads are exactly one of `dataBase64` / `text` / `sourcePath` (a relative sandbox path, any extension, ≤ 1 GiB). Every path read is checked by its **real** path: a symlink or junction planted in the sandbox that points outside it is `SECURITY_VIOLATION` on `zipPath` / `sourcePath` / `resources/read`, exactly as on writes. Without the sandbox variable every path input is refused with `SECURITY_VIOLATION` and the tools work on base64 only.
 ² **`limits` fragment** (every engine-touching tool): the eight named `ZipLimits` bounds — `maxEntries`, `maxEntryUncompressedSize`, `maxTotalUncompressedSize`, `maxCompressionRatio`, `maxNameBytes`, `maxExtraFieldBytes`, `maxCommentBytes`, `maxCentralDirectoryBytes` (engine defaults 100000 · 1 GiB · 8 GiB · 1024 · 4096 · 65535 · 65535 · 256 MiB). Raise a bound for trusted input only; a value above the operator ceilings (`ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`) is refused with `LIMIT_CEILING_EXCEEDED` naming the variable; a ceiling below the engine default tightens it silently. `strict: true` escalates the first diagnostic to `ZIP_STRICT_DIAGNOSTIC`.
@@ -207,14 +207,15 @@ next to the prose remedy in `message`, drawn from a closed vocabulary: `outputMo
 (`extract_zip` above the inline caps), `range` (`read_zip_entry` above the 16 MiB cap),
 `filter`, `encoding:'base64'`, `data:'verify'` (`scan_zip_forward` `data: 'include'` above the
 caps), `list_zip_entries` (an out-of-range `index`), `resources/list` (a missing `zipPath` /
-`sourcePath`), `maxEntries ≤ N` (`scan_zip_forward` above the ceiling). Absent when no
+`sourcePath`), `zipPath` (an inline payload above the 128 MiB cap — route the bytes through a
+sandbox file), `maxEntries ≤ N` (`scan_zip_forward` above the ceiling). Absent when no
 single input change lifts the refusal. Branch on `code` first; `remedy` only refines the
 retry.
 
 | `code` | Meaning | Fix |
 |--------|---------|-----|
 | `VALIDATION_ERROR` | Zod rejected the input: wrong type / bound / enum, an **unknown or misspelt key** (top-level or nested — schemas are strict), both or neither of `zipBase64` / `zipPath` (or `name` / `index`, `dataBase64` / `text` / `sourcePath`), an empty or non-base64 payload (a `data:` prefix is tolerated, base64-twice is not), a `range` outside `mode: 'data'`, `encoding: 'utf8'` with `mode: 'raw'`, `stream: true` without `sourcePath`, a duplicate name in `create_zip.entries`, a date outside 1980–2107 or not ISO-8601 (`pattern`), a `unixMode` that is not 3–4 octal digits (`pattern`, no surrounding whitespace), `unixMode` together with `externalAttributes`, an extra field with id `0x0001`, a `/`-terminated name carrying a payload (`create_zip` and `modify_zip` add / replace), a `compute_crc32` `expect` that is not 1–8 hex digits with an optional `0x`, an `inflate_raw` `method` that is not `deflate` / `store` / a number (`pattern`) | Re-read the field schema (the message names the path); pass exactly one input form; raw bytes as base64 once. |
-| `INPUT_TOO_LARGE` | A decoded `zipBase64` / `dataBase64` or the sum of inline payloads exceeds 128 MiB, or a `zipPath` / `sourcePath` file exceeds 1 GiB (buffered tools) | Use `zipPath` / `sourcePath` in the sandbox for large archives; split the payload; `scan_zip_forward` streams a `zipPath` without the 1 GiB cap. |
+| `INPUT_TOO_LARGE` | A decoded `zipBase64` / `dataBase64` or the sum of inline payloads exceeds 128 MiB, or a `zipPath` / `sourcePath` file exceeds 1 GiB (buffered tools) | Use `zipPath` / `sourcePath` in the sandbox for large archives (`data.remedy: 'zipPath'` on an inline payload); split the payload; `scan_zip_forward` streams a `zipPath` without the 1 GiB cap. |
 | `INPUT_NOT_FOUND` | `zipPath` / `sourcePath` does not exist in the sandbox (a dangling link too) or is not a regular file | Check the relative path (`resources/list` shows the sandbox contents; `data.remedy: 'resources/list'`); drop the file into `ZIPNATIVE_MCP_OUTPUT_DIR`. |
 | `ENTRY_TOO_LARGE` | An entry above the 16 MiB inline cap: `read_zip_entry` (uncompressed in `mode: 'data'`, or compressed in `mode: 'raw'`), `extract_zip` base64 mode, `scan_zip_forward` `data: 'include'` | `read_zip_entry` `mode: 'data'` with a `range` (`data.remedy: 'range'`) — a raw payload above the cap is not retrievable inline; the range and `extract_zip` `outputMode: 'file'` (`data.remedy: "outputMode:'file'"`) yield the *decompressed* content; `extract_zip` a `filter`; `scan_zip_forward` `data: 'verify'` (`data.remedy: "data:'verify'"`). |
 | `ENTRY_NOT_UTF8` | `encoding: 'utf8'` on content that is not valid UTF-8 | Read it with `encoding: 'base64'`. |
@@ -324,8 +325,12 @@ every result's `diagnostics[]` as `{ code, severity, message, entryName? }`, de-
   `CLAUDE.md`, `package.json`, `server.json` and `CITATION.cff` are checked by
   `tests/docs-consistency.test.ts` (it also refuses any line that routes an SFX /
   self-extracting prefix to `scan_zip_forward` without saying the tool refuses it, pins the
-  77-export ledger of `docs/KNOWLEDGE_BASE.md` §8 to `docs/data/core-exports.json`, and
-  asserts every `docs/**/*.md` and workflow is named in the README project-structure block);
+  77-export ledger of `docs/KNOWLEDGE_BASE.md` §8 to `docs/data/core-exports.json` with its
+  62 / 9 / 6 reach counts and `UNEXPOSED_EXPORTS` ⊆ the unexposed rows, pins the veraZIP
+  corpus counts quoted in the docs to `docs/data/verazip.json`, requires the cache clause on
+  every "no I/O outside the sandbox" statement in README / SECURITY.md / `docs/guides/SECURITY.md`,
+  and asserts every `docs/**/*.md`, `docs/data/*.json`, workflow, `src/**/*.ts` and
+  `scripts/**/*.{mjs,mts}` file is named in the README project-structure block);
   `examples/*.json` are executed by `tests/examples.test.ts`.
 - `npm run lint` runs `eslint src --max-warnings 0`: warnings fail the gate.
 - Quality gate (all PRs):

@@ -85,8 +85,8 @@ clause. The standard's remaining Table-1 rows disregard whole APPNOTE sections
 
 ### Conformant does not mean safe
 
-Three of the hostile fixtures — zip-slip, a Windows device name, duplicate paths —
-are **perfectly ISO-conformant**: the standard constrains the container's structure,
+Four of the hostile fixtures — zip-slip, a Windows device name, duplicate paths, a
+symlink entry — are **perfectly ISO-conformant**: the standard constrains the container's structure,
 not the meaning of entry names. That is precisely why the engine's secure-by-default
 extraction guards ([`SECURITY.md`](SECURITY.md)) exist on top of conformance. The
 corpus manifest records for those entries which tool **must refuse** them and with
@@ -123,8 +123,10 @@ its TypeScript twin `tests/_fixtures/raw-zip-builder.ts`) to write
 The conformant entries cover every writer path the tools expose — `create_zip`
 buffered, streamed (`stream: true`), `parallel`, `compression.deterministic`, store
 and deflate, comments, `order: 'insertion'` (an EPUB-style `mimetype`-first layout),
-`extraFields`, `unixMode`, directory entries, Zip64; `modify_zip` in `append` and
-`compact` mode; `inflate_raw` round-trips — plus the hostile-but-conformant trio.
+`extraFields`, `unixMode`, directory entries; `modify_zip` in `append` and
+`compact` mode — plus the raw-crafted files: a forced-Zip64 layout crafted by the
+raw builder (`create_zip` Zip64 auto-promotion is covered by `tests/zip64.test.ts`)
+and the hostile-but-conformant quartet.
 **Four raw-crafted negative canaries** (`expectConformant: false`) must be rejected
 with their declared check id — `WF/ENTRY-OVERLAP`, `WF/CD-COUNT`,
 `WF/LFH-SIZE-MISMATCH`, `WF/LFH-NAME-MISMATCH` (`REQUIRED_NEGATIVE_CHECKS`), the

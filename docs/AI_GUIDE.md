@@ -3,7 +3,7 @@
 > **Read this first if you are an AI agent (Claude, Copilot, Cursor, Continue, Zed, Windsurf, Cline, Roo Code, …) about to call zipnative-mcp.**
 > It tells you which of the 13 tools to pick and how to avoid the retry loops that ZIP archives cause.
 
-The server returns the same decision tree in `serverInfo.instructions`. The full reference lives in [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md); the stability charter in [`API_STABILITY.md`](API_STABILITY.md); the topic guides in [`guides/`](guides/) (security, determinism, incremental modification, conformance, governance, local testing). Worked invocations are in [`../examples/`](../examples).
+The server returns the same decision tree in the `instructions` field of the opening exchange (initialize / server/discover result). The full reference lives in [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md); the stability charter in [`API_STABILITY.md`](API_STABILITY.md); the topic guides in [`guides/`](guides/) (security, determinism, incremental modification, conformance, governance, local testing). Worked invocations are in [`../examples/`](../examples).
 
 ---
 
@@ -91,7 +91,7 @@ Only caller mistakes (bad `limits`, bad input) are `isError`. `verbosity: 'summa
 
 - Names are `/`-separated and **case-sensitive** (`README.md` ≠ `readme.md`). `ZIP_ENTRY_NOT_FOUND` names the remedy: call `list_zip_entries` for the exact names.
 - `read_zip_entry` by `name` returns the **last** duplicate; pass `index` (the central-directory position from `list_zip_entries`) to pick another. Duplicates are reported by `inspect_zip.duplicateNameCount` and the `ZIP_DUPLICATE_NAME` diagnostic.
-- Directory entries end in `/`; `filter.includeDirectories` (default `false` for extraction, `true` for listing and scanning) controls whether they appear.
+- Directory entries end in `/`; `filter.includeDirectories` (default `false` — listing and scanning include directories when no filter object is given; extraction never does) controls whether they appear.
 
 ### `limits` vs ceilings
 
@@ -233,7 +233,7 @@ Error results carry `_meta.error = { code, message, data? }` next to `content[0]
 | `code` | Meaning | Fix |
 |---|---|---|
 | `VALIDATION_ERROR` | Zod rejected the input: wrong type, unknown key (strict), both or neither of `zipBase64` / `zipPath`, malformed base64 (PEM, nested `data:` URI, double-encoded, empty), a `date` outside 1980–2107, an unparsable `unixMode`, extra field id `0x0001` | Re-read the field's schema (the message lists the offending path); pass the raw archive bytes as base64 exactly once. |
-| `INPUT_TOO_LARGE` | Decoded input above 128 MiB (inline) or 1 GiB (`zipPath` / `sourcePath`) | Use the sandbox (`zipPath`, `sourcePath`, file mode) or split the input. |
+| `INPUT_TOO_LARGE` | Decoded input above 128 MiB (inline) or 1 GiB (`zipPath` / `sourcePath`) | Use the sandbox (`zipPath`, `sourcePath`, file mode — `data.remedy: 'zipPath'` on an inline payload) or split the input. |
 | `INPUT_NOT_FOUND` | `zipPath` / `sourcePath` does not exist in the sandbox or is not a regular file | List `resources/list`; fix the relative path. |
 | `ENTRY_TOO_LARGE` | One entry above the 16 MiB inline cap (`read_zip_entry` — uncompressed in `mode: 'data'`, compressed in `mode: 'raw'` —, `extract_zip`, `scan_zip_forward data: 'include'`) | Pass a `range` (`mode: 'data'`), use `outputMode: 'file'`, or `data: 'verify'` — `data.remedy` names it. A raw payload above the cap is not retrievable inline; the range and file mode give the decompressed content. |
 | `ENTRY_NOT_UTF8` | `encoding: 'utf8'` on bytes that are not valid UTF-8 | Read it with `encoding: 'base64'`. |

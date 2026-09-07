@@ -27,7 +27,7 @@ applyTo: "release-notes/**,CHANGELOG.md,server.json,CITATION.cff,src/version.ts,
 
 ## Pre-publish dry run & rollback
 - **Dry run the registry payload** before tagging: `tests/schema-conformance.test.ts` (registry name regex + description ≤ 100 chars) and the `mcp-publisher` CLI (https://github.com/modelcontextprotocol/registry, `mcp-publisher --help`)
-  (or the repo's `mcp-publish` step) to catch `name`/version drift early.
+  to catch `name`/version drift early (registry publish is manual in 1.0.0; the `publish.yml` step is a 1.1.0 item).
 - **npm:** Trusted Publishing runs from the tag — do **not** publish manually. If a
   bad version ships, do **not** unpublish; cut a superseding patch (vX.Y.Z+1) and,
   if within npm's 72 h window and truly broken, `npm deprecate zipnative-mcp@X.Y.Z "use X.Y.Z+1"`.

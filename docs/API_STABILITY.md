@@ -76,7 +76,7 @@ A bump of `_meta.apiVersion` happens **only** in the cases listed in §3.
 | `_meta.error` **envelope** (`{ code, message, data? }`) | The three keys and `data.errorClass` / `engineError` / `entryName` are stable; further `data` keys are additive. `data.remedy` (optional string) is a machine-actionable hint from a closed vocabulary — `outputMode:'file'`, `range`, `filter`, `encoding:'base64'`, `data:'verify'`, `list_zip_entries`, `resources/list`, `maxEntries ≤ N` — emitted on the inline-cap, ceiling, index-out-of-range and missing-path refusals; adding a value is a minor, changing or removing one is a major. |
 | **Produced bytes** (`create_zip`, `modify_zip`, `inflate_raw`) | Covered — see §3: the bytes an archive-producing tool emits for a given input are byte-identical across patch and minor releases (per deflate tier); `compression.deterministic: true` bytes are identical across runtimes and are part of the engine's frozen contract. |
 | `_meta.examples` | **Not** covered. May change at any time (at most two per tool; every one is executable against its `inputSchema`). |
-| `description` strings, `title`, `serverInfo.instructions`, prompt texts, `_meta.error.message` wording | **Not** covered. May be reworded at any time — the `tools/list` *wording* is outside the byte-identical charter; tool-result `structuredContent` defaults are inside it. |
+| `description` strings, `title`, the `instructions` field of the opening exchange, prompt texts, `_meta.error.message` wording | **Not** covered. May be reworded at any time — the `tools/list` *wording* is outside the byte-identical charter; tool-result `structuredContent` defaults are inside it. |
 | `tools/list` **structure** (types, enums, bounds, defaults, `required`, `additionalProperties`, annotations, example count) | Covered, and enforced by the catalogue gates below. |
 | Schema **`default`** values | Documented; changes are minor unless they alter produced bytes silently — then major. |
 | Unknown input keys | Rejected with `VALIDATION_ERROR` at every nesting level (Zod `.strictObject`), exactly as the published `additionalProperties: false` declares. |
@@ -162,7 +162,7 @@ All 13 tools shipped in zipnative-mcp 1.0.0 are at `_meta.apiVersion = '1.0.0'` 
 - **Inputs:** `zipBase64` | `zipPath`; `outputMode` (`base64` default | `file`); `outputDir` (file mode, required); `includeData` (default true; `false` = dry run); `filter`; `rejectTraversal` (default true); `rejectSymlinks` (default true); `onDuplicate` (`error` default | `first` | `last`); `emptyDirectories` (default false, file mode); `strict`; `limits`; `verbosity`; `fields`.
 - **Outputs:** `mode`, `dryRun`, `fileCount`, `totalBytes`, `entries[] { path, entryName, index, sizeBytes, crc32, method, dataBase64?, filePath? }`, `skipped[] { entryName, reason: 'unsafe-path' }`, `outputDir?`, `directoriesCreated?`, `diagnostics[]`, `diagnosticCounts`; in file mode up to 50 `resource_link` content blocks. Summary scalars: `skippedCount`, `paths[]`, `diagnosticCount`.
 - **Error codes:** common; `MISSING_OUTPUT_PATH`, `ENTRY_TOO_LARGE`, `OUTPUT_TOO_LARGE`, `OUTPUT_EXISTS`, `IO_ERROR`, `SECURITY_VIOLATION` (sandbox / realpath); `ZIP_PATH_TRAVERSAL`, `ZIP_SYMLINK_REJECTED`, `ZIP_EXTRACT_DUPLICATE_PATH`, `ZIP_LIMIT_EXCEEDED`, `ZIP_ENTRY_OVERLAP`, `ZIP_CD_LFH_MISMATCH`, `ZIP_CRC_MISMATCH`, `ZIP_SIZE_MISMATCH`, `ZIP_UNSUPPORTED_ENCRYPTION`, `ZIP_UNSUPPORTED_METHOD`, structural refusals.
-- **Annotations:** not read-only (file mode writes), not destructive (never overwrites), idempotent. Cacheable in base64 mode only.
+- **Annotations:** writes (`readOnlyHint` false — file mode writes), not destructive (never overwrites), idempotent. Cacheable in base64 mode only.
 
 ### `scan_zip_forward` — since 1.0.0
 - **Inputs:** `zipBase64` | `zipPath`; `data` (`none` default | `verify` | `include`); `filter`; `maxEntries` (≥ 1, default 10 000 **clamped** to `ZIPNATIVE_MCP_MAX_ENTRIES` — the JSON Schema keeps `default: 10000` as documentation, the Zod side is optional and the code resolves `min(10000, ceiling)`; only an explicit value above the ceiling is refused); `tolerateTruncation` (default false); `strict`; `limits`; `verbosity`; `fields`.
@@ -181,14 +181,14 @@ All 13 tools shipped in zipnative-mcp 1.0.0 are at `_meta.apiVersion = '1.0.0'` 
 - **Outputs:** `mode`, `sizeBytes`, `filePath?`, `summary { entryCount, fileCount, directoryCount, streamedCount, uncompressedBytes, order, deterministic, deflateTier, parallel { requested, workers }, sha256? }` (typed in the tool's `outputSchema`, every key optional), `diagnostics[]`, `diagnosticCounts`; the bytes as an embedded `resource` (base64 mode) or a `resource_link` (file mode).
 - **Error codes:** common; `INPUT_TOO_LARGE` (inline payload total), `LIMIT_CEILING_EXCEEDED` (`parallel.workers`), `MISSING_OUTPUT_PATH`, `OUTPUT_EXISTS`, `OUTPUT_TOO_LARGE`, `IO_ERROR`; `ZIP_INVALID_ENTRY_NAME`, `ZIP_DUPLICATE_ENTRY_NAME`, `ZIP_INVALID_OPTION`, `ZIP_LIMIT_EXCEEDED`, `ZIP_UNSUPPORTED_ZIP64_STREAMING` (a streamed entry > 4 GiB), `ZIP_INPUT_TOO_LARGE`, `ZIP_API_MISUSE`.
 - **Bytes:** covered (§3). Default output is reproducible per environment (`summary.deterministic: false`, `deflateTier: 'node-zlib'`); `compression.deterministic: true` output is frozen across runtimes and is the only case reporting `summary.deterministic: true`; `inspect_zip.determinism` is the separate structural verdict.
-- **Annotations:** not read-only, not destructive, idempotent. Never cached with `defaultDate: 'now'`, `parallel`, `sourcePath` or file mode.
+- **Annotations:** writes (`readOnlyHint` false), not destructive, idempotent. Never cached with `defaultDate: 'now'`, `parallel`, `sourcePath` or file mode.
 
 ### `modify_zip` — since 1.0.0
 - **Inputs:** `zipBase64` | `zipPath`; `operations[]` (1–1000: `{ op: 'add' | 'replace', name, … entry payload … }` under the same rules and `pattern`s as `create_zip` — a `/`-terminated name with a payload is `VALIDATION_ERROR`, `{ op: 'remove', name }`, `{ op: 'rename', from, to }`, `{ op: 'setComment', comment }`); `mode` (`append` default | `compact`); `compression`; `defaultDate` (`pattern` `^(?:now|\d{4}-\d{2}-\d{2})`); `includeSha256`; `strict`; `limits`; `outputMode`; `outputPath`.
 - **Outputs:** `mode`, `sizeBytes`, `filePath?`, `summary { saveMode, operationsApplied, entryCountBefore, entryCountAfter, inputBytes, outputBytes, grewByBytes, noOp, sha256? }` (typed in the tool's `outputSchema`), `diagnostics[]` (incl. `ZIP_DEAD_BYTES_RATIO`), `diagnosticCounts`; the bytes as an embedded `resource` or a `resource_link`.
 - **Error codes:** common; `INPUT_TOO_LARGE`, `MISSING_OUTPUT_PATH`, `OUTPUT_EXISTS`, `OUTPUT_TOO_LARGE`, `IO_ERROR`; `ZIP_ENTRY_NOT_FOUND`, `ZIP_ENTRY_EXISTS`, `ZIP_DUPLICATE_ENTRY_NAME` (duplicate-name source archive), `ZIP_INVALID_ENTRY_NAME`, `ZIP_LIMIT_EXCEEDED`, structural refusals; `_meta.error.data` carries `operationIndex` and `op`.
 - **Bytes:** covered (§3). Append mode preserves the input bytes as a prefix; compact mode is the canonical rewrite.
-- **Annotations:** not read-only, not destructive (the input is never touched; the output is never overwritten), idempotent.
+- **Annotations:** writes (`readOnlyHint` false), not destructive (the input is never touched; the output is never overwritten), idempotent.
 
 ### `compute_crc32` — since 1.0.0
 - **Inputs:** exactly one of `dataBase64` / `text` / `sourcePath`; `seed` (0–4 294 967 295, default 0); `expect` (1–8 hex digits, optional `0x`; `pattern` `^(?:0x)?[0-9a-fA-F]{1,8}$`).
@@ -201,7 +201,7 @@ All 13 tools shipped in zipnative-mcp 1.0.0 are at `_meta.apiVersion = '1.0.0'` 
 - **Outputs:** `mode`, `sizeBytes`, `filePath?`, `summary { method, methodName, bytesIn, bytesOut, bytesConsumed, leftover, finished, maxOutput, trailingWarning? }` (typed in the tool's `outputSchema`), `diagnostics: []`; the bytes as an embedded `resource` (`application/octet-stream`) or a `resource_link`.
 - **Error codes:** common; `INPUT_TOO_LARGE`, `MISSING_OUTPUT_PATH`, `OUTPUT_EXISTS`, `OUTPUT_TOO_LARGE`, `IO_ERROR`; `ZIP_INFLATE_OUTPUT_OVERFLOW`, `ZIP_DEFLATE_CORRUPT`, `ZIP_DEFLATE_TRUNCATED`, `ZIP_UNSUPPORTED_METHOD` (no codec beyond 0 / 8 is registered), `ZIP_UNSUPPORTED_CODEC_MODE`, `ZIP_INVALID_OPTION`.
 - **Bytes:** covered (§3) — inflation is a pure function of the input.
-- **Annotations:** read-only (base64 mode), idempotent.
+- **Annotations:** writes (`readOnlyHint` false — file mode writes the inflated bytes into the sandbox), not destructive, idempotent. Cacheable in base64 mode only.
 
 ### `describe_engine` — since 1.0.0
 - **Inputs:** `verbosity`; `fields`.
@@ -213,7 +213,7 @@ All 13 tools shipped in zipnative-mcp 1.0.0 are at `_meta.apiVersion = '1.0.0'` 
 - **Inputs:** `title` (8–160), `summary` (≥ 16), `issueType` (`bug` | `feature` | `security` | `docs` | `performance`), `targetRepo` (default `zipnative-mcp`), `reproduction { command, result }`, `expectedBehavior`, `actualBehavior?`, `affectedPackages[]` (default `['zipnative-mcp']`), `duplicateSearchPerformed` (must be `true`), `outputMode` (`inline` default | `file`), `outputPath` (`.md`).
 - **Outputs:** `title`, `issueType`, `targetRepo`, `outputMode`, `filePath?`, `sizeBytes`, `draftMarkdown`, `warnings[]`, `compliance { zeroDependencyConfirmed, reproductionCommand, reproductionResult, duplicateSearchPerformed, affectedPackages, identityReminderShown, humanGate, environment { node, os, zipnativeMcp } }`; two text content blocks (the human-gate notice and the draft).
 - **Error codes:** `VALIDATION_ERROR`, `GOVERNANCE_VIOLATION`, `MISSING_OUTPUT_PATH`, `INVALID_PATH`, `INVALID_EXTENSION`, `OUTPUT_EXISTS`, `OUTPUT_TOO_LARGE`, `IO_ERROR`, `SECURITY_VIOLATION`.
-- **Annotations:** not read-only (file mode writes a `.md`), not destructive, idempotent. **Never cached** (embeds the environment). The `draftMarkdown` and `compliance.humanGate` texts are governance-charter wording carried verbatim and are not promised byte-stable.
+- **Annotations:** writes (`readOnlyHint` false — file mode writes a `.md`), not destructive, idempotent. **Never cached** (embeds the environment). The `draftMarkdown` and `compliance.humanGate` texts are governance-charter wording carried verbatim and are not promised byte-stable.
 
 > **1.0.0 baseline.** There is no earlier tool API to compare with; the deltas recorded by future
 > releases start from `tests/_fixtures/tool-shape.v1.0.0.json`. The catalogue ships with the

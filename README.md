@@ -66,7 +66,7 @@ The server also ships **seven MCP prompts** — `secure_extraction`, `reproducib
 - **Zero runtime dependencies in the engine** — pure TypeScript, no native bindings, no `eval`; one API across Node ≥ 22, browsers, Deno, Bun and Workers (this server adds only the MCP SDK and zod: three runtime dependencies in total).
 - **Safe by default** — path traversal, symlinks, duplicate names, decompression bombs, overlapping entries, parser-differential smuggling and Zip64 spoofing are refused, not guessed at; every parser loop runs under a named, CWE-tagged, caller-configurable bound.
 - **Random access and streaming** — read one entry from a multi-gigabyte archive without touching the rest; iterate unseekable streams with bounded memory.
-- **Deterministic** — a written determinism contract: same inputs, same SHA-256 on every runtime.
+- **Deterministic** — a written determinism contract: reproducible layout always, byte-stable per environment by default, and the same SHA-256 on every runtime under `compression.deterministic: true`.
 - **Incremental modification** — replace, remove, add or rename entries without recompressing the untouched 99 % (append-only), or compact for true deletion.
 - **A frozen 39-code error vocabulary** and **`verifyZip()`** — one call, a machine-readable report that never throws for archive problems.
 - **The first open clause-by-clause ISO/IEC 21320-1:2015 validator**, blocking in CI.
@@ -396,7 +396,7 @@ Edit an existing archive without recompressing anything: `operations` add / repl
 | `zipBase64` / `zipPath` | string | — | exactly one |
 | `operations` | array 1–1000 | — | `{ op: 'add' \| 'replace', name, dataBase64 \| text \| sourcePath, compression?, date?, comment?, unixMode? \| externalAttributes?, extraFields?, directory? (add only) }`, `{ op: 'remove', name }`, `{ op: 'rename', from, to }`, `{ op: 'setComment', comment }` — the payload rules and `pattern`s are those of `create_zip` (a `/`-terminated name with a payload is `VALIDATION_ERROR`) |
 | `mode` | `'append'` \| `'compact'` | `'append'` | |
-| `compression` | object | engine default | for new payloads |
+| `compression` | object | engine default | for new payloads (same shape as `create_zip`: `method`, `level`, `deterministic`) |
 | `defaultDate` | string | DOS epoch | for new payloads; ISO-8601 instant or `'now'` (`pattern` `^(?:now\|\d{4}-\d{2}-\d{2})`; `'now'` → `ZIP_TIMESTAMP_NOT_PINNED`) |
 | `includeSha256` | boolean | `false` | |
 | `outputMode` / `outputPath` | | `'base64'` | |
@@ -502,7 +502,7 @@ A draft that proposes a runtime dependency, omits a reproduction, or sets `dupli
 
 ## 🔐 Security model
 
-`zipnative-mcp` runs **inside the host process** and exposes a stdio MCP server (or a loopback-only HTTP endpoint). It treats every archive as untrusted input and performs no I/O outside the configured sandbox.
+`zipnative-mcp` runs **inside the host process** and exposes a stdio MCP server (or a loopback-only HTTP endpoint). It treats every archive as untrusted input and performs no I/O outside the configured sandbox other than the opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR`.
 
 | Threat | Defence | CWE |
 | ------ | ------- | --- |
@@ -553,7 +553,7 @@ See [SECURITY.md](SECURITY.md) for the responsible disclosure process.
 
 ZIP has no veraPDF — JHOVE never shipped a ZIP module and no ISO/IEC 21320-1 validator existed — so the zipnative ecosystem ships its own gate, **veraZIP**: an ISO/IEC 21320-1:2015 (Document Container File) validator vendored from the engine (`scripts/verazip-core.mjs`) that **raw-parses the bytes with its own EOCD / central-directory / local-header reader and never imports `zipnative`** — a validator that shared the engine's parser would attest the engine with the engine.
 
-`npm run validate:zip` builds the server, drives the **real `tools/call` handler** (`create_zip` and `modify_zip` across every writer path — buffered, `stream: true`, `parallel`, `compression.deterministic`, `order: 'insertion'`, extra fields, comments, Unix modes, append and `compact`) plus raw-crafted archives to write a **38-archive corpus**, then validates every file clause by clause (22 check ids). The conformant set includes **hostile-but-conformant** archives (zip-slip, a Windows device name, duplicate paths): the ISO profile constrains the container, not the meaning of names, so they PASS the validator and `extract_zip` **must refuse** them — the gate checks both. **4 raw-crafted negative canaries** must be rejected with a declared clause id. Level 0 (the ISO clauses) needs no external tool and always runs; level 1 re-tests every conformant archive with the foreign integrity tools present on the machine (`unzip -t`, `7z t`, `python -m zipfile -t`, `tar -tf`, `jar tf`) and **skips** the absent ones visibly; `VERAZIP_REQUIRED=1` (set in CI) fails closed. The corpus definition is recorded in [`docs/data/verazip.json`](docs/data/verazip.json) and the manifest of each run in `test-output/zip/manifest.json`.
+`npm run validate:zip` builds the server, drives the **real `tools/call` handler** (`create_zip` and `modify_zip` across every writer path — buffered, `stream: true`, `parallel`, `compression.deterministic`, `order: 'insertion'`, extra fields, comments, Unix modes, append and `compact`) plus raw-crafted archives to write a **38-archive corpus**, then validates every file clause by clause (22 check ids). The conformant set includes four **hostile-but-conformant** archives (zip-slip, a Windows device name, duplicate paths, a symlink entry): the ISO profile constrains the container, not the meaning of names, so they PASS the validator and `extract_zip` **must refuse** them — the gate checks both. **4 raw-crafted negative canaries** must be rejected with a declared clause id. Level 0 (the ISO clauses) needs no external tool and always runs; level 1 re-tests every conformant archive with the foreign integrity tools present on the machine (`unzip -t`, `7z t`, `python -m zipfile -t`, `tar -tf`, `jar tf`) and **skips** the absent ones visibly; `VERAZIP_REQUIRED=1` (set in CI) fails closed. The corpus definition is recorded in [`docs/data/verazip.json`](docs/data/verazip.json) and the manifest of each run in `test-output/zip/manifest.json`.
 
 A PASS proves that every archive this server writes is a well-formed ISO/IEC 21320-1 document container: one self-consistent end-of-central-directory record, a central directory that agrees with every local header, only store / deflate methods, no encryption, no multi-disk fields, valid Zip64 records exactly where a field overflows. It is **not a certification** — validation evidence against a specific validator revision — and **conformant does not mean safe**: the security guards exist on top of conformance.
 
@@ -664,7 +664,8 @@ scripts/
 ├── verazip-core.d.mts          # its type declarations
 ├── generate-zip-corpus.mjs     # writes the veraZIP corpus through the real tools + raw-crafted canaries (npm run corpus:zip)
 ├── validate-zip.mjs            # the gate: level 0 (ISO clauses) + level 1 (foreign integrity tools) (npm run validate:zip)
-├── helpers/zip-corpus.mjs      # the corpus definition (every writer path + the hostile-but-conformant trio + the canaries)
+├── helpers/zip-corpus.mjs      # the corpus definition (every writer path + the hostile-but-conformant quartet + the canaries)
+├── helpers/zip-corpus.d.mts    # its type declarations
 ├── helpers/raw-zip-builder.mjs # engine-independent raw ZIP writer for the crafted canaries (vendored from zipnative)
 ├── helpers/interop-tools.mjs   # unzip / 7z / python zipfile / tar / jar probes for level 1
 ├── verify-issue.mjs            # governance draft checker (npm run verify:issue)
@@ -694,7 +695,7 @@ tests/                          # vitest suites, one per tool / module (<tool>.t
 ├── http-shutdown.test.ts       # SIGTERM in HTTP mode exits cleanly and releases the port
 ├── schema-lockstep.test.ts     # Zod input schemas ↔ advertised JSON Schemas (keys, required, enums, defaults, bounds, patterns)
 ├── catalogue-parity.test.ts    # tools/list vs tests/_fixtures/tool-shape.json (frozen baseline: tool-shape.v1.0.0.json)
-├── docs-consistency.test.ts    # counts / names / codes quoted in the docs, the SFX guard, the 77-export ledger, this tree
+├── docs-consistency.test.ts    # counts / names / codes quoted in the docs, the SFX guard, the 77-export ledger + 62 / 9 / 6 reach counts, the veraZIP corpus counts, the SECURITY cache clause, this tree
 ├── diagnostics-inventory.test.ts # every one of the 11 diagnostics produced by a tool call
 ├── zip64.test.ts               # 70 000-entry reads and a 65 536-entry create_zip (auto-promotion)
 └── fixtures/interop/           # foreign-tool archives (bsdtar, PowerShell)

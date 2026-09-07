@@ -89,7 +89,7 @@ No breaking changes. Drop-in replacement for vX.Y.Z-1. Produced bytes are identi
 | Build | `npm run build` | ... |
 | Audit | `npm audit --audit-level=high` | ... |
 | Pack | `npm pack --dry-run` | N files, N kB |
-| Catalogue | `node scripts/tool-shape.mjs` | `tools/list` N bytes, instructions N bytes, N tools, N prompts, N error codes |
+| Catalogue | `node scripts/tool-shape.mjs --stats` | `tools/list` N bytes, `SERVER_INSTRUCTIONS` N bytes, N tools, N prompts, N `ZIP_*` error codes, N diagnostics |
 | ISO 21320-1 | `npm run validate:zip` | N PASS / N XFAIL / 0 FAIL / 0 XPASS on Linux and Windows |
 | Attribution | `git log --format=%B \| grep -ic claude` | 0 |
 
