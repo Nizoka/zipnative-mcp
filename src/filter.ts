@@ -1,6 +1,6 @@
 /**
- * Entry filters shared by `list_zip_entries`, `extract_zip`, `scan_zip_forward`
- * and `verify_zip`: exact names, a path prefix, or globs. The glob matcher is
+ * Entry filters shared by `list_zip_entries`, `extract_zip` and
+ * `scan_zip_forward`: exact names, a path prefix, or globs. The glob matcher is
  * vendored from zipnative-cli `src/utils/glob.ts` (dependency-free).
  *
  * Names are `/`-separated (archive convention). Glob syntax:

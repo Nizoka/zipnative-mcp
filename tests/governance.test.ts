@@ -117,6 +117,14 @@ describe('validateIssueMarkdown', () => {
 });
 
 describe('governance constants', () => {
+    it('A-015: GOVERNANCE_CONTRACT_SUMMARY quotes the package version from src/version.ts (no hand-written version string)', async () => {
+        const { ZIPNATIVE_MCP_VERSION } = await import('../src/version.js');
+        expect(GOVERNANCE_CONTRACT_SUMMARY).toContain(`contract (v${ZIPNATIVE_MCP_VERSION})`);
+        const source = await fs.readFile(path.join(ROOT, 'src', 'governance.ts'), 'utf8');
+        expect(source).toContain('${ZIPNATIVE_MCP_VERSION}');
+        expect(source).not.toMatch(/\(v\d+\.\d+\.\d+\)/);
+    });
+
     it('surface the draftsman role, the human gate and the no-network guarantee', () => {
         expect(GOVERNANCE_CONTRACT_SUMMARY).toMatch(/DRAFTSMAN/);
         expect(GOVERNANCE_CONTRACT_SUMMARY).toMatch(/no outbound network call, ever/);

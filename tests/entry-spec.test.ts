@@ -66,8 +66,9 @@ describe('entry-spec', () => {
             expect(parseUnixMode('0644', 'x')).toBe(0o644);
             expect(parseUnixMode('755', 'x')).toBe(0o755);
             expect(parseUnixMode('0o750', 'x')).toBe(0o750);
-            expect(parseUnixMode(' 4755 ', 'x')).toBe(0o4755);
-            for (const bad of ['8', '64', '12345', '0x1ff', 'rwx', '']) {
+            expect(parseUnixMode('4755', 'x')).toBe(0o4755);
+            // A-005: no trimming — the runtime parser accepts exactly what the advertised `pattern` accepts.
+            for (const bad of ['8', '64', '12345', '0x1ff', 'rwx', '', ' 4755 ', '0755\n']) {
                 expect(() => parseUnixMode(bad, 'entries[0].unixMode')).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR', message: expect.stringContaining('entries[0].unixMode must be 3–4 octal digits') }));
             }
         });
@@ -126,7 +127,10 @@ describe('entry-spec', () => {
             expect(dir).toEqual({ externalAttributes: ((0o40750 << 16) >>> 0) | 0x10 });
             const rawAttrs = toAddEntryOptions(PayloadSchema.parse({ name: 'a', text: 'x', externalAttributes: 7 }), 'e');
             expect(rawAttrs).toEqual({ externalAttributes: 7 });
-            expect(() => toAddEntryOptions(PayloadSchema.parse({ name: 'a', text: 'x', date: 'bad' }), 'entries[0]')).toThrow(expect.objectContaining({ message: expect.stringContaining('entries[0].date') }));
+            // A malformed date is refused by the schema pattern; a well-formed date outside the DOS range by the runtime parser (naming the field).
+            expect(PayloadSchema.safeParse({ name: 'a', text: 'x', date: 'bad' }).success).toBe(false);
+            expect(() => toAddEntryOptions(PayloadSchema.parse({ name: 'a', text: 'x', date: '1979-12-31T00:00:00Z' }), 'entries[0]')).toThrow(expect.objectContaining({ message: expect.stringContaining('entries[0].date') }));
+            expect(() => toAddEntryOptions(PayloadSchema.parse({ name: 'a', text: 'x', date: '2024-99-99' }), 'entries[0]')).toThrow(expect.objectContaining({ message: expect.stringContaining('entries[0].date') }));
         });
     });
 

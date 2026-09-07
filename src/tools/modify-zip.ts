@@ -21,6 +21,7 @@ import { ensureEngineReady } from '../engine.js';
 import {
     COMPRESSION_INPUT_SCHEMA,
     CompressionSchema,
+    DEFAULT_DATE_PATTERN,
     DEFAULT_DATE_SCHEMA,
     ENTRY_PAYLOAD_PROPERTIES,
     EntryPayloadShape,
@@ -31,9 +32,10 @@ import {
     toDefaultDate,
 } from '../entry-spec.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
-import { emitArchive, OUTPUT_INPUT_PROPERTIES, type OutputResult } from '../output.js';
+import { emitArchive, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
 import { guard } from '../zip-errors.js';
 import { EngineOptionsShape, parseInput, sha256Hex, STRICT_INPUT_PROPERTY } from './_shared.js';
+import { archiveOutputSchemaWith } from './create-zip.js';
 
 export const MODIFY_ZIP_NAME = 'modify_zip';
 
@@ -59,25 +61,25 @@ export const MODIFY_ZIP_INPUT_SCHEMA = {
                         type: 'object',
                         additionalProperties: false,
                         required: ['op', 'name'],
-                        properties: { op: { type: 'string', enum: ['add', 'replace'] }, ...payloadProps, directory: { type: 'boolean', default: false, description: 'add only: an explicit directory entry.' } },
+                        properties: { op: { type: 'string', enum: ['add', 'replace'], description: "'add' a new entry (ZIP_ENTRY_EXISTS if present) or 'replace' an existing one (ZIP_ENTRY_NOT_FOUND otherwise)." }, ...payloadProps, directory: { type: 'boolean', default: false, description: 'add only: an explicit directory entry.' } },
                     },
                     {
                         type: 'object',
                         additionalProperties: false,
                         required: ['op', 'name'],
-                        properties: { op: { type: 'string', enum: ['remove'] }, name: { type: 'string', minLength: 1 } },
+                        properties: { op: { type: 'string', enum: ['remove'], description: 'Remove an entry (its bytes remain in the file under mode append).' }, name: { type: 'string', minLength: 1, description: 'Entry name to remove (exact, case-sensitive).' } },
                     },
                     {
                         type: 'object',
                         additionalProperties: false,
                         required: ['op', 'from', 'to'],
-                        properties: { op: { type: 'string', enum: ['rename'] }, from: { type: 'string', minLength: 1 }, to: { type: 'string', minLength: 1, maxLength: 4096 } },
+                        properties: { op: { type: 'string', enum: ['rename'], description: 'Rename an entry without recompression; never overwrites an existing name.' }, from: { type: 'string', minLength: 1, description: 'Current entry name.' }, to: { type: 'string', minLength: 1, maxLength: 4096, description: 'New entry name (must not exist).' } },
                     },
                     {
                         type: 'object',
                         additionalProperties: false,
                         required: ['op', 'comment'],
-                        properties: { op: { type: 'string', enum: ['setComment'] }, comment: { type: 'string', maxLength: U16 } },
+                        properties: { op: { type: 'string', enum: ['setComment'], description: 'Replace the archive comment.' }, comment: { type: 'string', maxLength: U16, description: 'New archive comment (UTF-8, ≤ 65535 bytes).' } },
                     },
                 ],
             },
@@ -90,7 +92,7 @@ export const MODIFY_ZIP_INPUT_SCHEMA = {
         },
         compression: COMPRESSION_INPUT_SCHEMA,
         defaultDate: DEFAULT_DATE_SCHEMA,
-        includeSha256: { type: 'boolean', default: false },
+        includeSha256: { type: 'boolean', default: false, description: 'Add `summary.sha256` of the produced bytes.' },
         ...STRICT_INPUT_PROPERTY,
         limits: LIMITS_INPUT_SCHEMA,
         ...OUTPUT_INPUT_PROPERTIES,
@@ -113,13 +115,27 @@ const InputSchema = z
         operations: z.array(z.union([WriteOp, RemoveOp, RenameOp, CommentOp])).min(1).max(MAX_MODIFY_OPERATIONS),
         mode: z.enum(['append', 'compact']).default('append'),
         compression: CompressionSchema.optional(),
-        defaultDate: z.string().optional(),
+        defaultDate: z.string().regex(new RegExp(DEFAULT_DATE_PATTERN)).optional(),
         includeSha256: z.boolean().default(false),
         ...EngineOptionsShape,
-        outputMode: z.enum(['base64', 'file']).default('base64'),
-        outputPath: z.string().optional(),
+        ...OutputShape,
     })
     .superRefine(refineArchiveInput);
+
+export const MODIFY_ZIP_OUTPUT_SCHEMA = archiveOutputSchemaWith(
+    {
+        saveMode: { type: 'string', enum: ['append', 'compact'] },
+        operationsApplied: { type: 'integer', minimum: 0 },
+        entryCountBefore: { type: 'integer', minimum: 0 },
+        entryCountAfter: { type: 'integer', minimum: 0 },
+        inputBytes: { type: 'integer', minimum: 0 },
+        outputBytes: { type: 'integer', minimum: 0 },
+        grewByBytes: { type: 'integer', description: 'outputBytes − inputBytes (negative after a compacting rewrite).' },
+        noOp: { type: 'boolean', description: 'true when the engine returned the input buffer unchanged (no pending edit, same comment).' },
+        sha256: { type: 'string', description: 'Present with includeSha256.' },
+    },
+    'modify_zip summary.',
+);
 
 export interface ModifyZipSummary {
     readonly saveMode: 'append' | 'compact';

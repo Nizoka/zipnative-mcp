@@ -33,14 +33,14 @@ import { readFields, readVerbosity, selectFields } from './projection.js';
 import { listResources, listResourceTemplates, readResource, resourceLinkForPath } from './resources.js';
 import { TOOL_API_VERSION, ZIPNATIVE_MCP_VERSION } from './version.js';
 import { COMPUTE_CRC32_INPUT_SCHEMA, COMPUTE_CRC32_NAME, COMPUTE_CRC32_OUTPUT_SCHEMA, computeCrc32, type ComputeCrc32Result } from './tools/compute-crc32.js';
-import { ARCHIVE_OUTPUT_SCHEMA, CREATE_ZIP_INPUT_SCHEMA, CREATE_ZIP_NAME, createZipTool, type CreateZipResult } from './tools/create-zip.js';
+import { CREATE_ZIP_INPUT_SCHEMA, CREATE_ZIP_NAME, CREATE_ZIP_OUTPUT_SCHEMA, createZipTool, type CreateZipResult } from './tools/create-zip.js';
 import { __setToolCount, DESCRIBE_ENGINE_INPUT_SCHEMA, DESCRIBE_ENGINE_NAME, DESCRIBE_ENGINE_OUTPUT_SCHEMA, describeEngine, describeSummary, type DescribeEngineResult } from './tools/describe-engine.js';
 import { DRAFT_GOVERNANCE_ISSUE_INPUT_SCHEMA, DRAFT_GOVERNANCE_ISSUE_NAME, DRAFT_GOVERNANCE_ISSUE_OUTPUT_SCHEMA, draftGovernanceIssue, type DraftGovernanceIssueResult } from './tools/draft-governance-issue.js';
 import { EXTRACT_ZIP_INPUT_SCHEMA, EXTRACT_ZIP_NAME, EXTRACT_ZIP_OUTPUT_SCHEMA, EXTRACT_ZIP_SUMMARY_PROPERTIES, extractSummary, extractZipTool, type ExtractZipResult } from './tools/extract-zip.js';
-import { INFLATE_RAW_INPUT_SCHEMA, INFLATE_RAW_NAME, inflateRaw, type InflateRawResult } from './tools/inflate-raw.js';
+import { INFLATE_RAW_INPUT_SCHEMA, INFLATE_RAW_NAME, INFLATE_RAW_OUTPUT_SCHEMA, inflateRaw, type InflateRawResult } from './tools/inflate-raw.js';
 import { INSPECT_ZIP_INPUT_SCHEMA, INSPECT_ZIP_NAME, INSPECT_ZIP_OUTPUT_SCHEMA, INSPECT_ZIP_SUMMARY_PROPERTIES, inspectSummary, inspectZip, type InspectZipResult } from './tools/inspect-zip.js';
 import { LIST_ZIP_ENTRIES_INPUT_SCHEMA, LIST_ZIP_ENTRIES_NAME, LIST_ZIP_ENTRIES_OUTPUT_SCHEMA, LIST_ZIP_ENTRIES_SUMMARY_PROPERTIES, listSummary, listZipEntries, type ListZipEntriesResult } from './tools/list-zip-entries.js';
-import { MODIFY_ZIP_INPUT_SCHEMA, MODIFY_ZIP_NAME, modifyZipTool, type ModifyZipResult } from './tools/modify-zip.js';
+import { MODIFY_ZIP_INPUT_SCHEMA, MODIFY_ZIP_NAME, MODIFY_ZIP_OUTPUT_SCHEMA, modifyZipTool, type ModifyZipResult } from './tools/modify-zip.js';
 import { READ_ZIP_ENTRY_INPUT_SCHEMA, READ_ZIP_ENTRY_NAME, READ_ZIP_ENTRY_OUTPUT_SCHEMA, READ_ZIP_ENTRY_SUMMARY_PROPERTIES, readEntrySummary, readZipEntry, type ReadZipEntryResult } from './tools/read-zip-entry.js';
 import { SANITIZE_ENTRY_PATHS_INPUT_SCHEMA, SANITIZE_ENTRY_PATHS_NAME, SANITIZE_ENTRY_PATHS_OUTPUT_SCHEMA, SANITIZE_ENTRY_PATHS_SUMMARY_PROPERTIES, sanitizeEntryPaths, sanitizeSummary, type SanitizeEntryPathsResult } from './tools/sanitize-entry-paths.js';
 import { SCAN_ZIP_FORWARD_INPUT_SCHEMA, SCAN_ZIP_FORWARD_NAME, SCAN_ZIP_FORWARD_OUTPUT_SCHEMA, SCAN_ZIP_FORWARD_SUMMARY_PROPERTIES, scanSummary, scanZipForward, type ScanZipForwardResult } from './tools/scan-zip-forward.js';
@@ -225,7 +225,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Inspect archive (facts, determinism verdict, CI checks)',
         kind: 'inspect',
         description:
-            "Read-only archive report in ONE call: size, entry / file / directory counts, Zip64, comment, compressed vs uncompressed totals, per-method counts, encrypted / symlink / data-descriptor / Zip64 / cp437 / duplicate / unsafe-name counts, date range, a `determinism` verdict (epoch timestamps + canonical order + UTF-8 flags ⇒ reproducible; `canonicalLayout` = no data descriptors) and every engine diagnostic (prepended SFX data, name mismatches, …). Opens EAGERLY by default so a hostile shape (overlapping entries, central/local divergence, Zip64 spoofing) is refused with its ZIP_* code rather than summarised. `check:[…]` / `assert:{…}` turn it into a CI gate → `checks[]` + `checksPassed`. Token-frugal: verbosity:'summary', fields:[…]. Input: zipBase64 or zipPath (sandbox).",
+            "Read-only archive report in ONE call: size, entry / file / directory counts, Zip64, comment, compressed vs uncompressed totals, per-method counts, encrypted / symlink / data-descriptor / Zip64 / cp437 / duplicate / unsafe-name counts, date range, a `determinism` verdict (epoch timestamps + canonical order + UTF-8 flags ⇒ reproducible; `canonicalLayout` = no data descriptors) and every engine diagnostic (prepended SFX data, name mismatches, …). Opens EAGERLY by default: every entry's real extent is checked up front — overlapping entries, entries reaching into the central directory or past EOF, and Zip64 spoofing — and refused with their ZIP_* code rather than summarised (a method / CRC / size divergence between central and local headers is caught by verify_zip and on read, not here). `check:[…]` / `assert:{…}` turn it into a CI gate → `checks[]` + `checksPassed`. Token-frugal: verbosity:'summary', fields:[…]. Input: zipBase64 or zipPath (sandbox).",
         inputSchema: INSPECT_ZIP_INPUT_SCHEMA,
         outputSchema: projectableOutputSchema(INSPECT_ZIP_OUTPUT_SCHEMA, INSPECT_ZIP_SUMMARY_PROPERTIES, `Structured archive report (the zipnative inspect --json shape).${PROJECTION_NOTE}`),
         annotations: READ_ONLY,
@@ -270,7 +270,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Verify archive integrity (one call, never throws for archive problems)',
         kind: 'verify',
         description:
-            "Deep verification in one call — zipnative's verifyZip report verbatim: eager structural validation, then every entry's CRC-32 / size / local-header agreement. `ok` is true when the structure is valid AND every verifiable entry passed. This tool NEVER fails for a problem with the archive: a structural refusal lands in `error` {code: ZIP_*, message}; an unverifiable entry is `skipped` ('encrypted' | 'stream-only-codec') and does not fail the archive. Only caller mistakes (bad limits, bad input) are isError. `entries:'failed'` keeps the rows you act on; `verbosity:'summary'` keeps the verdict + counts. Verify before you trust: run it on any archive from an untrusted source before extract_zip.",
+            "Deep verification in one call — zipnative's verifyZip report verbatim: eager structural validation, then every entry's CRC-32 / size / local-header agreement. `ok` is true when the structure is valid AND every verifiable entry passed. This tool NEVER fails for a problem with the archive: a structural refusal lands in `error` {code: ZIP_*, message}; an unverifiable entry is `skipped` ('encrypted' | 'stream-only-codec') and does not fail the archive, while an entry whose method has no codec here (anything but 0 store / 8 deflate) is reported FAILED, not skipped — the engine's verdict verbatim. Only caller mistakes (bad limits, bad input) are isError. `entries:'failed'` keeps the rows you act on; `verbosity:'summary'` keeps the verdict + counts. Verify before you trust: run it on any archive from an untrusted source before extract_zip.",
         inputSchema: VERIFY_ZIP_INPUT_SCHEMA,
         outputSchema: projectableOutputSchema(VERIFY_ZIP_OUTPUT_SCHEMA, VERIFY_ZIP_SUMMARY_PROPERTIES, `Deep verification report.${PROJECTION_NOTE}`),
         annotations: READ_ONLY,
@@ -285,7 +285,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Extract (secure by default)',
         kind: 'extract',
         description:
-            "Extract with every engine guard ON unless you name the relaxation: zip-slip / absolute / drive / UNC / NUL / ADS / Windows-device names → ZIP_PATH_TRAVERSAL (rejectTraversal:false SKIPS them, listed in `skipped`; an unsafe path is never emitted); symlinks → ZIP_SYMLINK_REJECTED (rejectSymlinks:false extracts the target text as data, never a link); duplicate sanitized paths → ZIP_EXTRACT_DUPLICATE_PATH (onDuplicate 'first' | 'last'); declared sizes / ratios beyond `limits` → ZIP_LIMIT_EXCEEDED; overlapping entries and central/local divergence are always refused. `filter` keeps a subset. outputMode 'base64' (default) returns files inline (≤ 16 MiB each, ≤ 32 MiB total; includeData:false = dry run of the plan); 'file' streams into a relative `outputDir` inside ZIPNATIVE_MCP_OUTPUT_DIR (never overwrites) and returns resource links. Directories are implied by paths (emptyDirectories:true creates the explicit ones).",
+            "Extract with every engine guard ON unless you name the relaxation: zip-slip / absolute / drive / UNC / NUL / ADS / Windows-device names → ZIP_PATH_TRAVERSAL (rejectTraversal:false SKIPS them, listed in `skipped`; an unsafe path is never emitted); symlinks → ZIP_SYMLINK_REJECTED (rejectSymlinks:false extracts the target text as data, never a link); duplicate sanitized paths → ZIP_EXTRACT_DUPLICATE_PATH (onDuplicate 'first' | 'last'); declared sizes / ratios beyond `limits` → ZIP_LIMIT_EXCEEDED; overlapping entries and central/local divergence are always refused. `filter` keeps a subset. outputMode 'base64' (default) returns files inline (≤ 16 MiB each, ≤ 32 MiB total; includeData:false = dry run of the plan); 'file' streams into a relative `outputDir` inside ZIPNATIVE_MCP_OUTPUT_DIR (never overwrites) and returns resource links. Directories are implied by paths (emptyDirectories:true creates the explicit ones). The dry run opens eagerly: an overlapping, offset-into-CD or Zip64-spoofed archive is refused before any plan is returned. Prefer read_zip_entry for a single file.",
         inputSchema: EXTRACT_ZIP_INPUT_SCHEMA,
         outputSchema: projectableOutputSchema(EXTRACT_ZIP_OUTPUT_SCHEMA, EXTRACT_ZIP_SUMMARY_PROPERTIES, `Extraction result (inline files, a dry-run plan, or written files).${PROJECTION_NOTE}`),
         annotations: WRITES,
@@ -326,12 +326,12 @@ const TOOLS: readonly ToolDefinition[] = [
     },
     {
         name: CREATE_ZIP_NAME,
-        title: 'Create archive (deterministic by default)',
+        title: 'Create archive (reproducible; deterministic:true for cross-runtime identical bytes)',
         kind: 'archive-output',
         description:
-            "Write a ZIP from inline entries (`dataBase64` | `text` | `sourcePath` in the sandbox, or `directory:true`). Reproducible by default: canonical order (raw UTF-8 name bytes), DOS-epoch timestamps, UTF-8 names, constant attributes — `defaultDate:'now'` or per-entry `date` opts out (ZIP_TIMESTAMP_NOT_PINNED diagnostic). `compression` {method store|deflate, level 0–9, deterministic:true = pinned pure-TS encoder ⇒ identical bytes on every runtime} at archive or entry level; `order:'insertion'` for EPUB / JAR (mimetype first, stored); `comment`, per-entry comment / unixMode / externalAttributes / raw extraFields. `stream:true` on a sourcePath feeds the file through addStream (data-descriptor layout, bounded memory). `parallel` compresses with the worker pool — byte-identical output. Zip64 is emitted exactly when a field overflows. Output base64 (≤ 50 MiB) or a sandbox file (streamed, never overwritten); `summary.deterministic` / `deflateTier` / `sha256` (includeSha256) prove reproducibility. Every archive it writes is ISO/IEC 21320-1 conformant (CI-validated).",
+            "Write a ZIP from inline entries (`dataBase64` | `text` | `sourcePath` in the sandbox, or `directory:true`). Reproducible by default: canonical order (raw UTF-8 name bytes), DOS-epoch timestamps, UTF-8 names, constant attributes — `defaultDate:'now'` or per-entry `date` opts out (ZIP_TIMESTAMP_NOT_PINNED diagnostic). `compression` {method store|deflate, level 0–9, deterministic:true = pinned pure-TS encoder ⇒ identical bytes on every runtime} at archive or entry level; `order:'insertion'` for EPUB / JAR (mimetype first, stored); `comment`, per-entry comment / unixMode / externalAttributes / raw extraFields. `stream:true` on a sourcePath feeds the file through addStream (data-descriptor layout, bounded memory). `parallel` compresses with the worker pool — byte-identical output. Zip64 is emitted exactly when a field overflows. Output base64 (≤ 50 MiB) or a sandbox file (streamed, never overwritten); `summary.deterministic` is true ONLY with compression.deterministic:true (cross-runtime identity); a default call is reproducible on the same runtime (`deflateTier` 'node-zlib') and reports false; `sha256` (includeSha256, base64 and file modes) is the proof. Every archive it writes is ISO/IEC 21320-1 conformant (CI-validated).",
         inputSchema: CREATE_ZIP_INPUT_SCHEMA,
-        outputSchema: ARCHIVE_OUTPUT_SCHEMA,
+        outputSchema: CREATE_ZIP_OUTPUT_SCHEMA,
         annotations: WRITES,
         examples: [
             { title: 'Two text files, reproducible', input: { entries: [{ name: 'README.md', text: '# Hello\n' }, { name: 'src/index.js', text: 'export {};\n' }], compression: { deterministic: true }, includeSha256: true } },
@@ -344,9 +344,9 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Modify archive (incremental, no recompression)',
         kind: 'archive-output',
         description:
-            "Edit an existing archive without recompressing anything: operations add / replace / remove / rename / setComment applied in order. mode 'append' (default) = save(): the original bytes stay verbatim and edits are appended — fast and byte-preserving, BUT removed or replaced payloads REMAIN in the file (data remanence: recoverable by anyone; a ZIP_DEAD_BYTES_RATIO diagnostic fires past 50 % dead bytes, and 7-Zip is known to read the stale payload). mode 'compact' = saveCompact(): canonical rewrite, still no recompression, removed data truly gone, SFX prefix dropped. No edits and an unchanged comment return the same bytes (`summary.noOp`). Archives with duplicate entry names are refused. Output base64 or a sandbox file.",
+            "Edit an existing archive without recompressing anything: operations add / replace / remove / rename / setComment applied in order. mode 'append' (default) = save(): the original bytes stay verbatim and edits are appended — fast and byte-preserving, BUT removed or replaced payloads REMAIN in the file (data remanence: recoverable by anyone; a ZIP_DEAD_BYTES_RATIO diagnostic fires past 50 % dead bytes, and 7-Zip is known to read the stale payload). mode 'compact' = saveCompact(): canonical rewrite, still no recompression, removed data truly gone, SFX prefix dropped. No edits and an unchanged comment return the same bytes (`summary.noOp`). Archives with duplicate entry names are refused — prefer create_zip for a full rebuild or when the source has duplicate names. Output base64 or a sandbox file.",
         inputSchema: MODIFY_ZIP_INPUT_SCHEMA,
-        outputSchema: ARCHIVE_OUTPUT_SCHEMA,
+        outputSchema: MODIFY_ZIP_OUTPUT_SCHEMA,
         annotations: WRITES,
         examples: [
             { title: 'Replace one file, keep everything else byte-identical', input: { zipBase64: SAMPLE_ZIP_PLACEHOLDER, operations: [{ op: 'replace', name: 'config.json', text: '{"debug":false}' }] } },
@@ -373,9 +373,9 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Inflate raw DEFLATE (bounded)',
         kind: 'inflate',
         description:
-            "Decompress a raw DEFLATE (RFC 1951) stream — e.g. the payload from read_zip_entry mode:'raw' — with a MANDATORY `maxOutput` bound through zipnative's resumable inflater (constant memory, exact `bytesConsumed`, trailing bytes reported as `leftover`; ZIP_INFLATE_OUTPUT_OVERFLOW past the bound). method 'store' is a bounded pass-through; a numeric method id selects a registered codec (none beyond 0 / 8 in this server → ZIP_UNSUPPORTED_METHOD). Output base64 (≤ 50 MiB) or a sandbox file.",
+            "Decompress a raw DEFLATE (RFC 1951) stream — e.g. the payload from read_zip_entry mode:'raw' — with a MANDATORY `maxOutput` bound through zipnative's resumable inflater (constant memory, exact `bytesConsumed`, trailing bytes reported as `leftover`; ZIP_INFLATE_OUTPUT_OVERFLOW past the bound). method 'store' is a bounded pass-through; a numeric method id selects a registered codec (none beyond 0 / 8 in this server → ZIP_UNSUPPORTED_METHOD). Output base64 (≤ 50 MiB) or a sandbox file. Use it only for a raw payload or a bare deflate stream; to read an entry's content prefer read_zip_entry mode:'data'.",
         inputSchema: INFLATE_RAW_INPUT_SCHEMA,
-        outputSchema: ARCHIVE_OUTPUT_SCHEMA,
+        outputSchema: INFLATE_RAW_OUTPUT_SCHEMA,
         annotations: WRITES,
         examples: [
             { title: 'Inflate a small raw-deflate stream', input: { dataBase64: 'y0jNyckHAA==', maxOutput: 1024 } },
@@ -387,7 +387,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Describe engine & server capabilities',
         kind: 'engine',
         description:
-            "Offline preflight (no archive needed): server / engine / tool-API versions, the deflate tier in use and the pinned deterministic tier, runtime codecs (node:zlib, CompressionStream, DecompressionStream) and worker threads, the codec registry, the engine's default `limits`, the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES, ZIPNATIVE_MCP_WORKERS), every server cap, whether the sandbox and the cache are enabled, the 39 frozen ZIP_* error codes and 11 diagnostic codes, and the engine exports this server deliberately does not expose (with why). `network` is always 'none'.",
+            "Offline preflight (no archive needed): server / engine / tool-API versions, the deflate tier in use and the pinned deterministic tier, runtime codecs (node:zlib, CompressionStream, DecompressionStream) and worker threads, the codec registry, the engine's default `limits`, the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES, ZIPNATIVE_MCP_WORKERS), every server cap, whether the sandbox and the cache are enabled, the 39 frozen ZIP_* error codes and 11 diagnostic codes, and the engine exports this server deliberately does not expose (with why). `network` is always 'none'. Call it first in a session, or whenever a cap / ceiling refusal needs interpreting.",
         inputSchema: DESCRIBE_ENGINE_INPUT_SCHEMA,
         outputSchema: projectableOutputSchema(DESCRIBE_ENGINE_OUTPUT_SCHEMA, {}, `Capability manifest.${PROJECTION_NOTE}`),
         annotations: READ_ONLY,
@@ -401,7 +401,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Draft a governance-compliant GitHub issue (HITL)',
         kind: 'governance',
         description:
-            "Produce a LOCAL GitHub issue draft + compliance report for zipnative / zipnative-mcp and NEVER submit it — the agent drafts, a human reviews and files it under their own identity (Human-In-The-Loop contract, .github/AGENT_RULES.md). No GitHub write path and no network path exist in this server. The draft is checked against the zero-dependency + reproduction policy; a violation (new runtime dependency, missing reproduction, duplicateSearchPerformed:false) throws GOVERNANCE_VIOLATION. targetRepo 'zipnative' for engine behaviour (parsing, writing, limits, codecs), 'zipnative-mcp' for wrapper behaviour (schemas, sandbox, transport). Returns markdown inline (outputMode:'file' also writes a .md). Present the draft AND the report to the user, then STOP.",
+            "Produce a LOCAL GitHub issue draft + compliance report for zipnative / zipnative-mcp and NEVER submit it — the agent drafts, a human reviews and files it under their own identity (Human-In-The-Loop contract, .github/AGENT_RULES.md). No GitHub write path and no network path exist in this server. The draft is checked against the zero-dependency + reproduction policy; a violation (new runtime dependency, missing reproduction, duplicateSearchPerformed:false) throws GOVERNANCE_VIOLATION. targetRepo 'zipnative' for engine behaviour (parsing, writing, limits, codecs), 'zipnative-mcp' for wrapper behaviour (schemas, sandbox, transport). Returns markdown inline (outputMode:'file' also writes a .md inside the sandbox). Use it only after reproducing a defect — for questions read describe_engine / AGENTS.md instead. Present the draft AND the report to the user, then STOP.",
         inputSchema: DRAFT_GOVERNANCE_ISSUE_INPUT_SCHEMA,
         outputSchema: DRAFT_GOVERNANCE_ISSUE_OUTPUT_SCHEMA,
         // Not readOnlyHint: outputMode='file' writes a .md into the sandbox. The default inline mode is side-effect-free.
@@ -416,7 +416,7 @@ const TOOLS: readonly ToolDefinition[] = [
 const TOOL_INDEX: ReadonlyMap<string, ToolDefinition> = new Map(TOOLS.map((t) => [t.name, t]));
 __setToolCount(TOOLS.length);
 
-const SERVER_INSTRUCTIONS = `zipnative-mcp: 13 tools over the zipnative v${ZIPNATIVE_VERSION} ZIP engine (zero dependencies, pure TypeScript). Tool API ${TOOL_API_VERSION}. MCP 2026-07-28 (stateless) with automatic fallback to the 2025-era handshake. Every tool has typed input/output schemas and executable _meta.examples; read-only tools never modify input; archive-producing tools are byte-reproducible by default and every option is opt-in.
+const SERVER_INSTRUCTIONS = `zipnative-mcp: 13 tools over the zipnative v${ZIPNATIVE_VERSION} ZIP engine (zero dependencies, pure TypeScript). Tool API ${TOOL_API_VERSION}. MCP 2026-07-28 (stateless) with automatic fallback to the 2025-era handshake. Every tool has typed input/output schemas and executable _meta.examples; read-only tools never modify input; archive-producing tools are byte-reproducible on one runtime by default (compression.deterministic:true for cross-runtime identity) and every option is opt-in.
 
 DECISION TREE:
   • What is in this archive? → inspect_zip (facts + determinism verdict + diagnostics; check:[…] for CI) then list_zip_entries (paged rows, filter by prefix/glob)
@@ -425,7 +425,8 @@ DECISION TREE:
   • Get files out → extract_zip (guards ON by default; outputMode:'file' + outputDir for the sandbox; filter for a subset)
   • Build an archive → create_zip (reproducible by default; compression.deterministic:true for cross-runtime identical bytes; order:'insertion' for EPUB/JAR; parallel for many large entries)
   • Change an existing archive → modify_zip (add/replace/remove/rename/setComment; mode:'compact' to truly delete — 'append' keeps old bytes)
-  • Truncated download, stream, SFX prefix, forensics → scan_zip_forward (local headers only — NOT authoritative; tolerateTruncation:true)
+  • Truncated download, cut or unseekable stream, forensics → scan_zip_forward (local headers only — NOT authoritative; tolerateTruncation:true; the stream must start at a local header)
+  • Self-extractor / prepended prefix → inspect_zip (reports prependedData; the engine shifts offsets) — scan_zip_forward refuses it (ZIP_SIGNATURE_MISMATCH); modify_zip mode:'compact' drops the prefix
   • Planning your own extraction sink → sanitize_entry_paths
   • Checksum / raw deflate payload → compute_crc32 / inflate_raw (mandatory maxOutput)
   • What can this server do here? → describe_engine (limits, ceilings, caps, sandbox, deflate tier, error codes)

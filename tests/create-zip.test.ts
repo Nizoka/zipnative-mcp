@@ -11,8 +11,10 @@ import path from 'node:path';
 import { createZipTool } from '../src/tools/create-zip.js';
 import { inspectZip } from '../src/tools/inspect-zip.js';
 import { listZipEntries } from '../src/tools/list-zip-entries.js';
+import { modifyZipTool } from '../src/tools/modify-zip.js';
 import { readZipEntry } from '../src/tools/read-zip-entry.js';
-import { ensureEngineReady } from '../src/engine.js';
+import { ensureEngineReady, probeRuntime } from '../src/engine.js';
+import { b64, basicZip } from './_zip-fixtures.js';
 import { __resetCeilingsForTests, assertInputWithin, MAX_BASE64_INPUT_BYTES } from '../src/caps.js';
 import { callToolDirect } from '../src/server.js';
 import { assertValidZip } from './_zip-assert.js';
@@ -239,7 +241,10 @@ describe('create_zip', () => {
             expect(list.entries.find((e) => e.name === 'bin/')?.isDirectory).toBe(true);
             expect(list.entries.find((e) => e.name === 'bin/')?.externalAttributes).toBe(((0o40750 << 16) >>> 0) | 0x10);
             await expect(createZipTool({ entries: [{ name: 'a', text: 'a', unixMode: '0755', externalAttributes: 1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
-            await expect(createZipTool({ entries: [{ name: 'a', text: 'a', unixMode: '9' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('entries[0].unixMode') });
+            // The schema `pattern` (lock-step with the Zod regex) refuses a malformed mode at the boundary, naming the path.
+            await expect(createZipTool({ entries: [{ name: 'a', text: 'a', unixMode: '9' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('unixMode') });
+            // A-005: surrounding whitespace is no longer trimmed — the advertised pattern is the contract.
+            await expect(createZipTool({ entries: [{ name: 'a', text: 'a', unixMode: ' 0755 ' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('unixMode') });
             await expect(createZipTool({ entries: [{ name: 'a', text: 'a', externalAttributes: -1 }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
         });
 
@@ -289,6 +294,25 @@ describe('create_zip', () => {
             expect(defaults.summary.parallel.requested).toBe(true);
             expect(defaults.summary.parallel.workers).toBeGreaterThanOrEqual(1);
             expect(defaults.summary.parallel.workers).toBeLessThanOrEqual(8);
+        });
+
+        it('A-004: parallel:{} uses the engine default worker count bounded by ZIPNATIVE_MCP_WORKERS; bytes identical to the sequential writer', async () => {
+            const entries = [{ name: 'a.bin', dataBase64: Buffer.from(patternBytes(120_000, 3)).toString('base64') }, { name: 'b.txt', text: 'text '.repeat(4000) }];
+            const engineDefault = (await probeRuntime()).defaultWorkers;
+            expect(engineDefault).toBe(Math.max(1, Math.min((await probeRuntime()).cpuCount - 1, 8)));
+            const defaults = await createZipTool({ entries, parallel: {}, compression: { deterministic: true }, includeSha256: true });
+            expect(defaults.summary.parallel).toEqual({ requested: true, workers: Math.min(8, engineDefault) });
+            const sequential = await createZipTool({ entries, compression: { deterministic: true }, includeSha256: true });
+            expect(defaults.summary.sha256).toBe(sequential.summary.sha256);
+            expect(defaults.base64).toBe(sequential.base64);
+            assertValidZip(defaults.base64 as string, 'parallel-default');
+            // A lower ceiling bounds the default; 0 disables the pool entirely.
+            process.env['ZIPNATIVE_MCP_WORKERS'] = '1';
+            __resetCeilingsForTests();
+            expect((await createZipTool({ entries: [{ name: 'a', text: 'a' }], parallel: {} })).summary.parallel).toEqual({ requested: true, workers: 1 });
+            process.env['ZIPNATIVE_MCP_WORKERS'] = '0';
+            __resetCeilingsForTests();
+            expect((await createZipTool({ entries: [{ name: 'a', text: 'a' }], parallel: {} })).summary.parallel).toEqual({ requested: true, workers: 0 });
         });
 
         it('workers above the operator ceiling are refused; ZIPNATIVE_MCP_WORKERS=0 keeps everything inline', async () => {
@@ -372,12 +396,86 @@ describe('create_zip', () => {
                 data: { limit: 'maxEntries', configured: 1, observed: 2 },
             });
             await expect(createZipTool({ entries: [], limits: { maxEntries: 200_000 } })).rejects.toMatchObject({ code: 'LIMIT_CEILING_EXCEEDED' });
-            await expect(createZipTool({ entries: Array.from({ length: 10_001 }, (_, i) => ({ name: `e${i}`, text: 'x' })) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+            // B-010: the schema cap is 100 000 (aligned with the engine default), so a per-call
+            // limit and the operator ceiling are the bounds that fire on a large entry list.
+            const many = Array.from({ length: 12 }, (_, i) => ({ name: `e${i}`, text: 'x' }));
+            await expect(createZipTool({ entries: many, limits: { maxEntries: 11 } })).rejects.toMatchObject({ code: 'ZIP_LIMIT_EXCEEDED', data: { limit: 'maxEntries', configured: 11, observed: 12 } });
+            process.env['ZIPNATIVE_MCP_MAX_ENTRIES'] = '11';
+            __resetCeilingsForTests();
+            try {
+                await expect(createZipTool({ entries: many })).rejects.toMatchObject({ code: 'ZIP_LIMIT_EXCEEDED', data: { limit: 'maxEntries', configured: 11, observed: 12 } });
+                await expect(createZipTool({ entries: many, limits: { maxEntries: 12 } })).rejects.toMatchObject({ code: 'LIMIT_CEILING_EXCEEDED', data: { env: 'ZIPNATIVE_MCP_MAX_ENTRIES', ceiling: 11 } });
+            } finally {
+                delete process.env['ZIPNATIVE_MCP_MAX_ENTRIES'];
+                __resetCeilingsForTests();
+            }
+            await expect(createZipTool({ entries: Array.from({ length: 100_001 }, (_, i) => ({ name: `e${i}`, text: 'x' })) })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
         });
 
         it('includeSha256 reports the hash of the produced bytes', async () => {
             const out = await createZipTool({ entries: [{ name: 'a.txt', text: 'a' }], includeSha256: true });
             expect(out.summary.sha256).toBe(createHash('sha256').update(bytesOfResult(out)).digest('hex'));
+        });
+
+        it('B-006: includeSha256 in file mode reports the sha256 of the written file, equal to the base64-mode digest', async () => {
+            sandbox = await makeSandbox();
+            const entries = [{ name: 'a.txt', text: 'a'.repeat(3000) }, { name: 'b.bin', dataBase64: Buffer.from(patternBytes(50_000)).toString('base64') }];
+            const file = await createZipTool({ entries, includeSha256: true, outputMode: 'file', outputPath: 'hashed.zip', chunkSize: 4096 });
+            expect(file.mode).toBe('file');
+            const written = await fs.readFile(file.filePath as string);
+            expect(file.summary.sha256).toBe(createHash('sha256').update(written).digest('hex'));
+            const inline = await createZipTool({ entries, includeSha256: true });
+            expect(file.summary.sha256).toBe(inline.summary.sha256);
+            expect(bytesOfResult(inline).byteLength).toBe(written.byteLength);
+            // Without the flag the file-mode summary carries no digest (byte-identical default response).
+            const plain = await createZipTool({ entries, outputMode: 'file', outputPath: 'plain.zip' });
+            expect(plain.summary.sha256).toBeUndefined();
+            // Streamed sources are hashed while streaming too.
+            const streamed = await createZipTool({ entries: [{ name: 'src.zip', sourcePath: 'hashed.zip', stream: true }], includeSha256: true, outputMode: 'file', outputPath: 'streamed.zip' });
+            expect(streamed.summary.sha256).toBe(createHash('sha256').update(await fs.readFile(streamed.filePath as string)).digest('hex'));
+        });
+    });
+
+    describe('B-011: a "/"-terminated name with a payload is refused like modify_zip', () => {
+        it("create_zip: 'dir/' with text → VALIDATION_ERROR; 'dir/' with directory:true and no payload → ok", async () => {
+            for (const payload of [{ text: 'x' }, { dataBase64: 'eA==' }, { sourcePath: 'p.bin' }] as const) {
+                await expect(createZipTool({ entries: [{ name: 'dir/', ...payload }] }), JSON.stringify(payload)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining("ending in '/'") });
+            }
+            // An EMPTY payload on a '/' name is what the engine itself accepts (a directory entry of length 0).
+            const out = await createZipTool({ entries: [{ name: 'dir/', directory: true }, { name: 'a.txt', text: 'a' }] });
+            assertValidZip(out.base64 as string, 'dir-ok');
+            expect(out.summary.directoryCount).toBe(1);
+            expect((await listZipEntries({ zipBase64: out.base64 as string })).entries.find((e) => e.name === 'dir/')?.isDirectory).toBe(true);
+        });
+
+        it("modify_zip add: 'dir/' with text → VALIDATION_ERROR; 'dir/' with directory:true → ok", async () => {
+            await expect(modifyZipTool({ zipBase64: b64(basicZip()), operations: [{ op: 'add', name: 'dir/', text: 'x' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining("ending in '/'") });
+            await expect(modifyZipTool({ zipBase64: b64(basicZip()), operations: [{ op: 'replace', name: 'README.md', text: 'x' }, { op: 'add', name: 'dir/', dataBase64: 'AA==' }] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+            const out = await modifyZipTool({ zipBase64: b64(basicZip()), operations: [{ op: 'add', name: 'dir/', directory: true }] });
+            assertValidZip(out.base64 as string, 'modify-dir-ok');
+            expect(out.summary.entryCountAfter).toBe(5);
+        });
+    });
+
+    describe('B-015: the determinism verdicts', () => {
+        it("a default call is reproducible on this runtime but reports summary.deterministic false with deflateTier 'node-zlib'", async () => {
+            const entries = [{ name: 'a.txt', text: 'deterministic '.repeat(200) }];
+            const one = await createZipTool({ entries, includeSha256: true });
+            const two = await createZipTool({ entries, includeSha256: true });
+            expect(one.summary.deterministic).toBe(false);
+            expect(one.summary.deflateTier).toBe('node-zlib');
+            expect(one.summary.sha256).toBe(two.summary.sha256);
+            // The structural verdict of inspect_zip is a different question (canonical defaults) and says true.
+            expect((await inspectZip({ zipBase64: one.base64 as string })).determinism.deterministic).toBe(true);
+        });
+
+        it("compression.deterministic:true → summary.deterministic true with deflateTier 'pure-pinned'", async () => {
+            const out = await createZipTool({ entries: [{ name: 'a.txt', text: 'deterministic '.repeat(200) }], compression: { deterministic: true } });
+            expect(out.summary.deterministic).toBe(true);
+            expect(out.summary.deflateTier).toBe('pure-pinned');
+            // A stored-only archive needs no codec: the pin still decides the verdict.
+            const stored = await createZipTool({ entries: [{ name: 'a.txt', text: 'a' }], compression: { method: 'store' } });
+            expect(stored.summary.deterministic).toBe(false);
         });
     });
 });

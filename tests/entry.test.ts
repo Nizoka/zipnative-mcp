@@ -6,7 +6,7 @@ import { iterateZipEntries, openZip, type StreamedZipHeader } from 'zipnative';
 
 import { bytesToHex, crcHex, decodeComment, decodeFlags, ENTRY_VIEW_SCHEMA, formatRatio, methodName, sanitizedPathOf, viewFromEntry, viewFromHeader } from '../src/entry.js';
 import { chunked } from '../src/archive-input.js';
-import { basicZip, bytesOf, raw, richZip, SYMLINK, ZIP_SLIP, INVALID_UTF8_NAME } from './_zip-fixtures.js';
+import { basicZip, bytesOf, raw, richZip, SYMLINK, ZIP_SLIP, INVALID_UTF8_NAME, CP437_NAME, STRONG_ENCRYPTION_FLAG, UT_TIMESTAMP, UT_TIMESTAMP_MTIME } from './_zip-fixtures.js';
 
 describe('entry helpers', () => {
     it('decodeFlags reads the four documented bits', () => {
@@ -127,6 +127,34 @@ describe('viewFromEntry', () => {
         const badView = viewFromEntry([...bad.entries()][0] as NonNullable<ReturnType<typeof bad.getEntry>>, 0);
         expect(badView.rawNameHex).toBe('fffe2e747874');
         expect(badView.nameEncoding).toBe('cp437');
+    });
+
+    it('a cp437 name decodes through the code page (é from 0x82) and keeps its raw bytes', () => {
+        const reader = openZip(CP437_NAME(), { onDiagnostic: () => undefined });
+        const view = viewFromEntry([...reader.entries()][0] as NonNullable<ReturnType<typeof reader.getEntry>>, 0);
+        expect(view.name).toBe('é.txt');
+        expect(view.nameEncoding).toBe('cp437');
+        expect(view.rawNameHex).toBe('822e747874');
+        expect(view.flags.utf8).toBe(false);
+        expect(view.sanitizedPath).toBe('é.txt');
+    });
+
+    it('FLAG_STRONG_ENCRYPTION (bit 6) is decoded alongside bit 0; the entry counts as encrypted', () => {
+        const reader = openZip(STRONG_ENCRYPTION_FLAG(), { onDiagnostic: () => undefined });
+        const view = viewFromEntry(reader.getEntry('aes.bin') as NonNullable<ReturnType<typeof reader.getEntry>>, 0);
+        expect(view.flags).toEqual({ raw: 0x0041, encrypted: true, dataDescriptor: false, strongEncryption: true, utf8: false });
+        expect(view.isEncrypted).toBe(true);
+        const plain = viewFromEntry(reader.getEntry('ok.txt') as NonNullable<ReturnType<typeof reader.getEntry>>, 1);
+        expect(plain.flags.strongEncryption).toBe(false);
+        expect(plain.isEncrypted).toBe(false);
+    });
+
+    it('an Info-ZIP UT extra (0x5455) overrides the DOS timestamp with its mtime and is named in extraFields', () => {
+        const reader = openZip(UT_TIMESTAMP(), { onDiagnostic: () => undefined });
+        const view = viewFromEntry([...reader.entries()][0] as NonNullable<ReturnType<typeof reader.getEntry>>, 0);
+        expect(view.lastModified).toBe(new Date(UT_TIMESTAMP_MTIME * 1000).toISOString());
+        expect(view.dosDate).toBe(0x0021);
+        expect(view.extraFields).toEqual([{ id: 0x5455, idHex: '0x5455', name: 'Extended timestamp (UT)', length: 5 }]);
     });
 
     it('every emitted key is declared in ENTRY_VIEW_SCHEMA (no required list)', () => {

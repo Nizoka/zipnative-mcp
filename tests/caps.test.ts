@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 
+import * as caps from '../src/caps.js';
 import {
     __resetCeilingsForTests, assertInputWithin, CAPS, DEFAULT_MAX_ENTRIES_CEILING, DEFAULT_MAX_UNCOMPRESSED_CEILING, DEFAULT_WORKERS_CEILING,
     getCeilings, MAX_BASE64_INPUT_BYTES, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, readCeilings, WORKERS_ENV,
@@ -67,7 +68,8 @@ describe('caps', () => {
 
     it('the serialisable CAPS view mirrors the constants', () => {
         expect(CAPS.maxBase64InputBytes).toBe(MAX_BASE64_INPUT_BYTES);
-        expect(CAPS).toEqual({
+        // The headline values are pinned (they are quoted in the docs) …
+        expect(CAPS).toMatchObject({
             stdioMaxFrameBytes: 256 * 1024 * 1024,
             maxBase64InputBytes: 128 * 1024 * 1024,
             maxPathInputBytes: 1024 * 1024 * 1024,
@@ -77,11 +79,32 @@ describe('caps', () => {
             maxExtractInlineTotalBytes: 32 * 1024 * 1024,
             maxListLimit: 2000,
             defaultListLimit: 200,
-            maxCreateEntries: 10_000,
+            maxCreateEntries: 100_000,
             maxModifyOperations: 1000,
             maxSanitizeNames: 10_000,
             maxDiagnostics: 200,
+            defaultScanMaxEntries: 10_000,
+            maxListedResources: 1000,
+            maxResourceWalkDepth: 8,
+            maxResourceReadBytes: 50 * 1024 * 1024,
+            cacheTtlSeconds: 3600,
+            cacheMaxBytes: 256 * 1024 * 1024,
         });
         expect(Object.values(CAPS).every((v) => Number.isInteger(v) && v > 0)).toBe(true);
+    });
+
+    it('A-008: every numeric constant exported by src/caps.ts (except the ceiling defaults) is advertised in CAPS', () => {
+        // Ceiling defaults are reported by describe_engine under `ceilings`, not `caps`.
+        const ceilingNames = new Set(['DEFAULT_MAX_UNCOMPRESSED_CEILING', 'DEFAULT_MAX_ENTRIES_CEILING', 'DEFAULT_WORKERS_CEILING']);
+        expect(DEFAULT_MAX_UNCOMPRESSED_CEILING + DEFAULT_MAX_ENTRIES_CEILING + DEFAULT_WORKERS_CEILING).toBeGreaterThan(0);
+        const advertised = new Set(Object.values(CAPS));
+        const numericExports = Object.entries(caps).filter(([name, value]) => typeof value === 'number' && !ceilingNames.has(name));
+        expect(numericExports.length).toBe(Object.keys(CAPS).length);
+        const missing = numericExports.filter(([, value]) => !advertised.has(value as number)).map(([name]) => name);
+        expect(missing, `caps.ts constants missing from CAPS: ${missing.join(', ')}`).toEqual([]);
+        // Every CAPS key maps back to a constant with the same value.
+        for (const [key, value] of Object.entries(CAPS)) {
+            expect(numericExports.some(([, v]) => v === value), `CAPS.${key} = ${value} has no source constant`).toBe(true);
+        }
     });
 });

@@ -104,6 +104,20 @@ describe('draft_governance_issue', () => {
         await expect(draftGovernanceIssue({ ...validInput, issueType: 'wish' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
     });
 
+    it('A-017: an unknown key is refused through parseInput with the uniform "Invalid arguments:" wording', async () => {
+        const err = await draftGovernanceIssue({ ...validInput, submit: true }).catch((e: unknown) => e as ToolError);
+        expect(err).toBeInstanceOf(ToolError);
+        expect((err as ToolError).code).toBe('VALIDATION_ERROR');
+        expect((err as ToolError).message).toMatch(/^Invalid arguments: /);
+        expect((err as ToolError).message).toContain('submit');
+        // Same wording on the wire, and `undefined` input is treated as {} like every other tool.
+        const r = await callToolDirect('draft_governance_issue', { ...validInput, githubToken: 'ghp_never' });
+        expect(r.isError).toBe(true);
+        expect((r.content[0] as { text: string }).text).toMatch(/^draft_governance_issue failed \[VALIDATION_ERROR\]: Invalid arguments: /);
+        expect((r.content[0] as { text: string }).text).not.toContain('ghp_never');
+        await expect(draftGovernanceIssue(undefined)).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringMatching(/^Invalid arguments: /) });
+    });
+
     it("requires outputPath when outputMode='file' (MISSING_OUTPUT_PATH)", async () => {
         await expect(draftGovernanceIssue({ ...validInput, outputMode: 'file' })).rejects.toThrow(ToolError);
         await expect(draftGovernanceIssue({ ...validInput, outputMode: 'file' })).rejects.toMatchObject({ code: 'MISSING_OUTPUT_PATH' });

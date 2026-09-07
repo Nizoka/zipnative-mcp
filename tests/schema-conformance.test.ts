@@ -196,6 +196,63 @@ describe('tool catalogue hygiene', () => {
         expect(issues).toEqual([]);
     });
 
+    it('A-013: every input-schema property (recursively, union arms and array items included) has a non-empty description', () => {
+        const missing: string[] = [];
+        const walk = (node: unknown, at: string): void => {
+            if (node === null || typeof node !== 'object') return;
+            const o = node as Record<string, unknown>;
+            if (o['properties'] !== undefined) {
+                for (const [k, v] of Object.entries(o['properties'] as Record<string, Record<string, unknown>>)) {
+                    const d = v['description'];
+                    if (typeof d !== 'string' || d.trim().length === 0) missing.push(`${at}.${k}`);
+                    walk(v, `${at}.${k}`);
+                }
+            }
+            if (o['items'] !== undefined) walk(o['items'], `${at}[]`);
+            for (const [i, arm] of ((o['oneOf'] ?? o['anyOf'] ?? []) as unknown[]).entries()) walk(arm, `${at}|${i}`);
+        };
+        let total = 0;
+        const count = (node: unknown): void => {
+            if (node === null || typeof node !== 'object') return;
+            const o = node as Record<string, unknown>;
+            if (o['properties'] !== undefined) {
+                for (const v of Object.values(o['properties'] as Record<string, unknown>)) {
+                    total++;
+                    count(v);
+                }
+            }
+            if (o['items'] !== undefined) count(o['items']);
+            for (const arm of (o['oneOf'] ?? o['anyOf'] ?? []) as unknown[]) count(arm);
+        };
+        for (const t of tools) {
+            walk(t.inputSchema, t.name);
+            count(t.inputSchema);
+        }
+        expect(total).toBeGreaterThan(200);
+        expect(missing, `undescribed input properties: ${missing.join(', ')}`).toEqual([]);
+    });
+
+    it('B-016: create_zip / modify_zip / inflate_raw declare a typed summary, and every summary key a call emits is declared', async () => {
+        await ensureEngineReady();
+        const cases: Array<[string, Record<string, unknown>]> = [
+            ['create_zip', { entries: [{ name: 'a.txt', text: 'a' }], includeSha256: true, parallel: { workers: 0 } }],
+            ['modify_zip', { zipBase64: b64(basicZip()), operations: [{ op: 'remove', name: 'README.md' }], includeSha256: true }],
+            ['inflate_raw', { dataBase64: b64(Buffer.concat([deflateRawSync(Buffer.from('abc')), Buffer.from('tail')])), maxOutput: 1024 }],
+        ];
+        for (const [name, args] of cases) {
+            const schema = byName.get(name)!.outputSchema as { properties: { summary: { additionalProperties: boolean; properties: Record<string, unknown> } } };
+            const declared = Object.keys(schema.properties.summary.properties);
+            expect(declared.length, name).toBeGreaterThanOrEqual(8);
+            expect(schema.properties.summary.additionalProperties, name).toBe(false);
+            const sc = (await callSc(name, args)) as { summary: Record<string, unknown> };
+            for (const key of Object.keys(sc.summary)) expect(declared, `${name}.summary.${key}`).toContain(key);
+            expect(validateAgainst(schema, sc)).toBeNull();
+        }
+        expect(Object.keys((byName.get('create_zip')!.outputSchema as { properties: { summary: { properties: object } } }).properties.summary.properties)).toEqual(expect.arrayContaining(['deterministic', 'deflateTier', 'sha256', 'parallel']));
+        expect(Object.keys((byName.get('modify_zip')!.outputSchema as { properties: { summary: { properties: object } } }).properties.summary.properties)).toEqual(expect.arrayContaining(['saveMode', 'noOp', 'grewByBytes', 'sha256']));
+        expect(Object.keys((byName.get('inflate_raw')!.outputSchema as { properties: { summary: { properties: object } } }).properties.summary.properties)).toEqual(expect.arrayContaining(['bytesConsumed', 'leftover', 'finished', 'maxOutput']));
+    });
+
     it('every _meta.examples[].input validates against its inputSchema', () => {
         const failures: string[] = [];
         for (const t of tools) {

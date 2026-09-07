@@ -75,7 +75,12 @@ export const SANITIZE_ENTRY_PATHS_OUTPUT_SCHEMA = {
 
 const RESERVED_WIN_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 
-/** Re-derive the rule that made the engine return null (same order as the engine). */
+/**
+ * Re-derive the most specific rule for a rejected name. The engine's `null` is
+ * the gate; this is an explanatory label (the engine tests `/` before `//`, so a
+ * `//`-prefixed name is reported here as `unc` where the engine's own order
+ * would say `absolute`).
+ */
 export function sanitizeReason(name: string): SanitizeReason {
     if (name.length === 0) return 'empty';
     if (name.includes('\0')) return 'nul';

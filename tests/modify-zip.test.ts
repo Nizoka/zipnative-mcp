@@ -200,6 +200,44 @@ describe('modify_zip', () => {
             await expect(modifyZipTool({ zipBase64: b64(basicZip()), operations: [{ op: 'add', name: 'n.txt', text: 'n' }], defaultDate: '1970-01-01T00:00:00Z' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
         });
 
+        it('per-operation compression and the archive defaultDate apply to NEW payloads only; existing entries keep their bytes', async () => {
+            const text = 'compressible text '.repeat(200);
+            const out = await modifyZipTool({
+                zipBase64: b64(basicZip()),
+                operations: [
+                    { op: 'add', name: 'stored.txt', text, compression: { method: 'store' } },
+                    { op: 'add', name: 'deflated.txt', text },
+                    { op: 'add', name: 'dated.txt', text: 'd', date: '2031-02-03T04:05:06Z' },
+                ],
+                compression: { method: 'deflate', level: 9 },
+                defaultDate: '2025-01-02T03:04:06Z',
+            });
+            assertValidZip(out.base64 as string, 'modify-compression');
+            const list = await listZipEntries({ zipBase64: out.base64 as string });
+            const byName = new Map(list.entries.map((e) => [e.name, e]));
+            expect(byName.get('stored.txt')?.method).toBe(0);
+            expect(byName.get('deflated.txt')?.method).toBe(8);
+            expect(byName.get('deflated.txt')?.compressedSize).toBeLessThan(byName.get('stored.txt')?.compressedSize ?? 0);
+            expect(byName.get('stored.txt')?.lastModified).toBe('2025-01-02T03:04:06.000Z');
+            expect(byName.get('dated.txt')?.lastModified).toBe('2031-02-03T04:05:06.000Z');
+            // Untouched entries keep the original (DOS-epoch, host-local) timestamp and method.
+            const original = (await listZipEntries({ zipBase64: b64(basicZip()) })).entries.find((e) => e.name === 'README.md');
+            expect(byName.get('README.md')?.lastModified).toBe(original?.lastModified);
+            expect(byName.get('README.md')?.dosDate).toBe(0x0021);
+            expect(byName.get('docs/guide.md')?.method).toBe(8);
+            expect(out.diagnostics.map((d) => d.code)).not.toContain('ZIP_TIMESTAMP_NOT_PINNED');
+            expect(await textOf(out.base64 as string, 'stored.txt')).toBe(text);
+        });
+
+        it('rename onto an existing name is ZIP_ENTRY_EXISTS (never an overwrite), with the operation index', async () => {
+            await expect(modifyZipTool({ zipBase64: b64(basicZip()), operations: [{ op: 'setComment', comment: 'c' }, { op: 'rename', from: 'README.md', to: 'docs/guide.md' }] })).rejects.toMatchObject({
+                code: 'ZIP_ENTRY_EXISTS',
+                data: { errorClass: 'input', operationIndex: 1, op: 'rename' },
+            });
+            // The source is untouched by the failed call: a fresh call still sees both entries.
+            expect((await names(b64(basicZip()))).sort()).toEqual(['README.md', 'assets/', 'docs/guide.md', 'src/index.js']);
+        });
+
         it('validates the operations list', async () => {
             const zipBase64 = b64(basicZip());
             await expect(modifyZipTool({ zipBase64, operations: [] })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });

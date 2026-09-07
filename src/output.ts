@@ -5,6 +5,7 @@
  * uses. Mirrors pdfnative-mcp `src/output.ts`.
  */
 import path from 'node:path';
+import { z } from 'zod';
 
 import { encodeBase64 } from './base64.js';
 import { MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES } from './caps.js';
@@ -84,18 +85,21 @@ export async function emitArchive(
 export async function emitArchiveStream(
     chunks: AsyncIterable<Uint8Array>,
     outputPath: string | undefined,
-    options: { extensions?: readonly string[]; mimeType?: string } = {},
-): Promise<OutputResult> {
+    options: { extensions?: readonly string[]; mimeType?: string; hash?: 'sha256' | undefined } = {},
+): Promise<OutputResult & { sha256?: string }> {
     if (outputPath === undefined) {
         throw new ToolError('MISSING_OUTPUT_PATH', "outputPath is required when outputMode='file'.");
     }
     const resolved = resolveOutputFile(outputPath, options.extensions ?? ZIP_CONTAINER_EXTENSIONS);
     const label = relativeLabel(resolved);
     const stream = await openExclusiveWriteStream(resolved, label);
+    // Hash while streaming so `includeSha256` costs no second pass and no buffering.
+    const hasher = options.hash === 'sha256' ? (await import('node:crypto')).createHash('sha256') : null;
     let total = 0;
     try {
         for await (const chunk of chunks) {
             total += chunk.byteLength;
+            hasher?.update(chunk);
             if (total > MAX_FILE_OUTPUT_BYTES) {
                 throw new ToolError('OUTPUT_TOO_LARGE', `Output exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap.`);
             }
@@ -118,8 +122,20 @@ export async function emitArchiveStream(
         await discardPartial(resolved);
         throw err;
     }
-    return { mode: 'file', sizeBytes: total, filePath: resolved, mimeType: options.mimeType ?? 'application/zip' };
+    return {
+        mode: 'file',
+        sizeBytes: total,
+        filePath: resolved,
+        mimeType: options.mimeType ?? 'application/zip',
+        ...(hasher !== null ? { sha256: hasher.digest('hex') } : {}),
+    };
 }
+
+/** Zod twin of {@link OUTPUT_INPUT_PROPERTIES} (spread into the archive-producing tools). */
+export const OutputShape = {
+    outputMode: z.enum(['base64', 'file']).default('base64'),
+    outputPath: z.string().optional(),
+};
 
 /**
  * Writes a UTF-8 text artifact (a Markdown governance draft) to a sandboxed

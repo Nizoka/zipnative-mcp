@@ -183,6 +183,37 @@ describe('read_zip_entry', () => {
             expect(rawOut.sizeBytes).toBeLessThan(16 * MiB);
         });
 
+        it('A-010: the raw-mode ENTRY_TOO_LARGE message states the payload is not retrievable inline and names a remedy that yields bytes', async () => {
+            const stored = raw([{ name: 'big.bin', data: patternBytes(17 * MiB) }]);
+            const err = await readZipEntry({ zipBase64: b64(stored), name: 'big.bin', mode: 'raw' }).catch((e: unknown) => e as ToolError);
+            expect(err).toBeInstanceOf(ToolError);
+            expect((err as ToolError).code).toBe('ENTRY_TOO_LARGE');
+            expect((err as ToolError).message).toContain('not retrievable inline');
+            expect((err as ToolError).message).toContain("mode:'data'");
+            expect((err as ToolError).message).toContain('DECOMPRESSED');
+            expect((err as ToolError).data).toMatchObject({ entryName: 'big.bin', sizeBytes: 17 * MiB, cap: 16 * MiB, remedy: 'range' });
+            // The remedy works: a window of the decompressed content is still readable.
+            const window = await readZipEntry({ zipBase64: b64(stored), name: 'big.bin', range: { offset: 0, length: 8 } });
+            expect(window.range?.returned).toBe(8);
+            // An out-of-range index names list_zip_entries and the valid index range.
+            const idx = await readZipEntry({ zipBase64: b64(basicZip()), index: 7 }).catch((e: unknown) => e as ToolError);
+            expect((idx as ToolError).code).toBe('ZIP_ENTRY_NOT_FOUND');
+            expect((idx as ToolError).message).toContain('list_zip_entries');
+            expect((idx as ToolError).message).toContain('indices 0–3');
+            expect((idx as ToolError).data).toMatchObject({ index: 7, entryCount: 4, remedy: 'list_zip_entries' });
+            const empty = await readZipEntry({ zipBase64: b64(raw([])), index: 0 }).catch((e: unknown) => e as ToolError);
+            expect((empty as ToolError).message).toContain('indices 0–0');
+        });
+
+        it('raw mode on a STORED entry returns the bytes verbatim (no codec involved)', async () => {
+            const zip = raw([{ name: 's.bin', data: new Uint8Array([1, 2, 3, 4, 5]) }]);
+            const out = await readZipEntry({ zipBase64: b64(zip), name: 's.bin', mode: 'raw' });
+            expect(out.entry.method).toBe(0);
+            expect(out.sizeBytes).toBe(5);
+            expect(Buffer.from(out.dataBase64 as string, 'base64')).toEqual(Buffer.from([1, 2, 3, 4, 5]));
+            expect(out.crcVerified).toBe(false);
+        });
+
         it('maps the engine refusals with their data fields', async () => {
             await expect(readZipEntry({ zipBase64: b64(ENCRYPTED_FLAG()), name: 'secret.txt' })).rejects.toMatchObject({
                 code: 'ZIP_UNSUPPORTED_ENCRYPTION',

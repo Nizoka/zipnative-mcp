@@ -6,7 +6,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 
 import { verifyZipTool, verifySummary } from '../src/tools/verify-zip.js';
 import { callToolDirect } from '../src/server.js';
-import { b64, basicZip, bytesOf, richZip, streamedZip, OVERLAP, CD_MISMATCH, CRC_OVERRIDE, ENCRYPTED_FLAG, LFH_NAME_MISMATCH, MULTI_DISK, SFX_PREFIXED, raw } from './_zip-fixtures.js';
+import { ZIP_ERROR_CODES } from '../src/zip-errors.js';
+import { b64, basicZip, bytesOf, richZip, streamedZip, OVERLAP, CD_MISMATCH, CRC_OVERRIDE, ENCRYPTED_FLAG, LFH_NAME_MISMATCH, MULTI_DISK, SFX_PREFIXED, raw, HOSTILE_FIXTURES, UNKNOWN_METHOD, STRONG_ENCRYPTION_FLAG, truncated } from './_zip-fixtures.js';
 
 describe('verify_zip', () => {
     beforeAll(() => {
@@ -124,6 +125,39 @@ describe('verify_zip', () => {
         await expect(verifyZipTool({})).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
         await expect(verifyZipTool({ zipBase64: b64(basicZip()), entries: 'some' })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
         await expect(verifyZipTool({ zipBase64: b64(basicZip()), strict: true })).rejects.toMatchObject({ code: 'VALIDATION_ERROR' });
+    });
+
+    it('B-019: verify_zip is never isError across the whole hostile fixture set (plus a truncated archive)', async () => {
+        const cases: Array<[string, Uint8Array]> = [...Object.entries(HOSTILE_FIXTURES).map(([name, make]): [string, Uint8Array] => [name, make()]), ['TRUNCATED', truncated(basicZip(), 60)]];
+        expect(cases.length).toBeGreaterThanOrEqual(30);
+        for (const [name, bytes] of cases) {
+            const r = await callToolDirect('verify_zip', { zipBase64: b64(bytes) });
+            expect(r.isError, name).not.toBe(true);
+            const sc = r.structuredContent as { ok: boolean; error: { code: string } | null; entryCount: number };
+            expect(typeof sc.ok, name).toBe('boolean');
+            if (sc.error !== null) {
+                expect(sc.ok, name).toBe(false);
+                expect(ZIP_ERROR_CODES as readonly string[], `${name}: ${sc.error.code}`).toContain(sc.error.code);
+                expect(sc.entryCount, name).toBe(0);
+            }
+        }
+    });
+
+    it('B-020: an entry whose method has no codec here is reported FAILED (ok:false, no skipped reason), never skipped', async () => {
+        const out = await verifyZipTool({ zipBase64: b64(UNKNOWN_METHOD()) });
+        expect(out.ok).toBe(false);
+        expect(out.error).toBeNull();
+        expect(out.entryCount).toBe(1);
+        expect(out.failedCount).toBe(1);
+        expect(out.skippedCount).toBe(0);
+        expect(out.entries[0]).toMatchObject({ name: 'w.bin', ok: false });
+        expect(out.entries[0]?.skipped).toBeUndefined();
+        const failed = await verifyZipTool({ zipBase64: b64(UNKNOWN_METHOD()), entries: 'failed' });
+        expect(failed.entries.map((e) => e.name)).toEqual(['w.bin']);
+        // Encrypted entries (ZipCrypto or strong encryption) are the ones that ARE skipped.
+        const strong = await verifyZipTool({ zipBase64: b64(STRONG_ENCRYPTION_FLAG()) });
+        expect(strong.ok).toBe(true);
+        expect(strong.entries.find((e) => e.name === 'aes.bin')?.skipped).toBe('encrypted');
     });
 
     it('summary projection keeps the verdict and counts', async () => {

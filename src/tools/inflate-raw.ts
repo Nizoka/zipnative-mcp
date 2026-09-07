@@ -16,10 +16,11 @@ import { decodeBase64Field } from '../base64.js';
 import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES, MAX_PATH_INPUT_BYTES } from '../caps.js';
 import { ensureEngineReady } from '../engine.js';
 import { ToolError } from '../errors.js';
-import { emitArchive, OUTPUT_INPUT_PROPERTIES, type OutputResult } from '../output.js';
+import { emitArchive, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
 import { resolveInputFile } from '../sandbox.js';
 import { guard } from '../zip-errors.js';
 import { parseInput } from './_shared.js';
+import { archiveOutputSchemaWith } from './create-zip.js';
 
 export const INFLATE_RAW_NAME = 'inflate_raw';
 
@@ -31,7 +32,7 @@ export const INFLATE_RAW_INPUT_SCHEMA = {
         dataBase64: { type: 'string', description: 'The compressed stream as base64 (e.g. the payload from read_zip_entry mode:"raw"). Exclusive with sourcePath.' },
         sourcePath: { type: 'string', minLength: 1, description: 'Relative path of a file inside the sandbox holding the compressed stream (streamed). Exclusive with dataBase64.' },
         maxOutput: { type: 'integer', minimum: 1, description: `Mandatory output bound in bytes: decompression stops with ZIP_INFLATE_OUTPUT_OVERFLOW beyond it (zip-bomb guard). Inline results are further capped at ${MAX_BASE64_OUTPUT_BYTES} bytes, file results at ${MAX_FILE_OUTPUT_BYTES}.` },
-        method: { type: 'string', default: 'deflate', description: "'deflate' (default, method 8), 'store' (method 0, bounded pass-through) or a numeric method id for a registered codec." },
+        method: { type: 'string', pattern: '^(?:deflate|store|[0-9]+)$', default: 'deflate', description: "'deflate' (default, method 8), 'store' (method 0, bounded pass-through) or a numeric method id for a registered codec." },
         allowTrailing: { type: 'boolean', default: false, description: 'Accept bytes after the end of the deflate stream silently (they are always reported as `leftover`).' },
         ...OUTPUT_INPUT_PROPERTIES,
     },
@@ -42,18 +43,29 @@ const InputSchema = z
         dataBase64: z.string().optional(),
         sourcePath: z.string().min(1).optional(),
         maxOutput: z.number().int().min(1),
-        method: z.string().default('deflate'),
+        method: z.string().regex(/^(?:deflate|store|[0-9]+)$/).default('deflate'),
         allowTrailing: z.boolean().default(false),
-        outputMode: z.enum(['base64', 'file']).default('base64'),
-        outputPath: z.string().optional(),
+        ...OutputShape,
     })
     .superRefine((v, ctx) => {
         const n = (v.dataBase64 !== undefined ? 1 : 0) + (v.sourcePath !== undefined ? 1 : 0);
         if (n !== 1) ctx.addIssue({ code: 'custom', message: 'pass exactly one of dataBase64 / sourcePath', path: ['dataBase64'] });
-        if (!(v.method === 'deflate' || v.method === 'store' || /^\d+$/.test(v.method))) {
-            ctx.addIssue({ code: 'custom', message: "method must be 'deflate', 'store' or a numeric method id", path: ['method'] });
-        }
     });
+
+export const INFLATE_RAW_OUTPUT_SCHEMA = archiveOutputSchemaWith(
+    {
+        method: { type: 'integer', minimum: 0 },
+        methodName: { type: 'string' },
+        bytesIn: { type: 'integer', minimum: 0 },
+        bytesOut: { type: 'integer', minimum: 0 },
+        bytesConsumed: { type: 'integer', minimum: 0, description: 'Compressed bytes the deflate stream consumed (excludes leftover).' },
+        leftover: { type: 'integer', minimum: 0, description: 'Trailing bytes after the end of the stream.' },
+        finished: { type: 'boolean' },
+        maxOutput: { type: 'integer', minimum: 1, description: 'The effective output bound (maxOutput capped by the inline / file cap).' },
+        trailingWarning: { type: 'string' },
+    },
+    'inflate_raw summary (the produced bytes are application/octet-stream, not an archive).',
+);
 
 export interface InflateRawSummary {
     readonly method: number;

@@ -26,9 +26,11 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
+import { CACHE_MAX_BYTES, CACHE_TTL_SECONDS } from './caps.js';
+
 const ENV_VAR = 'ZIPNATIVE_MCP_CACHE_DIR';
-const TTL_SECONDS = 3600;
-const MAX_BYTES = 256 * 1024 * 1024;
+const TTL_SECONDS = CACHE_TTL_SECONDS;
+const MAX_BYTES = CACHE_MAX_BYTES;
 
 interface CacheEntry<V> {
     readonly tool: string;

@@ -15,6 +15,8 @@
  * is the only gate.
  */
 
+import { ZIPNATIVE_MCP_VERSION } from './version.js';
+
 /** Result of validating a draft issue's markdown against the policy. */
 export interface IssueValidationResult {
     readonly ok: boolean;
@@ -84,7 +86,7 @@ export const HUMAN_GATE =
  * Compact, agent-facing summary of the governance contract. Surfaced verbatim by
  * the `governance_contract` MCP prompt and echoed in server instructions.
  */
-export const GOVERNANCE_CONTRACT_SUMMARY = `zipnative-mcp AI Governance & Human-In-The-Loop contract (v1.0.0)
+export const GOVERNANCE_CONTRACT_SUMMARY = `zipnative-mcp AI Governance & Human-In-The-Loop contract (v${ZIPNATIVE_MCP_VERSION})
 
 ROLE: You are a DRAFTSMAN, never an autonomous submitter.
 

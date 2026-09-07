@@ -23,7 +23,7 @@ export const COMPUTE_CRC32_INPUT_SCHEMA = {
         text: { type: 'string', description: 'UTF-8 text. Exclusive with dataBase64 / sourcePath.' },
         sourcePath: { type: 'string', minLength: 1, description: 'Relative path of a file inside the sandbox (streamed, ≤ 1 GiB). Exclusive with dataBase64 / text.' },
         seed: { type: 'integer', minimum: 0, maximum: 0xffff_ffff, default: 0, description: 'Running CRC to continue from (chain calls over consecutive chunks).' },
-        expect: { type: 'string', description: "Optional expected CRC (8 hex digits, e.g. '4e08bfb4'); the result carries `matches`." },
+        expect: { type: 'string', pattern: '^(?:0x)?[0-9a-fA-F]{1,8}$', description: "Optional expected CRC (1–8 hex digits, optional 0x prefix, e.g. '4e08bfb4'); the result carries `matches`." },
     },
 } as const;
 

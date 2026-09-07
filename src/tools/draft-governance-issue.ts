@@ -19,6 +19,7 @@ import os from 'node:os';
 import { z } from 'zod';
 
 import { GovernanceError, ToolError } from '../errors.js';
+import { parseInput } from './_shared.js';
 import {
     HUMAN_GATE,
     IDENTITY_REMINDER,
@@ -267,11 +268,7 @@ function buildDraftMarkdown(
 }
 
 export async function draftGovernanceIssue(rawInput: unknown): Promise<DraftGovernanceIssueResult> {
-    const parsed = InputSchema.safeParse(rawInput);
-    if (!parsed.success) {
-        throw new ToolError('VALIDATION_ERROR', `Invalid arguments: ${parsed.error.message}`);
-    }
-    const input = parsed.data;
+    const input = parseInput(InputSchema, rawInput);
 
     if (!input.duplicateSearchPerformed) {
         throw new GovernanceError(

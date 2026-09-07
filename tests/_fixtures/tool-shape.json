@@ -1696,8 +1696,7 @@
     },
     "maxEntries": {
      "type": "integer",
-     "minimum": 1,
-     "default": 10000
+     "minimum": 1
     },
     "tolerateTruncation": {
      "type": "boolean",
@@ -1987,6 +1986,10 @@
      "type": "integer",
      "minimum": 0
     },
+    "maxEntries": {
+     "type": "integer",
+     "minimum": 1
+    },
     "error": {
      "type": "object",
      "additionalProperties": false,
@@ -2150,7 +2153,7 @@
  },
  {
   "name": "create_zip",
-  "title": "Create archive (deterministic by default)",
+  "title": "Create archive (reproducible; deterministic:true for cross-runtime identical bytes)",
   "annotations": {
    "readOnlyHint": false,
    "destructiveHint": false,
@@ -2166,7 +2169,7 @@
    "properties": {
     "entries": {
      "type": "array",
-     "maxItems": 10000,
+     "maxItems": 100000,
      "items": {
       "type": "object",
       "additionalProperties": false,
@@ -2215,7 +2218,8 @@
         }
        },
        "date": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^\\d{4}-\\d{2}-\\d{2}"
        },
        "comment": {
         "type": "string",
@@ -2227,7 +2231,8 @@
         "maximum": 4294967295
        },
        "unixMode": {
-        "type": "string"
+        "type": "string",
+        "pattern": "^(?:0o)?[0-7]{3,4}$"
        },
        "extraFields": {
         "type": "array",
@@ -2267,7 +2272,8 @@
      "default": "canonical"
     },
     "defaultDate": {
-     "type": "string"
+     "type": "string",
+     "pattern": "^(?:now|\\d{4}-\\d{2}-\\d{2})"
     },
     "compression": {
      "type": "object",
@@ -2407,7 +2413,58 @@
     },
     "summary": {
      "type": "object",
-     "additionalProperties": true
+     "additionalProperties": false,
+     "properties": {
+      "entryCount": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "fileCount": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "directoryCount": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "streamedCount": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "uncompressedBytes": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "order": {
+       "type": "string",
+       "enum": [
+        "canonical",
+        "insertion"
+       ]
+      },
+      "deterministic": {
+       "type": "boolean"
+      },
+      "deflateTier": {
+       "type": "string"
+      },
+      "parallel": {
+       "type": "object",
+       "additionalProperties": false,
+       "properties": {
+        "requested": {
+         "type": "boolean"
+        },
+        "workers": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
+      },
+      "sha256": {
+       "type": "string"
+      }
+     }
     },
     "diagnostics": {
      "type": "array",
@@ -2535,7 +2592,8 @@
           }
          },
          "date": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}"
          },
          "comment": {
           "type": "string",
@@ -2547,7 +2605,8 @@
           "maximum": 4294967295
          },
          "unixMode": {
-          "type": "string"
+          "type": "string",
+          "pattern": "^(?:0o)?[0-7]{3,4}$"
          },
          "extraFields": {
           "type": "array",
@@ -2676,7 +2735,8 @@
      }
     },
     "defaultDate": {
-     "type": "string"
+     "type": "string",
+     "pattern": "^(?:now|\\d{4}-\\d{2}-\\d{2})"
     },
     "includeSha256": {
      "type": "boolean",
@@ -2766,7 +2826,45 @@
     },
     "summary": {
      "type": "object",
-     "additionalProperties": true
+     "additionalProperties": false,
+     "properties": {
+      "saveMode": {
+       "type": "string",
+       "enum": [
+        "append",
+        "compact"
+       ]
+      },
+      "operationsApplied": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "entryCountBefore": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "entryCountAfter": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "inputBytes": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "outputBytes": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "grewByBytes": {
+       "type": "integer"
+      },
+      "noOp": {
+       "type": "boolean"
+      },
+      "sha256": {
+       "type": "string"
+      }
+     }
     },
     "diagnostics": {
      "type": "array",
@@ -2842,7 +2940,8 @@
      "default": 0
     },
     "expect": {
-     "type": "string"
+     "type": "string",
+     "pattern": "^(?:0x)?[0-9a-fA-F]{1,8}$"
     }
    }
   },
@@ -2907,6 +3006,7 @@
     },
     "method": {
      "type": "string",
+     "pattern": "^(?:deflate|store|[0-9]+)$",
      "default": "deflate"
     },
     "allowTrailing": {
@@ -2952,7 +3052,42 @@
     },
     "summary": {
      "type": "object",
-     "additionalProperties": true
+     "additionalProperties": false,
+     "properties": {
+      "method": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "methodName": {
+       "type": "string"
+      },
+      "bytesIn": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "bytesOut": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "bytesConsumed": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "leftover": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "finished": {
+       "type": "boolean"
+      },
+      "maxOutput": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "trailingWarning": {
+       "type": "string"
+      }
+     }
     },
     "diagnostics": {
      "type": "array",

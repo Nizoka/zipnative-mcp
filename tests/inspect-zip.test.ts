@@ -10,9 +10,11 @@ import { inspectZip, inspectSummary, INSPECT_CHECKS } from '../src/tools/inspect
 import { callToolDirect } from '../src/server.js';
 import { ToolError } from '../src/errors.js';
 import { cleanupSandbox, makeSandbox } from './_sandbox.js';
+import { readZipEntry } from '../src/tools/read-zip-entry.js';
+import { verifyZipTool } from '../src/tools/verify-zip.js';
 import {
     b64, basicZip, bytesOf, richZip, streamedZip, OVERLAP, SFX_PREFIXED, TRAILING_GARBAGE, INVALID_UTF8_NAME, CP437_NAME,
-    CD_MISMATCH, MULTI_DISK, ZIP64_DROPPED, ZIP64_FORCED, ZIP_SLIP, SYMLINK, ENCRYPTED_FLAG, raw,
+    CD_MISMATCH, MULTI_DISK, ZIP64_DROPPED, ZIP64_FORCED, ZIP_SLIP, SYMLINK, ENCRYPTED_FLAG, raw, LFH_METHOD_MISMATCH, OFFSET_INTO_CD, ZIP64_CONTRADICTION,
 } from './_zip-fixtures.js';
 
 async function codeOf(p: Promise<unknown>): Promise<string> {
@@ -230,6 +232,23 @@ describe('inspect_zip', () => {
             });
             const lazy = await inspectZip({ zipBase64: b64(OVERLAP()), validate: 'lazy' });
             expect(lazy.entryCount).toBe(2);
+        });
+
+        it('B-004: the eager pass checks extents (overlap, offset into the CD, Zip64 spoofing) but summarises a method-divergent archive; verify_zip and read_zip_entry are the divergence gates', async () => {
+            // Extents: refused at open.
+            await expect(inspectZip({ zipBase64: b64(OFFSET_INTO_CD()) })).rejects.toMatchObject({ code: 'ZIP_ENTRY_OVERLAP', data: { errorClass: 'security' } });
+            await expect(inspectZip({ zipBase64: b64(ZIP64_CONTRADICTION()) })).rejects.toMatchObject({ code: 'ZIP_ZIP64_CONTRADICTION', data: { errorClass: 'security' } });
+            // Method divergence between the central and local headers: summarised, no refusal.
+            const summarised = await inspectZip({ zipBase64: b64(LFH_METHOD_MISMATCH()) });
+            expect(summarised.entryCount).toBe(1);
+            expect(summarised.methods).toEqual([{ id: 0, name: 'store', count: 1 }]);
+            expect(summarised.diagnostics).toEqual([]);
+            // The gates that DO catch it.
+            await expect(readZipEntry({ zipBase64: b64(LFH_METHOD_MISMATCH()), name: 'm.txt' })).rejects.toMatchObject({ code: 'ZIP_CD_LFH_MISMATCH', data: { errorClass: 'security' } });
+            const verified = await verifyZipTool({ zipBase64: b64(LFH_METHOD_MISMATCH()) });
+            expect(verified.ok).toBe(false);
+            expect(verified.error).toBeNull();
+            expect(verified.entries[0]).toMatchObject({ name: 'm.txt', ok: false, localHeaderMatch: false });
         });
 
         it('reports prepended (SFX) data as a diagnostic', async () => {

@@ -30,8 +30,13 @@ export const MAX_EXTRACT_INLINE_TOTAL_BYTES = 32 * MiB;
 /** `list_zip_entries` page bounds. */
 export const MAX_LIST_LIMIT = 2000;
 export const DEFAULT_LIST_LIMIT = 200;
-/** JSON-shaped input bounds. */
-export const MAX_CREATE_ENTRIES = 10_000;
+/**
+ * JSON-shaped input bounds. `MAX_CREATE_ENTRIES` is aligned with the engine's
+ * default `maxEntries` (100 000) so Zip64 output (> 65 535 entries) stays
+ * reachable through `create_zip`; the 256 MiB frame and the operator
+ * ceiling `ZIPNATIVE_MCP_MAX_ENTRIES` remain the effective bounds.
+ */
+export const MAX_CREATE_ENTRIES = 100_000;
 export const MAX_MODIFY_OPERATIONS = 1000;
 export const MAX_SANITIZE_NAMES = 10_000;
 export const MAX_FILTER_NAMES = 1000;
@@ -41,10 +46,18 @@ export const MAX_FIELDS_PATHS = 16;
 export const MAX_SCAN_ENTRIES_DEFAULT = 10_000;
 /** Diagnostics kept per result after de-duplication by (code, entryName). */
 export const MAX_DIAGNOSTICS = 200;
-/** `extract_zip` file mode: resource links attached to the result (the rest stay in `files[]`). */
+/** `extract_zip` file mode: resource links attached to the result (the rest stay in `entries[]`). */
 export const MAX_RESOURCE_LINKS = 50;
 /** `read_zip_entry` range length bound. */
 export const MAX_RANGE_LENGTH = MAX_ENTRY_INLINE_BYTES;
+/** `resources/list`: maximum number of sandbox files returned, and the directory-walk depth. */
+export const MAX_LISTED_RESOURCES = 1000;
+export const MAX_RESOURCE_WALK_DEPTH = 8;
+/** `resources/read`: largest payload returned (mirrors the inline output cap). */
+export const MAX_RESOURCE_READ_BYTES = MAX_BASE64_OUTPUT_BYTES;
+/** Opt-in response cache (`ZIPNATIVE_MCP_CACHE_DIR`): entry TTL and total size (LRU by mtime). */
+export const CACHE_TTL_SECONDS = 3600;
+export const CACHE_MAX_BYTES = 256 * MiB;
 
 /** Operator ceilings — environment variable names. */
 export const MAX_UNCOMPRESSED_ENV = 'ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES';
@@ -126,4 +139,16 @@ export const CAPS = {
     maxModifyOperations: MAX_MODIFY_OPERATIONS,
     maxSanitizeNames: MAX_SANITIZE_NAMES,
     maxDiagnostics: MAX_DIAGNOSTICS,
+    maxFilterNames: MAX_FILTER_NAMES,
+    maxFilterGlobs: MAX_FILTER_GLOBS,
+    maxExtraFields: MAX_EXTRA_FIELDS,
+    maxFieldsPaths: MAX_FIELDS_PATHS,
+    defaultScanMaxEntries: MAX_SCAN_ENTRIES_DEFAULT,
+    maxResourceLinks: MAX_RESOURCE_LINKS,
+    maxRangeLength: MAX_RANGE_LENGTH,
+    maxListedResources: MAX_LISTED_RESOURCES,
+    maxResourceWalkDepth: MAX_RESOURCE_WALK_DEPTH,
+    maxResourceReadBytes: MAX_RESOURCE_READ_BYTES,
+    cacheTtlSeconds: CACHE_TTL_SECONDS,
+    cacheMaxBytes: CACHE_MAX_BYTES,
 } as const;

@@ -42,8 +42,8 @@ export const READ_ZIP_ENTRY_INPUT_SCHEMA = {
             required: ['offset', 'length'],
             description: `Read only a byte window of the decompressed content through the chunked stream (bounded memory; CRC is not verified for a window). length ≤ ${MAX_RANGE_LENGTH}.`,
             properties: {
-                offset: { type: 'integer', minimum: 0 },
-                length: { type: 'integer', minimum: 1, maximum: MAX_RANGE_LENGTH },
+                offset: { type: 'integer', minimum: 0, description: 'First byte of the window (0-based, in the decompressed content).' },
+                length: { type: 'integer', minimum: 1, maximum: MAX_RANGE_LENGTH, description: 'Window length in bytes; fewer are returned at the end of the entry (`range.returned`).' },
             },
         },
         ...STRICT_INPUT_PROPERTY,
@@ -118,7 +118,7 @@ function locate(entries: readonly ZipEntry[], reader: { getEntry(name: string): 
     if (input.index !== undefined) {
         const entry = entries[input.index];
         if (entry === undefined) {
-            throw new ToolError('ZIP_ENTRY_NOT_FOUND', `Entry index ${input.index} is out of range (the archive holds ${entries.length} entries).`, { errorClass: 'not-found', index: input.index, entryCount: entries.length });
+            throw new ToolError('ZIP_ENTRY_NOT_FOUND', `Entry index ${input.index} is out of range (the archive holds ${entries.length} entries, indices 0–${Math.max(0, entries.length - 1)}) — take the index from list_zip_entries.`, { errorClass: 'not-found', index: input.index, entryCount: entries.length, remedy: 'list_zip_entries' });
         }
         return { entry, index: input.index };
     }
@@ -148,7 +148,7 @@ export async function readZipEntry(rawInput: unknown): Promise<ReadZipEntryResul
 
     if (input.mode === 'raw') {
         if (entry.compressedSize > MAX_ENTRY_INLINE_BYTES) {
-            throw new ToolError('ENTRY_TOO_LARGE', `Entry "${label}" compressed payload is ${entry.compressedSize} bytes, above the ${MAX_ENTRY_INLINE_BYTES}-byte inline cap — use extract_zip with outputMode:'file'.`, { entryName: label, sizeBytes: entry.compressedSize, cap: MAX_ENTRY_INLINE_BYTES });
+            throw new ToolError('ENTRY_TOO_LARGE', `Entry "${label}" compressed payload is ${entry.compressedSize} bytes, above the ${MAX_ENTRY_INLINE_BYTES}-byte inline cap — raw payloads above the cap are not retrievable inline; for the DECOMPRESSED content use mode:'data' with a range, or extract_zip with outputMode:'file'.`, { entryName: label, sizeBytes: entry.compressedSize, cap: MAX_ENTRY_INLINE_BYTES, remedy: 'range' });
         }
         const raw = guard(`Failed to read raw entry "${label}"`, () => reader.readEntryRaw(entry), label);
         return { entry: view, mode: 'raw', sizeBytes: raw.byteLength, crcVerified: false, encoding: 'base64', dataBase64: encodeBase64(raw), ...sink.report() };

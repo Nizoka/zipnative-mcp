@@ -16,15 +16,22 @@ import { resolveInputFile } from './sandbox.js';
 const U16 = 65_535;
 const U32 = 0xffff_ffff;
 
+/** JSON `pattern` / Zod `.regex()` for `unixMode` — kept identical (lock-step). */
+export const UNIX_MODE_PATTERN = '^(?:0o)?[0-7]{3,4}$';
+/** JSON `pattern` / Zod `.regex()` for ISO-8601 dates (prefix; the range is checked at runtime). */
+export const ISO_DATE_PATTERN = '^\\d{4}-\\d{2}-\\d{2}';
+/** JSON `pattern` / Zod `.regex()` for `defaultDate` (`'now'` or an ISO-8601 instant). */
+export const DEFAULT_DATE_PATTERN = '^(?:now|\\d{4}-\\d{2}-\\d{2})';
+
 // ── Compression ──────────────────────────────────────────────────────
 export const COMPRESSION_INPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     description: "Compression settings. `method` 'deflate' (default) or 'store'; `level` 0–9 (default 6); `deterministic: true` pins the pure-TS encoder so the bytes are identical on every runtime (slower).",
     properties: {
-        method: { type: 'string', enum: ['store', 'deflate'] },
-        level: { type: 'integer', minimum: 0, maximum: 9 },
-        deterministic: { type: 'boolean' },
+        method: { type: 'string', enum: ['store', 'deflate'], description: "'deflate' (default) or 'store' (no compression)." },
+        level: { type: 'integer', minimum: 0, maximum: 9, description: 'Deflate effort 0–9 (default 6).' },
+        deterministic: { type: 'boolean', description: 'true pins the pure-TS encoder: identical bytes on every runtime (slower).' },
     },
 } as const;
 
@@ -61,6 +68,7 @@ export function parseEntryDate(raw: string, where: string): Date {
 
 export const DEFAULT_DATE_SCHEMA = {
     type: 'string',
+    pattern: DEFAULT_DATE_PATTERN,
     description: "Timestamp for entries that set no `date`: an ISO-8601 instant (1980-01-01 … 2107-12-31, 2-second DOS granularity) or 'now' (wall clock — emits the ZIP_TIMESTAMP_NOT_PINNED diagnostic and makes the bytes non-reproducible). Omitted: the DOS epoch 1980-01-01T00:00:00 (reproducible).",
 } as const;
 
@@ -76,7 +84,7 @@ const S_IFDIR = 0o040000;
 
 /** Parse a unixMode string ('0644', '755', '0o755') into permission bits. */
 export function parseUnixMode(raw: string, where: string): number {
-    const m = /^(?:0o)?([0-7]{3,4})$/.exec(raw.trim());
+    const m = /^(?:0o)?([0-7]{3,4})$/.exec(raw);
     if (m === null) {
         throw new ToolError('VALIDATION_ERROR', `${where} must be 3–4 octal digits such as '0644' or '755' (got ${JSON.stringify(raw)}).`);
     }
@@ -99,7 +107,7 @@ export const EXTRA_FIELD_INPUT_SCHEMA = {
         additionalProperties: false,
         required: ['id', 'dataBase64'],
         properties: {
-            id: { type: 'integer', minimum: 0, maximum: U16 },
+            id: { type: 'integer', minimum: 0, maximum: U16, description: 'Extra-field header id (0–65535; 0x0001 is reserved for the engine).' },
             dataBase64: { type: 'string', description: 'Payload bytes as base64 (may be empty).' },
         },
     },
@@ -130,10 +138,10 @@ export const ENTRY_PAYLOAD_PROPERTIES = {
     text: { type: 'string', description: 'File content as UTF-8 text. Exclusive with dataBase64 / sourcePath.' },
     sourcePath: { type: 'string', minLength: 1, description: 'Relative path of a file inside the ZIPNATIVE_MCP_OUTPUT_DIR sandbox to read the content from (any extension). Exclusive with dataBase64 / text.' },
     compression: COMPRESSION_INPUT_SCHEMA,
-    date: { type: 'string', description: 'ISO-8601 last-modified instant for this entry (overrides defaultDate).' },
+    date: { type: 'string', pattern: ISO_DATE_PATTERN, description: 'ISO-8601 last-modified instant for this entry, 1980-01-01 … 2107-12-31 (overrides defaultDate; 2-second DOS granularity).' },
     comment: { type: 'string', maxLength: U16, description: 'Entry comment (UTF-8, ≤ 65535 bytes).' },
     externalAttributes: { type: 'integer', minimum: 0, maximum: U32, description: 'Raw external attributes (uint32). Exclusive with unixMode.' },
-    unixMode: { type: 'string', description: "Unix permission bits as octal ('0644', '0755'); mapped to external attributes. Exclusive with externalAttributes." },
+    unixMode: { type: 'string', pattern: UNIX_MODE_PATTERN, description: "Unix permission bits as 3–4 octal digits ('0644', '755', '0o755'); mapped to external attributes. Exclusive with externalAttributes." },
     extraFields: EXTRA_FIELD_INPUT_SCHEMA,
 } as const;
 
@@ -144,10 +152,10 @@ export const EntryPayloadShape = {
     text: z.string().optional(),
     sourcePath: z.string().min(1).optional(),
     compression: CompressionSchema.optional(),
-    date: z.string().optional(),
+    date: z.string().regex(new RegExp(ISO_DATE_PATTERN)).optional(),
     comment: z.string().max(U16).optional(),
     externalAttributes: z.number().int().min(0).max(U32).optional(),
-    unixMode: z.string().optional(),
+    unixMode: z.string().regex(new RegExp(UNIX_MODE_PATTERN)).optional(),
     extraFields: z.array(ExtraFieldSchema).max(MAX_EXTRA_FIELDS).optional(),
 };
 
@@ -160,6 +168,13 @@ export function refineEntryPayload(value: EntryPayload, ctx: z.RefinementCtx, al
         if (sources !== 0) ctx.addIssue({ code: 'custom', message: 'a directory entry takes no dataBase64 / text / sourcePath', path: ['directory'] });
     } else if (sources !== 1 && !(allowNoPayload && sources === 0)) {
         ctx.addIssue({ code: 'custom', message: 'pass exactly one of dataBase64 / text / sourcePath (or directory: true)', path: ['name'] });
+    }
+    // A '/'-terminated name is a directory by ZIP convention: a payload on it would be
+    // written but silently dropped by every extractor. Refuse it up front (the engine
+    // refuses it on the modify path; the writer path is aligned here).
+    const hasPayload = (value.text ?? '').length > 0 || (value.dataBase64 ?? '').length > 0 || value.sourcePath !== undefined;
+    if (!value.directory && value.name.endsWith('/') && hasPayload) {
+        ctx.addIssue({ code: 'custom', message: "a name ending in '/' denotes a directory and cannot carry a payload — drop the trailing '/' or set directory: true without a payload", path: ['name'] });
     }
     if (value.externalAttributes !== undefined && value.unixMode !== undefined) {
         ctx.addIssue({ code: 'custom', message: 'externalAttributes and unixMode are exclusive', path: ['unixMode'] });

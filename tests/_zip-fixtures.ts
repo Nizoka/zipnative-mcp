@@ -7,10 +7,10 @@
  * zipnative) so the reader is never tested only against our own writer —
  * the anti-circularity rule the engine's own test-suite follows.
  */
-import { deflateRawSync } from 'node:zlib';
+import { crc32 as zlibCrc32, deflateRawSync } from 'node:zlib';
 import { createZip, createZipModifier, openZip, type CreateZipOptions } from 'zipnative';
 
-import { buildRawZip, type RawEntrySpec, type RawZipOptions } from './_fixtures/raw-zip-builder.js';
+import { buildExtraField, buildRawZip, type RawEntrySpec, type RawZipOptions } from './_fixtures/raw-zip-builder.js';
 
 const te = new TextEncoder();
 
@@ -116,9 +116,74 @@ export const MULTI_DISK = (): Uint8Array => {
 };
 export const ZIP64_FORCED = (): Uint8Array => buildRawZip([{ name: 'a.txt', data: bytesOf('a') }], { forceZip64: true });
 export const ZIP64_DROPPED = (): Uint8Array => buildRawZip([{ name: 'a.txt', data: bytesOf('a') }], { forceZip64: true, zip64DropRecord: true });
+/** Zip64 EOCD (count 1) with the classic EOCD counts patched to a NON-sentinel 5: a parser-differential archive (ZIP_ZIP64_CONTRADICTION). */
+export const ZIP64_CONTRADICTION = (): Uint8Array => {
+    const bytes = ZIP64_FORCED();
+    const eocd = bytes.length - 22;
+    bytes[eocd + 8] = 5;
+    bytes[eocd + 9] = 0;
+    bytes[eocd + 10] = 5;
+    bytes[eocd + 11] = 0;
+    return bytes;
+};
+/** Zip64 EOCD declaring 2^60 entries — above Number.MAX_SAFE_INTEGER (ZIP_VALUE_UNREPRESENTABLE). */
+export const ZIP64_HUGE_COUNT = (): Uint8Array => buildRawZip([{ name: 'a.txt', data: bytesOf('a') }], { forceZip64: true, zip64TotalEntriesOverride: 2 ** 60 });
+/** A central 0x7075 Unicode Path extra (version 1, CRC of the header name) naming a DIFFERENT file (ZIP_UNICODE_PATH_CONFLICT). */
+export const UNICODE_PATH_CONFLICT = (): Uint8Array => {
+    const unicodeName = bytesOf('other.txt');
+    const data = new Uint8Array(5 + unicodeName.length);
+    data[0] = 1;
+    new DataView(data.buffer).setUint32(1, zlibCrc32(Buffer.from('a.txt')), true);
+    data.set(unicodeName, 5);
+    return buildRawZip([{ name: 'a.txt', data: bytesOf('a'), extraCentral: buildExtraField([{ id: 0x7075, data }]) }]);
+};
+/** A central extra block whose header declares 16 bytes but holds 2 (ZIP_EXTRA_FIELD_MALFORMED). */
+export const MALFORMED_EXTRA = (): Uint8Array => buildRawZip([{ name: 'a.txt', data: bytesOf('a'), extraCentral: new Uint8Array([0x6a, 0x6a, 0x10, 0x00, 0x01, 0x02]) }]);
+/** A 0x0001 Zip64 extra supplying a size for classic fields that are NOT sentinels (ZIP_ZIP64_EXTRA_IGNORED). */
+export const ZIP64_EXTRA_IGNORED = (): Uint8Array => {
+    const data = new Uint8Array(8);
+    new DataView(data.buffer).setBigUint64(0, 1n, true);
+    return buildRawZip([{ name: 'a.txt', data: bytesOf('a'), extraCentral: buildExtraField([{ id: 0x0001, data }]) }]);
+};
+/** Two entries with the same name (ZIP_DUPLICATE_NAME on a name-keyed lookup; the last one wins). */
+export const DUPLICATE_NAME = (): Uint8Array => buildRawZip([{ name: 'a', data: bytesOf('first') }, { name: 'a', data: bytesOf('second') }]);
+/** An entry flagged both encrypted (bit 0) and strong-encryption (bit 6). */
+export const STRONG_ENCRYPTION_FLAG = (): Uint8Array => buildRawZip([{ name: 'aes.bin', data: bytesOf('x'), flags: 0x0001 | 0x0040 }, { name: 'ok.txt', data: bytesOf('ok') }]);
+/** An entry whose central directory carries an Info-ZIP extended timestamp (UT, 0x5455) with `mtime`. */
+export const UT_TIMESTAMP_MTIME = 1_700_000_000;
+export const UT_TIMESTAMP = (): Uint8Array => {
+    const data = new Uint8Array(5);
+    data[0] = 0x01; // flags: mtime present
+    new DataView(data.buffer).setUint32(1, UT_TIMESTAMP_MTIME, true);
+    return buildRawZip([{ name: 'ut.txt', data: bytesOf('ut'), extraCentral: buildExtraField([{ id: 0x5455, data }]), extraLocal: buildExtraField([{ id: 0x5455, data }]) }]);
+};
+/** The second entry's central-directory offset points INTO the central directory (an entry reaching past its own data). */
+export const OFFSET_INTO_CD = (): Uint8Array => {
+    const entries = [{ name: 'a.txt', data: bytesOf('aaaa') }, { name: 'b.txt', data: bytesOf('bbbb') }];
+    const plain = buildRawZip(entries);
+    const cdStart = Buffer.from(plain).indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+    return buildRawZip([entries[0]!, { ...entries[1]!, localHeaderOffsetOverride: cdStart }]);
+};
+
+/**
+ * Every hostile fixture above, by name — the set a "never isError for an
+ * archive problem" contract is checked against.
+ */
+export const HOSTILE_FIXTURES: Readonly<Record<string, () => Uint8Array>> = {
+    ZIP_SLIP, DEVICE_NAME, DUPLICATE_PATHS, SYMLINK, OVERLAP, CD_MISMATCH, DECLARED_BOMB, LFH_NAME_MISMATCH, LFH_METHOD_MISMATCH, CRC_OVERRIDE,
+    TRAILING_GARBAGE, SFX_PREFIXED, ENCRYPTED_FLAG, UNKNOWN_METHOD, STORE_DESCRIPTOR, DEFLATE_DESCRIPTOR, CORRUPT_DEFLATE, INVALID_UTF8_NAME, CP437_NAME,
+    MULTI_DISK, ZIP64_FORCED, ZIP64_DROPPED, ZIP64_CONTRADICTION, ZIP64_HUGE_COUNT, UNICODE_PATH_CONFLICT, MALFORMED_EXTRA, ZIP64_EXTRA_IGNORED,
+    DUPLICATE_NAME, STRONG_ENCRYPTION_FLAG, UT_TIMESTAMP, OFFSET_INTO_CD,
+};
 
 export function truncated(bytes: Uint8Array, keep: number): Uint8Array {
     return bytes.subarray(0, keep);
+}
+
+/** Offset of the central directory as the EOCD declares it (the raw builder emits no prefix unless asked). */
+export function centralDirectoryOffset(bytes: Uint8Array): number {
+    const eocd = bytes.length - 22;
+    return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(eocd + 16, true);
 }
 
 export function raw(entries: readonly RawEntrySpec[], options?: RawZipOptions): Uint8Array {

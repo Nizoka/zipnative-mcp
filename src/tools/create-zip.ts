@@ -16,10 +16,11 @@ import { activeDeflateTier, createZip, type AddEntryOptions, type CreateZipOptio
 
 import { assertInputWithin, getCeilings, MAX_BASE64_INPUT_BYTES, MAX_CREATE_ENTRIES, WORKERS_ENV } from '../caps.js';
 import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
-import { ensureEngineReady } from '../engine.js';
+import { ensureEngineReady, probeRuntime } from '../engine.js';
 import {
     COMPRESSION_INPUT_SCHEMA,
     CompressionSchema,
+    DEFAULT_DATE_PATTERN,
     DEFAULT_DATE_SCHEMA,
     ENTRY_PAYLOAD_PROPERTIES,
     EntryPayloadShape,
@@ -32,7 +33,7 @@ import {
 } from '../entry-spec.js';
 import { ToolError } from '../errors.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
-import { emitArchive, emitArchiveStream, OUTPUT_INPUT_PROPERTIES, type OutputResult } from '../output.js';
+import { emitArchive, emitArchiveStream, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
 import { resolveInputFile } from '../sandbox.js';
 import { guard, guardAsync } from '../zip-errors.js';
 import { EngineOptionsShape, parseInput, sha256Hex, STRICT_INPUT_PROPERTY } from './_shared.js';
@@ -93,7 +94,7 @@ const InputSchema = z
     .strictObject({
         entries: z.array(EntrySchema).max(MAX_CREATE_ENTRIES),
         order: z.enum(['canonical', 'insertion']).default('canonical'),
-        defaultDate: z.string().optional(),
+        defaultDate: z.string().regex(new RegExp(DEFAULT_DATE_PATTERN)).optional(),
         compression: CompressionSchema.optional(),
         comment: z.string().max(U16).optional(),
         chunkSize: z.number().int().min(1024).max(16_777_216).optional(),
@@ -106,8 +107,7 @@ const InputSchema = z
             .optional(),
         includeSha256: z.boolean().default(false),
         ...EngineOptionsShape,
-        outputMode: z.enum(['base64', 'file']).default('base64'),
-        outputPath: z.string().optional(),
+        ...OutputShape,
     })
     .superRefine((v, ctx) => {
         const names = new Set<string>();
@@ -147,6 +147,34 @@ export const ARCHIVE_OUTPUT_SCHEMA = {
     },
 } as const;
 
+/** The shared archive result with a typed `summary` (every key optional; the base stays the contract). */
+export function archiveOutputSchemaWith(summaryProperties: Readonly<Record<string, unknown>>, description: string): Record<string, unknown> {
+    return {
+        ...ARCHIVE_OUTPUT_SCHEMA,
+        properties: {
+            ...ARCHIVE_OUTPUT_SCHEMA.properties,
+            summary: { type: 'object', additionalProperties: false, description, properties: summaryProperties },
+        },
+    };
+}
+
+export const CREATE_ZIP_OUTPUT_SCHEMA = archiveOutputSchemaWith(
+    {
+        entryCount: { type: 'integer', minimum: 0 },
+        fileCount: { type: 'integer', minimum: 0 },
+        directoryCount: { type: 'integer', minimum: 0 },
+        streamedCount: { type: 'integer', minimum: 0, description: 'Entries fed through addStream (stream:true).' },
+        uncompressedBytes: { type: 'integer', minimum: 0 },
+        order: { type: 'string', enum: ['canonical', 'insertion'] },
+        deterministic: { type: 'boolean', description: 'true only when compression.deterministic:true pins every entry and no wall-clock date is used (cross-runtime identity).' },
+        deflateTier: { type: 'string', description: "The engine deflate tier in use ('node-zlib', 'pure-pinned', 'pure', 'injected')." },
+        parallel: { type: 'object', additionalProperties: false, properties: { requested: { type: 'boolean' }, workers: { type: 'integer', minimum: 0 } } },
+        sha256: { type: 'string', description: 'Present with includeSha256 (base64 and file modes).' },
+    },
+    'create_zip summary.',
+);
+
+
 async function* fileChunks(absPath: string): AsyncGenerator<Uint8Array, void, undefined> {
     for await (const chunk of createReadStream(absPath, { highWaterMark: 64 * 1024 })) {
         const buf = chunk as Buffer;
@@ -178,7 +206,8 @@ export async function createZipTool(rawInput: unknown): Promise<CreateZipResult>
         if (requested !== undefined && requested > ceiling) {
             throw new ToolError('LIMIT_CEILING_EXCEEDED', `parallel.workers ${requested} exceeds the operator ceiling ${ceiling} (${WORKERS_ENV}).`, { limit: 'workers', requested, ceiling, env: WORKERS_ENV });
         }
-        workers = requested ?? Math.min(ceiling, 8);
+        // The engine default is max(1, min(cores − 1, 8)); the operator ceiling bounds it.
+        workers = requested ?? Math.min(ceiling, (await probeRuntime()).defaultWorkers);
     }
 
     // Build the writer (sequential or parallel — same add/addDirectory/addStream surface).
@@ -246,8 +275,12 @@ export async function createZipTool(rawInput: unknown): Promise<CreateZipResult>
     };
 
     if (input.outputMode === 'file') {
-        const out = await emitArchiveStream(guard('Failed to assemble archive', () => writer.stream(input.chunkSize !== undefined ? { chunkSize: input.chunkSize } : undefined)), input.outputPath);
-        return { ...out, summary: summaryBase, ...sink.report() };
+        const out = await emitArchiveStream(
+            guard('Failed to assemble archive', () => writer.stream(input.chunkSize !== undefined ? { chunkSize: input.chunkSize } : undefined)),
+            input.outputPath,
+            { hash: input.includeSha256 ? 'sha256' : undefined },
+        );
+        return { ...out, summary: { ...summaryBase, ...(out.sha256 !== undefined ? { sha256: out.sha256 } : {}) }, ...sink.report() };
     }
     let bytes: Uint8Array;
     if (streamedCount > 0) {

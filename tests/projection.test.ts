@@ -82,6 +82,31 @@ describe('readVerbosity / readFields', () => {
     });
 });
 
+describe('A-018: the summary of a 300-entry result is at least 90 % smaller than the full result', () => {
+    it('list_zip_entries / verify_zip / scan_zip_forward', async () => {
+        const { callToolDirect, ensureEngineReady } = await import('../src/server.js');
+        const { zip64ManyEntries, b64 } = await import('./_zip-fixtures.js');
+        await ensureEngineReady();
+        const zipBase64 = b64(zip64ManyEntries(300));
+        const ratios: Record<string, number> = {};
+        for (const [tool, args] of [['list_zip_entries', { limit: 300 }], ['verify_zip', {}], ['scan_zip_forward', {}]] as const) {
+            const full = await callToolDirect(tool, { zipBase64, ...args });
+            const summary = await callToolDirect(tool, { zipBase64, ...args, verbosity: 'summary' });
+            expect(full.isError, tool).not.toBe(true);
+            expect(summary.isError, tool).not.toBe(true);
+            const fullBytes = Buffer.byteLength(JSON.stringify(full.structuredContent));
+            const summaryBytes = Buffer.byteLength(JSON.stringify(summary.structuredContent));
+            ratios[tool] = 1 - summaryBytes / fullBytes;
+            expect(fullBytes, tool).toBeGreaterThan(10_000);
+            expect(ratios[tool], `${tool}: ${fullBytes} → ${summaryBytes}`).toBeGreaterThanOrEqual(0.9);
+        }
+        // The summary still carries the verdict and every kept name (list / scan) or the counts (verify).
+        const scan = await callToolDirect('scan_zip_forward', { zipBase64, verbosity: 'summary' });
+        expect((scan.structuredContent as { names: string[]; entryCount: number }).names).toHaveLength(300);
+        expect((scan.structuredContent as { entryCount: number }).entryCount).toBe(300);
+    }, 60_000);
+});
+
 describe('fields projection — unmatched paths are surfaced', () => {
     it('adds _meta.unmatchedFields + availableFields when a requested path matches nothing, and nothing otherwise', async () => {
         const { callToolDirect, ensureEngineReady } = await import('../src/server.js');

@@ -25,7 +25,10 @@ import { resolveInputFile, resolveOutputFile } from '../src/sandbox.js';
 import { callToolDirect, ensureEngineReady } from '../src/server.js';
 import { guard, guardAsync, mapZipError, ZIP_ERROR_CLASS, ZIP_ERROR_CODES } from '../src/zip-errors.js';
 import { assertValidZip } from './_zip-assert.js';
-import { b64, basicZip, bytesOf, CD_MISMATCH, CORRUPT_DEFLATE, CRC_OVERRIDE, DEVICE_NAME, DUPLICATE_PATHS, ENCRYPTED_FLAG, highRatioZip, LFH_METHOD_MISMATCH, MULTI_DISK, OVERLAP, raw, SFX_PREFIXED, STORE_DESCRIPTOR, SYMLINK, TRAILING_GARBAGE, truncated, UNKNOWN_METHOD, ZIP64_DROPPED, ZIP_SLIP } from './_zip-fixtures.js';
+import { b64, basicZip, bytesOf, CD_MISMATCH, CORRUPT_DEFLATE, CRC_OVERRIDE, DEVICE_NAME, DUPLICATE_PATHS, ENCRYPTED_FLAG, highRatioZip, LFH_METHOD_MISMATCH, MULTI_DISK, OVERLAP, raw, SFX_PREFIXED, STORE_DESCRIPTOR, SYMLINK, TRAILING_GARBAGE, truncated, UNKNOWN_METHOD, ZIP64_CONTRADICTION, ZIP64_DROPPED, ZIP64_HUGE_COUNT, ZIP_SLIP } from './_zip-fixtures.js';
+
+/** The documented `data.remedy` vocabulary (docs/API_STABILITY.md §2, AGENTS.md §6). */
+const REMEDY_VOCABULARY = ["outputMode:'file'", 'range', 'filter', "encoding:'base64'", "data:'verify'", 'list_zip_entries', 'resources/list'] as const;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const AGENTS = path.join(ROOT, 'AGENTS.md');
@@ -64,12 +67,14 @@ const WRAPPER_CODES = [
  * Every other ZIP_* code must be named by a test that reaches it.
  */
 const UNREACHABLE_THROUGH_WRAPPER: Readonly<Record<string, string>> = {
-    ZIP_INVALID_OPTION: 'every option shape is validated by Zod first (VALIDATION_ERROR); the engine never sees a malformed option object',
+    // B-008 (corrected reason): the engine raises it for compression.level / chunkSize out of range (both bounded by Zod →
+    // VALIDATION_ERROR), for an extra-field block above 65535 bytes (limits.maxExtraFieldBytes ≤ 65535 by schema fires FIRST as
+    // ZIP_LIMIT_EXCEEDED) and for a '/'-terminated name carrying a payload on the modify path — refused earlier by the shared
+    // refineEntryPayload Zod refinement since B-011 (VALIDATION_ERROR on create_zip and modify_zip alike).
+    ZIP_INVALID_OPTION: 'every engine path that raises it is pre-empted: level / chunkSize bounds and the directory-with-payload shape are Zod VALIDATION_ERRORs, an oversized extra block trips limits.maxExtraFieldBytes first',
     ZIP_INPUT_TOO_LARGE: 'the server caps (128 MiB decoded base64, 1 GiB zipPath) sit below the engine 2 GiB bound, so INPUT_TOO_LARGE fires first',
     ZIP_API_MISUSE: 'the wrapper always drains iterators and never re-enters a writer after toBytes(); it is the engine guarding its own callers',
     ZIP_INTERNAL: 'an engine invariant failure; no input reaches it',
-    ZIP_VALUE_UNREPRESENTABLE: 'a value above 2^53 in a Zip64 field needs an archive larger than the input caps allow',
-    ZIP_ZIP64_CONTRADICTION: 'needs a Zip64 extra field whose values contradict the 32-bit sentinels; the raw builder cannot craft it (the sentinel-without-extra shape maps to ZIP_RECORD_TRUNCATED / ZIP_ZIP64_LOCATOR_MISSING)',
     ZIP_LIMIT_INVALID: 'the limits shape is validated by Zod (integers ≥ 1) before resolveCallLimits merges it, so the engine never sees an invalid bound',
     ZIP_UNSUPPORTED_ZIP64_STREAMING: 'needs a > 4 GiB streamed entry (stream:true on a sourcePath), above the practical test envelope',
     ZIP_UNSUPPORTED_CODEC_MODE: 'needs a registered codec without a synchronous decompressor; this server registers none beyond store / deflate, so ZIP_UNSUPPORTED_METHOD fires first',
@@ -352,6 +357,54 @@ describe('previously uncovered codes', () => {
         expect(data.data).toEqual({ errorClass: 'data', engineError: 'ZipDataError', entryName: 'f.txt', expectedCrc: 'deadbeef', actualCrc: '00000001' });
         expect(mapZipError(new ZipDataError('ZIP_SIZE_MISMATCH', 'size'), 'ctx', 'fallback.txt').data).toEqual({ errorClass: 'data', engineError: 'ZipDataError', entryName: 'fallback.txt' });
     });
+
+    it('B-008: ZIP_VALUE_UNREPRESENTABLE and ZIP_ZIP64_CONTRADICTION are reachable with tiny raw archives (inspect_zip; verify_zip lands them in error.code)', async () => {
+        const huge = await refusal('inspect_zip', { zipBase64: b64(ZIP64_HUGE_COUNT()) });
+        expect(huge.code).toBe('ZIP_VALUE_UNREPRESENTABLE');
+        expect(huge.data).toMatchObject({ errorClass: 'parse', engineError: 'ZipFormatError' });
+        expect(huge.message).toContain('MAX_SAFE_INTEGER');
+        const contradiction = await refusal('inspect_zip', { zipBase64: b64(ZIP64_CONTRADICTION()) });
+        expect(contradiction.code).toBe('ZIP_ZIP64_CONTRADICTION');
+        expect(contradiction.data).toMatchObject({ errorClass: 'security', engineError: 'ZipSecurityError' });
+        expect(ZIP_ERROR_CLASS.ZIP_ZIP64_CONTRADICTION).toBe('security');
+        // The lazy readers refuse it too (the EOCD cross-check runs before any entry is parsed).
+        expect((await refusal('list_zip_entries', { zipBase64: b64(ZIP64_CONTRADICTION()) })).code).toBe('ZIP_ZIP64_CONTRADICTION');
+        expect((await refusal('extract_zip', { zipBase64: b64(ZIP64_CONTRADICTION()), includeData: false })).code).toBe('ZIP_ZIP64_CONTRADICTION');
+        for (const [bytes, code] of [[ZIP64_HUGE_COUNT(), 'ZIP_VALUE_UNREPRESENTABLE'], [ZIP64_CONTRADICTION(), 'ZIP_ZIP64_CONTRADICTION']] as const) {
+            const verified = await callToolDirect('verify_zip', { zipBase64: b64(bytes) });
+            expect(verified.isError).not.toBe(true);
+            expect(verified.structuredContent).toMatchObject({ ok: false, error: { code }, entryCount: 0 });
+        }
+    });
+
+    it('A-014: every ENTRY_TOO_LARGE / OUTPUT_TOO_LARGE / INPUT_NOT_FOUND refusal carries data.remedy from the documented vocabulary', async () => {
+        await enableSandbox();
+        const big = raw([{ name: 'big', data: new Uint8Array(17 * 1024 * 1024), method: 8 }]);
+        const stored = raw([{ name: 'big', data: new Uint8Array(17 * 1024 * 1024) }]);
+        const many = raw(Array.from({ length: 9 }, (_, i) => ({ name: `z${i}`, data: new Uint8Array(4 * 1024 * 1024), method: 8 })));
+        const limits = { maxCompressionRatio: 4096 };
+        const cases: Array<[string, Record<string, unknown>, string, string]> = [
+            ['read_zip_entry', { zipBase64: b64(big), name: 'big', limits }, 'ENTRY_TOO_LARGE', 'range'],
+            ['read_zip_entry', { zipBase64: b64(stored), name: 'big', mode: 'raw', limits }, 'ENTRY_TOO_LARGE', 'range'],
+            ['extract_zip', { zipBase64: b64(big), limits }, 'ENTRY_TOO_LARGE', "outputMode:'file'"],
+            ['extract_zip', { zipBase64: b64(many), limits }, 'OUTPUT_TOO_LARGE', "outputMode:'file'"],
+            ['scan_zip_forward', { zipBase64: b64(big), data: 'include', limits }, 'ENTRY_TOO_LARGE', "data:'verify'"],
+            ['scan_zip_forward', { zipBase64: b64(many), data: 'include', limits }, 'OUTPUT_TOO_LARGE', "data:'verify'"],
+            ['inspect_zip', { zipPath: 'missing.zip' }, 'INPUT_NOT_FOUND', 'resources/list'],
+            ['compute_crc32', { sourcePath: 'missing.bin' }, 'INPUT_NOT_FOUND', 'resources/list'],
+            ['create_zip', { entries: [{ name: 'a', sourcePath: 'missing.bin' }] }, 'INPUT_NOT_FOUND', 'resources/list'],
+            ['read_zip_entry', { zipBase64: b64(basicZip()), index: 9 }, 'ZIP_ENTRY_NOT_FOUND', 'list_zip_entries'],
+        ];
+        for (const [tool, args, code, remedy] of cases) {
+            const err = await refusal(tool, args);
+            expect(err.code, tool).toBe(code);
+            expect(err.data?.['remedy'], `${tool} ${code}`).toBe(remedy);
+            expect(REMEDY_VOCABULARY as readonly string[], `${tool}: ${String(err.data?.['remedy'])}`).toContain(err.data?.['remedy']);
+        }
+        // The inline output cap (emitArchive) names the file mode; the base64-decoding remedy is asserted in ENTRY_NOT_UTF8 above.
+        const inline = await codeOf(emitArchive(new Uint8Array(50 * 1024 * 1024 + 1), { mode: 'base64' }));
+        expect(inline.data?.['remedy']).toBe("outputMode:'file'");
+    }, 90_000);
 
     it('ZIP_* passthrough: hostile fixtures map to their frozen code with data.errorClass', async () => {
         const one = [{ name: 'a.txt', data: bytesOf('a') }];

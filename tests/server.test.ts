@@ -141,6 +141,25 @@ describe('server', () => {
         }
     });
 
+    it("A-020: every tool description names a sibling tool or carries an explicit 'prefer' / 'use it' / 'when' cue", async () => {
+        const response = (await rpc('tools/list')) as { tools: Array<{ name: string; description: string }> };
+        const names = response.tools.map((t) => t.name);
+        const offenders: string[] = [];
+        for (const t of response.tools) {
+            const siblings = names.filter((n) => n !== t.name && t.description.includes(n));
+            const cue = /prefer|use it|when/i.test(t.description);
+            if (siblings.length === 0 && !cue) offenders.push(t.name);
+        }
+        expect(offenders).toEqual([]);
+        // The five descriptions the audit flagged carry the routing clause the fix added.
+        const byName = new Map(response.tools.map((t) => [t.name, t.description]));
+        expect(byName.get('extract_zip')).toContain('read_zip_entry');
+        expect(byName.get('modify_zip')).toContain('create_zip');
+        expect(byName.get('inflate_raw')).toContain('read_zip_entry');
+        expect(byName.get('describe_engine')).toMatch(/Call it first|whenever/);
+        expect(byName.get('draft_governance_issue')).toContain('describe_engine');
+    });
+
     it('annotations: readOnlyHint exactly for the read tools, openWorldHint false everywhere, never destructive', async () => {
         const response = (await rpc('tools/list')) as { tools: Array<{ name: string; annotations?: Record<string, boolean> }> };
         const readOnly = response.tools.filter((t) => t.annotations?.['readOnlyHint'] === true).map((t) => t.name).sort();

@@ -50,9 +50,9 @@ export const INSPECT_ZIP_INPUT_SCHEMA = {
             additionalProperties: false,
             description: 'Parametrised assertions (each becomes a `checks[]` row).',
             properties: {
-                maxEntries: { type: 'integer', minimum: 0 },
-                minEntries: { type: 'integer', minimum: 0 },
-                maxUncompressedBytes: { type: 'integer', minimum: 0 },
+                maxEntries: { type: 'integer', minimum: 0, description: 'The archive must hold at most this many entries.' },
+                minEntries: { type: 'integer', minimum: 0, description: 'The archive must hold at least this many entries.' },
+                maxUncompressedBytes: { type: 'integer', minimum: 0, description: 'Sum of the declared uncompressed sizes must not exceed this.' },
                 maxRatio: { type: 'number', minimum: 1, description: 'Worst per-entry uncompressed/compressed ratio allowed.' },
                 has: { type: 'array', maxItems: 100, items: { type: 'string', minLength: 1 }, description: 'Entry names that must be present (exact).' },
                 method: { type: 'string', enum: ['store', 'deflate'], description: 'Every entry must use this method.' },
