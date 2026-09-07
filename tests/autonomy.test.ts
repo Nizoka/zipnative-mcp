@@ -338,12 +338,12 @@ describe.each(AGENT_TRANSPORTS)('C17 autonomous scenario over %s', (transport) =
         });
 
         it('S11 scan_zip_forward on a truncated stream: tolerant scan returns the partial inventory with the error', async () => {
-            // Under ZIPNATIVE_MCP_MAX_ENTRIES=5000 the schema default maxEntries (10000) is above the
-            // ceiling, so the agent must pass an explicit bound (observed behaviour, recorded for the audit).
+            // A-003: under ZIPNATIVE_MCP_MAX_ENTRIES=5000 the scanner's default budget (10000) is
+            // clamped to the ceiling — the agent passes no maxEntries and the result echoes 5000.
             const cut = b64(truncated(basicZip(), 60));
-            const r = ok(await agent.callTool('scan_zip_forward', { zipBase64: cut, tolerateTruncation: true, maxEntries: 5000 }));
+            const r = ok(await agent.callTool('scan_zip_forward', { zipBase64: cut, tolerateTruncation: true }));
             const s = sc(r);
-            expect(s).toMatchObject({ trust: 'local-headers-only', stoppedAt: 'error', truncated: true, entryCount: 1, inputBytes: 60, bytesDelivered: 60 });
+            expect(s).toMatchObject({ trust: 'local-headers-only', stoppedAt: 'error', truncated: true, entryCount: 1, inputBytes: 60, bytesDelivered: 60, maxEntries: 5000 });
             expect(['ZIP_STREAM_TRUNCATED', 'ZIP_RECORD_TRUNCATED', 'ZIP_SIGNATURE_MISMATCH']).toContain((s['error'] as { code: string }).code);
             expect((s['entries'] as Array<{ name: string }>).map((e) => e.name)).toEqual(['README.md']);
             expect(text0(r)).toContain('TRUNCATED');
@@ -387,22 +387,22 @@ describe.each(AGENT_TRANSPORTS)('C17 autonomous scenario over %s', (transport) =
 
         it('S15 draft_governance_issue: a file-mode draft is written (never submitted); a skipped duplicate search is a GOVERNANCE_VIOLATION', async () => {
             const draft = {
-                title: 'scan_zip_forward default maxEntries exceeds a lowered operator ceiling',
-                summary: 'With ZIPNATIVE_MCP_MAX_ENTRIES=5000 a scan_zip_forward call without maxEntries is refused because the schema default is 10000.',
-                issueType: 'bug',
+                title: 'read_zip_entry mode raw should accept a range for payloads above the inline cap',
+                summary: 'A compressed payload above the 16 MiB inline cap is not retrievable through mode raw at all; only the decompressed content is reachable (mode data with a range, or extract_zip file mode).',
+                issueType: 'feature',
                 targetRepo: 'zipnative-mcp',
-                reproduction: { command: "scan_zip_forward { zipBase64 } with ZIPNATIVE_MCP_MAX_ENTRIES=5000", result: 'LIMIT_CEILING_EXCEEDED' },
-                expectedBehavior: 'The default is clamped to the ceiling.',
+                reproduction: { command: "read_zip_entry { zipBase64, name, mode: 'raw' } on an entry whose compressed size exceeds 16 MiB", result: 'ENTRY_TOO_LARGE (data.remedy: range)' },
+                expectedBehavior: 'A range on the raw stream, as mode data offers on the decompressed one.',
                 affectedPackages: ['zipnative-mcp'],
             };
-            const r = ok(await agent.callTool('draft_governance_issue', { ...draft, duplicateSearchPerformed: true, outputMode: 'file', outputPath: 'drafts/scan-ceiling.md' }));
+            const r = ok(await agent.callTool('draft_governance_issue', { ...draft, duplicateSearchPerformed: true, outputMode: 'file', outputPath: 'drafts/raw-range.md' }));
             expect(text0(r)).toContain('DRAFT ONLY');
             const s = sc(r);
             expect(s['outputMode']).toBe('file');
             expect(await fs.readFile(s['filePath'] as string, 'utf8')).toBe(s['draftMarkdown']);
             expect(s['compliance']).toMatchObject({ zeroDependencyConfirmed: true, duplicateSearchPerformed: true, identityReminderShown: true });
             const listed = await agent.request<{ resources: Array<{ uri: string; mimeType: string }> }>('resources/list');
-            expect(listed.resources.find((x) => x.uri === 'zipnative://output/drafts/scan-ceiling.md')?.mimeType).toBe('text/markdown');
+            expect(listed.resources.find((x) => x.uri === 'zipnative://output/drafts/raw-range.md')?.mimeType).toBe('text/markdown');
 
             const refused = await agent.callTool('draft_governance_issue', { ...draft, duplicateSearchPerformed: false });
             expect(refused.isError).toBe(true);

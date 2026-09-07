@@ -332,3 +332,179 @@ describe('docs/data/errors.json ↔ the frozen vocabularies', () => {
         expect(data.diagnostics.map((d) => d.code).sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());
     });
 });
+
+describe('AUDIT-D: the claims the documents make about themselves hold', () => {
+    const readOnly = new Map(listToolsPayload().tools.map((t) => [t.name, (t.annotations as { readOnlyHint?: boolean } | undefined)?.readOnlyHint === true]));
+    const walk = (dir: string, accept: RegExp, out: string[] = []): string[] => {
+        if (!existsSync(dir)) return out;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+            const full = path.join(dir, entry.name);
+            if (entry.isDirectory()) walk(full, accept, out);
+            else if (accept.test(entry.name)) out.push(path.relative(ROOT, full).split(path.sep).join('/'));
+        }
+        return out;
+    };
+    const lines = (rel: string): Array<[number, string]> => read(rel).split('\n').map((l, i) => [i + 1, l]);
+    const NOTES = `release-notes/v${ZIPNATIVE_MCP_VERSION}.md`;
+
+    it.skipIf(!has('README.md'))('D-004/D-018: the README project-structure tree names every docs, workflow, src and scripts file', () => {
+        const block = section(read('README.md'), '## 📚 Project structure');
+        const fence = /```\n([\s\S]*?)```/.exec(block)?.[1] ?? '';
+        expect(fence.length).toBeGreaterThan(100);
+        const files = [
+            ...walk(path.join(ROOT, 'docs'), /\.(?:md|json)$/),
+            ...walk(path.join(ROOT, '.github', 'workflows'), /\.yml$/),
+            ...walk(path.join(ROOT, 'src'), /\.ts$/),
+            ...walk(path.join(ROOT, 'scripts'), /\.(?:mjs|mts)$/),
+        ];
+        const missing = files.filter((rel) => !fence.includes(path.basename(rel)));
+        expect(missing, `files absent from the README tree: ${missing.join(', ')}`).toEqual([]);
+    });
+
+    it('D-004/D-013: every "no I/O outside the sandbox" statement names the opt-in cache', () => {
+        for (const rel of ['README.md', 'SECURITY.md', 'docs/guides/SECURITY.md'].filter(has)) {
+            for (const [n, l] of lines(rel)) {
+                if (/no (?:file )?I\/O outside|neither reads nor writes anywhere else|no filesystem access outside/i.test(l)) {
+                    expect(l, `${rel}:${n}`).toMatch(/ZIPNATIVE_MCP_CACHE_DIR|cache/i);
+                }
+            }
+        }
+    });
+
+    it.skipIf(!has('docs/data/verazip.json'))('D-002/D-004: every corpus figure quoted in the documents equals docs/data/verazip.json', () => {
+        const { declared } = JSON.parse(read('docs/data/verazip.json')) as { declared: { conformant: number; nonConformant: number; hostileConformant: number } };
+        const total = declared.conformant + declared.nonConformant;
+        const words: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6 };
+        const num = (s: string): number => words[s.toLowerCase()] ?? Number(s);
+        const DOCS = ['README.md', 'CONTRIBUTING.md', 'llms.txt', 'docs/KNOWLEDGE_BASE.md', 'docs/guides/CONFORMANCE.md', 'docs/guides/LOCAL_TESTING.md', 'docs/guides/SECURITY.md', NOTES, 'CHANGELOG.md', '.github/workflows/verazip.yml', '.github/drafts/pr-v1.0.0.md'];
+        let seen = 0;
+        for (const rel of DOCS.filter(has)) {
+            for (const [n, l] of lines(rel)) {
+                const where = `${rel}:${n}: ${l.slice(0, 100)}`;
+                for (const m of l.matchAll(/\b(\d+|three|four|five) hostile-but-conformant/gi)) { seen++; expect(num(m[1]!), where).toBe(declared.hostileConformant); }
+                for (const m of l.matchAll(/(?<![-\d.:])\b(\d+) (?:archives|conformant)\b/g)) { seen++; expect([total, declared.conformant], where).toContain(Number(m[1])); }
+                for (const m of l.matchAll(/\bof (\d+)\b(?! bytes)/g)) if (/PASS|XFAIL|corpus|archives/.test(l)) { seen++; expect(Number(m[1]), where).toBe(total); }
+                for (const m of l.matchAll(/\b(\d+|four) (?:raw-crafted |crafted )?(?:negative canaries|negatives|non-conformant)/gi)) { seen++; expect(num(m[1]!), where).toBe(declared.nonConformant); }
+                for (const m of l.matchAll(/\b(\d+) (PASS|XFAIL)\b/g)) { seen++; expect(Number(m[1]), where).toBe(m[2] === 'PASS' ? declared.conformant : declared.nonConformant); }
+                if (/\b(?:three|trio)\b[^\n]{0,90}\bhostile|\bhostile[^\n]{0,90}\b(?:three|trio)\b/i.test(l)) expect(declared.hostileConformant, where).toBe(3);
+            }
+        }
+        expect(seen).toBeGreaterThan(10);
+    });
+
+    it.skipIf(!has('docs/data/core-exports.json') || !has('docs/KNOWLEDGE_BASE.md'))('D-004: the reach counts are 62 / 9 / 6 and every UNEXPOSED_EXPORTS entry is graded unexposed in the ledger', () => {
+        const core = JSON.parse(read('docs/data/core-exports.json')) as { exports: Array<{ name: string; reach: string }> };
+        const count = (reach: string): number => core.exports.filter((e) => e.reach === reach).length;
+        expect([count('capability'), count('type'), count('unexposed')]).toEqual([62, 9, 6]);
+        expect(count('capability') + count('type') + count('unexposed')).toBe(core.exports.length);
+        const ledger = section(read('docs/KNOWLEDGE_BASE.md'), '## 8. The 77-export coverage ledger');
+        const unexposedNames = new Set(core.exports.filter((e) => e.reach === 'unexposed').map((e) => e.name));
+        const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        for (const u of UNEXPOSED_EXPORTS) {
+            for (const raw of u.export.replace(/\s*\([^)]*\)/g, '').split(' / ')) {
+                const name = raw.trim();
+                const bare = name.split('.').pop()!;
+                // A whole export is an `unexposed` row; a field / member of an exposed export is called unexposed on the row of its owner.
+                const rowIsUnexposed = unexposedNames.has(bare);
+                const named = new RegExp(`\`[^\`\\n]*\\b${escape(bare)}\\b[^\`\\n]*\``);
+                const ledgerSaysUnexposed = ledger.split('\n').some((row) => row.includes('unexposed') && named.test(row));
+                expect(rowIsUnexposed || ledgerSaysUnexposed, `${name} is not graded unexposed in KB §8`).toBe(true);
+            }
+        }
+    });
+
+    it.skipIf(!has('docs/KNOWLEDGE_BASE.md'))('D-001: the knowledge base annotation sentence lists each tool under the hint it really carries', () => {
+        const line = read('docs/KNOWLEDGE_BASE.md').split('\n').find((l) => l.includes('`READ_ONLY` ='));
+        expect(line).toBeDefined();
+        const [readOnlyPart, writesPart] = line!.split('`WRITES`');
+        expect(writesPart).toBeDefined();
+        for (const [tool, ro] of readOnly) {
+            if (ro) expect(writesPart!, `${tool} must not be listed under WRITES`).not.toContain(`\`${tool}\``);
+            else {
+                expect(readOnlyPart!, `${tool} must not be listed under READ_ONLY`).not.toContain(`\`${tool}\``);
+                expect(writesPart!, `${tool} must be listed under WRITES`).toContain(`\`${tool}\``);
+            }
+        }
+    });
+
+    it.skipIf(!has('docs/API_STABILITY.md'))('D-001: API_STABILITY says "read-only" exactly for the tools whose readOnlyHint is true', () => {
+        const text = read('docs/API_STABILITY.md');
+        for (const [tool, ro] of readOnly) {
+            const sec = section(text, `### \`${tool}\``);
+            const ann = sec.split('\n').find((l) => l.trim().startsWith('- **Annotations:**'));
+            expect(ann, `${tool}: annotations line`).toBeDefined();
+            expect(/(?<!not )\bread-only\b/.test(ann!), `${tool}: "${ann}"`).toBe(ro);
+        }
+    });
+
+    it.skipIf(!has('README.md') || !has('AGENTS.md'))('D-016: the README and AGENTS read-only columns carry a tick exactly for the readOnlyHint tools', () => {
+        const readme = read('README.md');
+        const readmeRows = tableRows(readme.slice(readme.indexOf('| Tool | What it does | Read-only |')));
+        const agentsRows = tableRows(section(read('AGENTS.md'), AGENTS_SECTIONS[0]));
+        for (const [tool, ro] of readOnly) {
+            const r = readmeRows.find((row) => row[0] === `\`${tool}\``);
+            const a = agentsRows.find((row) => row[1] === `\`${tool}\``);
+            expect(r, `README row for ${tool}`).toBeDefined();
+            expect(a, `AGENTS row for ${tool}`).toBeDefined();
+            expect((r![2] ?? '').startsWith('✓'), `README read-only tick for ${tool}`).toBe(ro);
+            expect((a![3] ?? '').startsWith('✓'), `AGENTS read-only tick for ${tool}`).toBe(ro);
+        }
+    });
+
+    it.skipIf(!has('docs/KNOWLEDGE_BASE.md'))('D-006: every SERVER_INSTRUCTIONS byte figure in the knowledge base is the measured one', () => {
+        const measured = Buffer.byteLength(__serverInstructions);
+        let seen = 0;
+        for (const [n, l] of lines('docs/KNOWLEDGE_BASE.md')) {
+            for (const m of l.matchAll(/SERVER_INSTRUCTIONS`?[^\n]{0,60}?≈?\s*([\d,]+)\s*bytes/g)) {
+                seen++;
+                expect(Number(m[1]!.replace(/,/g, '')), `docs/KNOWLEDGE_BASE.md:${n}`).toBe(measured);
+            }
+        }
+        expect(seen).toBeGreaterThan(0);
+    });
+
+    it('D-009: no document credits draft_governance_issue with a resource_link', () => {
+        for (const rel of [NOTES, 'README.md', 'AGENTS.md', 'docs/API_STABILITY.md', 'CHANGELOG.md'].filter(has)) {
+            for (const [n, l] of lines(rel)) {
+                if (l.includes('resource_link') && l.includes('draft_governance_issue')) expect(l, `${rel}:${n}`).toMatch(/no resource_link|not .*resource_link|two text|text blocks|resources\/list/i);
+            }
+        }
+    });
+
+    it('D-010: a cross-runtime SHA-256 promise always carries the deterministic pin qualifier', () => {
+        for (const rel of ['README.md', 'AGENTS.md', 'llms.txt', 'docs/AI_GUIDE.md', 'docs/guides/DETERMINISM.md'].filter(has)) {
+            for (const [n, l] of lines(rel)) {
+                if (/same SHA-256 on every runtime|identical bytes on every runtime|identical SHA-256 on every runtime/i.test(l)) expect(l, `${rel}:${n}`).toMatch(/deterministic:\s*true|deterministic: true|pin/i);
+            }
+        }
+    });
+
+    it('D-011: includeDirectories is never described as defaulting to true without the "no filter" condition', () => {
+        for (const rel of ['docs/KNOWLEDGE_BASE.md', 'docs/AI_GUIDE.md', 'README.md', 'AGENTS.md'].filter(has)) {
+            for (const [n, l] of lines(rel)) {
+                if (/includeDirectories[^\n]{0,60}\btrue\b/.test(l)) expect(l, `${rel}:${n}`).toMatch(/no filter|without a filter|filter is given|filter object/i);
+            }
+        }
+    });
+
+    it.skipIf(!has('.github/instructions/release.instructions.md'))('D-014: a named workflow step exists in .github/workflows when the release instructions cite one', () => {
+        const text = read('.github/instructions/release.instructions.md');
+        if (text.includes('`mcp-publish`')) {
+            const workflows = readdirSync(path.join(ROOT, '.github', 'workflows')).map((f) => read(`.github/workflows/${f}`));
+            expect(workflows.some((w) => w.includes('mcp-publish'))).toBe(true);
+        }
+    });
+
+    it.skipIf(!has('.github/copilot-instructions.md'))('D-015: the tools said to share src/filter.ts all carry a filter input', () => {
+        const withFilter = new Set(listToolsPayload().tools.filter((t) => 'filter' in ((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {})).map((t) => t.name.split('_')[0]!));
+        const line = read('.github/copilot-instructions.md').split('\n').find((l) => l.includes('src/filter.ts'));
+        expect(line).toBeDefined();
+        const listed = line!.split('shared by ')[1];
+        expect(listed, 'the copilot line names the sharing tools').toBeDefined();
+        for (const w of listed!.replace(/\.$/, '').split(' / ')) expect(withFilter.has(w.trim()), w).toBe(true);
+    });
+
+    it('D-017: the instructions are documented as a top-level field of the opening exchange, never serverInfo.instructions', () => {
+        for (const rel of ['AGENTS.md', 'docs/AI_GUIDE.md', 'docs/KNOWLEDGE_BASE.md', 'README.md', 'llms.txt'].filter(has)) expect(read(rel), rel).not.toContain('serverInfo.instructions');
+    });
+});
