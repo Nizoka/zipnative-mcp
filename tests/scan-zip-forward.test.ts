@@ -7,12 +7,16 @@ import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
 import { scanZipForward, scanSummary } from '../src/tools/scan-zip-forward.js';
 import { listZipEntries } from '../src/tools/list-zip-entries.js';
 import { callToolDirect } from '../src/server.js';
+import { __resetCeilingsForTests, MAX_ENTRIES_ENV } from '../src/caps.js';
 import { ToolError } from '../src/errors.js';
 import { cleanupSandbox, makeSandbox } from './_sandbox.js';
-import { b64, basicZip, bytesOf, streamedZip, truncated, DEFLATE_DESCRIPTOR, STORE_DESCRIPTOR, ENCRYPTED_FLAG, LFH_NAME_MISMATCH, SFX_PREFIXED, raw } from './_zip-fixtures.js';
+import { b64, basicZip, bytesOf, centralDirectoryOffset, streamedZip, truncated, DEFLATE_DESCRIPTOR, STORE_DESCRIPTOR, ENCRYPTED_FLAG, LFH_NAME_MISMATCH, SFX_PREFIXED, raw } from './_zip-fixtures.js';
 
 const README = '# Hello\n\nA small archive for the tests.\n';
 
@@ -51,7 +55,10 @@ describe('scan_zip_forward', () => {
         expect(out.entries.every((e) => e.kept)).toBe(true);
         expect(out.entries.every((e) => e.data === undefined)).toBe(true);
         expect(out.inputBytes).toBe(bytes.byteLength);
-        expect(out.bytesDelivered).toBe(bytes.byteLength);
+        // A-001: the engine leaves the central directory unconsumed, so fewer bytes than the input were delivered.
+        expect(out.bytesDelivered).toBeLessThan(bytes.byteLength);
+        expect(out.bytesDelivered).toBeGreaterThan(0);
+        expect(out.maxEntries).toBe(10_000);
         expect(out.error).toBeUndefined();
         expect(out.diagnostics).toEqual([]);
         // Forward rows carry no central-directory-only fields.
@@ -168,7 +175,7 @@ describe('scan_zip_forward', () => {
         const out = await scanZipForward({ zipPath: 'in.zip', data: 'verify' });
         expect(out.stoppedAt).toBe('central-directory');
         expect(out.inputBytes).toBe(bytes.byteLength);
-        expect(out.bytesDelivered).toBe(bytes.byteLength);
+        expect(out.bytesDelivered).toBeLessThan(bytes.byteLength);
         expect(out.entryCount).toBe(4);
         await expect(scanZipForward({ zipPath: 'nope.zip' })).rejects.toMatchObject({ code: 'INPUT_NOT_FOUND' });
     });
@@ -206,6 +213,130 @@ describe('scan_zip_forward', () => {
         await expect(scanZipForward({ zipBase64: b64(basicZip()), limits: { maxEntries: 1_000_000 } })).rejects.toMatchObject({ code: 'LIMIT_CEILING_EXCEEDED' });
         const clean = await scanZipForward({ zipBase64: b64(basicZip()), strict: true });
         expect(clean.entryCount).toBe(4);
+    });
+
+    describe('A-001: stoppedAt is derived from byte accounting, never from a PK signature the wrapper parses', () => {
+        /** Both input forms: base64 in memory and a zipPath streamed from the sandbox. */
+        async function both(bytes: Uint8Array, extra: Record<string, unknown> = {}): Promise<Array<Awaited<ReturnType<typeof scanZipForward>>>> {
+            const inline = await scanZipForward({ zipBase64: b64(bytes), ...extra });
+            sandbox = await makeSandbox();
+            await fs.writeFile(path.join(sandbox, 'in.zip'), bytes);
+            const streamed = await scanZipForward({ zipPath: 'in.zip', ...extra });
+            await cleanupSandbox(sandbox);
+            sandbox = null;
+            return [inline, streamed];
+        }
+
+        it('src/tools/scan-zip-forward.ts contains no PK signature literal (CLAUDE.md convention 7)', () => {
+            const source = readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'tools', 'scan-zip-forward.ts'), 'utf8');
+            expect(source).not.toMatch(/0x50\s*,\s*0x4b/i);
+            expect(source).not.toMatch(/0x0?4034b50|0x0?2014b50|0x0?6054b50|0x0?6064b50/i);
+            expect(source).not.toMatch(/containsSignature|SIG_CFH|SIG_EOCD/);
+        });
+
+        it('a complete archive stops at the central directory with bytes left undelivered', async () => {
+            const bytes = basicZip();
+            for (const out of await both(bytes)) {
+                expect(out).toMatchObject({ stoppedAt: 'central-directory', truncated: false, entryCount: 4, inputBytes: bytes.byteLength });
+                expect(out.bytesDelivered).toBeLessThan(bytes.byteLength);
+                expect(out.bytesDelivered).toBeGreaterThanOrEqual(centralDirectoryOffset(bytes));
+            }
+        });
+
+        it("a stream cut inside an entry ends in 'error' with every byte delivered (tolerateTruncation)", async () => {
+            const cut = truncated(basicZip(), 60);
+            for (const out of await both(cut, { tolerateTruncation: true })) {
+                expect(out).toMatchObject({ stoppedAt: 'error', truncated: true, bytesDelivered: 60, inputBytes: 60 });
+                expect(out.error?.code).toBe('ZIP_STREAM_TRUNCATED');
+            }
+        });
+
+        it("a CD-less stream whose LAST entry is a stored nested zip ends at 'eof' / truncated — the nested central directory is payload, not a stop", async () => {
+            const nested = raw([{ name: 'outer.txt', data: bytesOf('outer') }, { name: 'inner.zip', data: basicZip() }]);
+            const headersOnly = nested.subarray(0, centralDirectoryOffset(nested));
+            for (const out of await both(headersOnly, { data: 'verify' })) {
+                expect(out).toMatchObject({ stoppedAt: 'eof', truncated: true, entryCount: 2, inputBytes: headersOnly.byteLength, bytesDelivered: headersOnly.byteLength });
+                expect(out.entries.map((e) => e.name)).toEqual(['outer.txt', 'inner.zip']);
+                expect(out.entries[1]?.data?.verified).toBe(true);
+                expect(out.error).toBeUndefined();
+            }
+        });
+
+        it("a stream cut INSIDE the central directory still classifies as 'central-directory' (the reader reached it)", async () => {
+            const full = basicZip();
+            const cut = full.subarray(0, centralDirectoryOffset(full) + 20);
+            for (const out of await both(cut, { tolerateTruncation: true })) {
+                expect(out).toMatchObject({ stoppedAt: 'central-directory', truncated: false, entryCount: 4 });
+                expect(out.bytesDelivered).toBeLessThan(cut.byteLength);
+            }
+        });
+
+        it("more than 64 KiB of trailing bytes after a complete archive is still 'central-directory'", async () => {
+            const bytes = raw([{ name: 'a.txt', data: bytesOf('a') }], { append: new Uint8Array(70_000) });
+            for (const out of await both(bytes)) {
+                expect(out).toMatchObject({ stoppedAt: 'central-directory', truncated: false, entryCount: 1, inputBytes: bytes.byteLength });
+                expect(out.bytesDelivered).toBeLessThan(bytes.byteLength);
+            }
+        });
+
+        it('an SFX / prepended prefix is refused with ZIP_SIGNATURE_MISMATCH on both input forms', async () => {
+            await expect(scanZipForward({ zipBase64: b64(SFX_PREFIXED()) })).rejects.toMatchObject({ code: 'ZIP_SIGNATURE_MISMATCH', data: { errorClass: 'parse' } });
+            sandbox = await makeSandbox();
+            await fs.writeFile(path.join(sandbox, 'sfx.zip'), SFX_PREFIXED());
+            await expect(scanZipForward({ zipPath: 'sfx.zip' })).rejects.toMatchObject({ code: 'ZIP_SIGNATURE_MISMATCH' });
+            const tolerated = await scanZipForward({ zipPath: 'sfx.zip', tolerateTruncation: true });
+            expect(tolerated.stoppedAt).toBe('error');
+            expect(tolerated.error?.code).toBe('ZIP_SIGNATURE_MISMATCH');
+        });
+    });
+
+    describe('A-003: the maxEntries default is clamped to the operator ceiling; only an explicit value above it is refused', () => {
+        afterEach(() => {
+            delete process.env[MAX_ENTRIES_ENV];
+            __resetCeilingsForTests();
+        });
+
+        it('with ZIPNATIVE_MCP_MAX_ENTRIES=5000: no maxEntries → 5000; 5000 ok; 5001 → LIMIT_CEILING_EXCEEDED with data.env', async () => {
+            process.env[MAX_ENTRIES_ENV] = '5000';
+            __resetCeilingsForTests();
+            const implicit = await scanZipForward({ zipBase64: b64(basicZip()) });
+            expect(implicit.maxEntries).toBe(5000);
+            expect(implicit.stoppedAt).toBe('central-directory');
+            const explicit = await scanZipForward({ zipBase64: b64(basicZip()), maxEntries: 5000 });
+            expect(explicit.maxEntries).toBe(5000);
+            await expect(scanZipForward({ zipBase64: b64(basicZip()), maxEntries: 5001 })).rejects.toMatchObject({
+                code: 'LIMIT_CEILING_EXCEEDED',
+                data: { limit: 'maxEntries', requested: 5001, ceiling: 5000, env: 'ZIPNATIVE_MCP_MAX_ENTRIES' },
+            });
+            const r = await callToolDirect('scan_zip_forward', { zipBase64: b64(basicZip()), maxEntries: 5001 });
+            expect(r.isError).toBe(true);
+            expect((r._meta as { error: { data: { env: string; remedy: string } } }).error.data.env).toBe('ZIPNATIVE_MCP_MAX_ENTRIES');
+            expect((r._meta as { error: { data: { remedy: string } } }).error.data.remedy).toContain('5000');
+        });
+
+        it('the default (10 000) applies untouched under the default ceiling and is reported in the result', async () => {
+            const out = await scanZipForward({ zipBase64: b64(basicZip()) });
+            expect(out.maxEntries).toBe(10_000);
+        });
+    });
+
+    describe('B-007: the budget boundary looks one header ahead', () => {
+        it("maxEntries equal to the entry count ends at 'central-directory'; one fewer ends at 'max-entries'", async () => {
+            const exact = await scanZipForward({ zipBase64: b64(basicZip()), maxEntries: 4 });
+            expect(exact).toMatchObject({ stoppedAt: 'central-directory', entryCount: 4, maxEntries: 4, truncated: false });
+            const short = await scanZipForward({ zipBase64: b64(basicZip()), maxEntries: 3 });
+            expect(short).toMatchObject({ stoppedAt: 'max-entries', entryCount: 3, maxEntries: 3, truncated: false });
+            expect(short.entries.map((e) => e.name)).toEqual(['README.md', 'assets/', 'docs/guide.md']);
+        });
+
+        it("maxEntries equal to limits.maxEntries ends at 'max-entries' without ZIP_LIMIT_EXCEEDED (no look-ahead past the engine bound)", async () => {
+            const out = await scanZipForward({ zipBase64: b64(basicZip()), maxEntries: 4, limits: { maxEntries: 4 } });
+            expect(out).toMatchObject({ stoppedAt: 'max-entries', entryCount: 4, truncated: false });
+            expect(out.error).toBeUndefined();
+            const three = await scanZipForward({ zipBase64: b64(basicZip()), maxEntries: 3, limits: { maxEntries: 3 } });
+            expect(three).toMatchObject({ stoppedAt: 'max-entries', entryCount: 3 });
+            expect(three.error).toBeUndefined();
+        });
     });
 
     it('summary projection keeps the verdict and kept names', async () => {
