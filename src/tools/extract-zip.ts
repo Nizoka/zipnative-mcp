@@ -26,7 +26,7 @@ import { ToolError } from '../errors.js';
 import { compileEntryFilter, FILTER_INPUT_SCHEMA, FilterSchema } from '../filter.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
 import { PROJECTION_INPUT_PROPERTIES } from '../projection.js';
-import { assertRealpathInside, discardPartial, mapWriteError, openExclusiveWriteStream, relativeLabel, resolveOutputDir } from '../sandbox.js';
+import { assertAncestorInside, assertRealpathInside, discardPartial, mapWriteError, openExclusiveWriteStream, relativeLabel, resolveOutputDir } from '../sandbox.js';
 import { guard, mapZipError } from '../zip-errors.js';
 import { EngineOptionsShape, parseInput, ProjectionShape, STRICT_INPUT_PROPERTY } from './_shared.js';
 
@@ -174,8 +174,11 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
     const keep = compileEntryFilter(input.filter);
     const options = engineOptions(input, sink, keep);
 
-    // Index lookup + pre-flight over the plan (declared sizes; the engine enforces them on read).
-    const reader = guard('Failed to open archive', () => openZip(bytes, { ...(options.limits !== undefined ? { limits: options.limits } : {}), ...sink.options }));
+    // Index lookup + pre-flight over the plan. EAGER: every entry's real extent
+    // (overlap, reach into the central directory, Zip64 spoofing) is refused
+    // here, so the dry run is a genuine hostile-shape pre-check and never
+    // returns a clean plan for an archive the extraction would refuse.
+    const reader = guard('Failed to open archive', () => openZip(bytes, { validate: 'eager', ...(options.limits !== undefined ? { limits: options.limits } : {}), ...sink.options }));
     const all: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);
     // The engine's extractors open their own reader, so its ZipEntry objects are
     // not ours: key the central-directory position on (offset, name) instead.
@@ -205,7 +208,7 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
         let totalBytes = 0;
         for (const p of planned) {
             if (input.includeData && p.entry.uncompressedSize > MAX_ENTRY_INLINE_BYTES) {
-                throw new ToolError('ENTRY_TOO_LARGE', `Entry "${p.entry.name}" is ${p.entry.uncompressedSize} bytes, above the ${MAX_ENTRY_INLINE_BYTES}-byte inline cap — use outputMode:'file', a filter, or read_zip_entry with a range.`, { entryName: p.entry.name, sizeBytes: p.entry.uncompressedSize, cap: MAX_ENTRY_INLINE_BYTES });
+                throw new ToolError('ENTRY_TOO_LARGE', `Entry "${p.entry.name}" is ${p.entry.uncompressedSize} bytes, above the ${MAX_ENTRY_INLINE_BYTES}-byte inline cap — use outputMode:'file', a filter, or read_zip_entry with a range.`, { entryName: p.entry.name, sizeBytes: p.entry.uncompressedSize, cap: MAX_ENTRY_INLINE_BYTES, remedy: "outputMode:'file'" });
             }
             totalBytes += p.entry.uncompressedSize;
         }
@@ -234,8 +237,9 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
 
     // ── file mode: streamed, exclusive, bounded ───────────────────────
     const outputDir = resolveOutputDir(input.outputDir, 'outputDir');
+    await assertAncestorInside(outputDir, 'outputDir');
     await fs.mkdir(outputDir, { recursive: true });
-    await assertRealpathInside(outputDir);
+    await assertRealpathInside(outputDir, 'outputDir');
     const rows: ExtractedRow[] = [];
     let totalBytes = 0;
     let written = 0;
@@ -247,8 +251,9 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
             const safe = sanitizeEntryPath(e.name.endsWith('/') ? e.name.slice(0, -1) : e.name);
             if (safe === null) continue;
             const dir = path.join(outputDir, ...safe.split('/'));
+            await assertAncestorInside(dir, 'outputDir');
             await fs.mkdir(dir, { recursive: true });
-            await assertRealpathInside(dir);
+            await assertRealpathInside(dir, 'outputDir');
             directoriesCreated++;
         }
     }
@@ -266,8 +271,9 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
             const item = next.value;
             const target = path.join(outputDir, ...item.path.split('/'));
             const label = relativeLabel(target);
+            await assertAncestorInside(path.dirname(target), 'outputDir');
             await fs.mkdir(path.dirname(target), { recursive: true });
-            await assertRealpathInside(path.dirname(target));
+            await assertRealpathInside(path.dirname(target), 'outputDir');
             const stream = await openExclusiveWriteStream(target, label);
             let size = 0;
             try {

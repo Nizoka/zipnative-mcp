@@ -113,11 +113,16 @@ export async function resolveInputFile(
     try {
         stat = await fs.stat(resolved);
     } catch {
-        throw new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' does not exist in the sandbox.`, { path: String(userPath) });
+        throw new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' does not exist in the sandbox — list the sandbox with resources/list, or pass the bytes as base64.`, { path: String(userPath), remedy: 'resources/list' });
     }
     if (!stat.isFile()) {
-        throw new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' is not a regular file.`, { path: String(userPath) });
+        throw new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' is not a regular file — name a file listed by resources/list.`, { path: String(userPath), remedy: 'resources/list' });
     }
+    // The read side gets the same defence in depth as the write side: the REAL
+    // location of the file itself (not only its parent — a file symlink would
+    // otherwise pass) must live inside the real sandbox, so a pre-planted
+    // junction / symlink can never redirect a read outside it.
+    await assertRealpathInside(resolved, what);
     return { resolved, size: stat.size };
 }
 
@@ -127,12 +132,12 @@ export async function resolveInputFile(
  * sandbox (a pre-existing symlinked directory would otherwise redirect the
  * write). Throws `SECURITY_VIOLATION`.
  */
-export async function assertRealpathInside(parentDir: string): Promise<void> {
+export async function assertRealpathInside(target: string, what = 'outputPath'): Promise<void> {
     const sandbox = requireSandbox();
-    const [realSandbox, realParent] = await Promise.all([fs.realpath(sandbox), fs.realpath(parentDir)]);
-    const relative = path.relative(realSandbox, realParent);
+    const [realSandbox, realTarget] = await Promise.all([fs.realpath(sandbox), fs.realpath(target)]);
+    const relative = path.relative(realSandbox, realTarget);
     if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        throw new SecurityError(`Refusing to write under '${parentDir}': its real location is outside the sandbox.`);
+        throw new SecurityError(`Refusing ${what} '${relativeLabel(target)}': its real location (a symlink or junction) is outside the sandbox.`);
     }
 }
 
@@ -156,8 +161,33 @@ export async function writeExclusive(resolved: string, bytes: Uint8Array, relati
     }
 }
 
+/**
+ * The deepest EXISTING ancestor of a path (the sandbox itself at worst). Checked
+ * before any `mkdir -p` so a pre-planted junction / symlink can never cause
+ * even an empty directory to be created outside the sandbox.
+ */
+async function deepestExistingAncestor(target: string): Promise<string> {
+    let current = target;
+    for (;;) {
+        try {
+            await fs.stat(current);
+            return current;
+        } catch {
+            const parent = path.dirname(current);
+            if (parent === current) return current;
+            current = parent;
+        }
+    }
+}
+
+/** Check the real path of the deepest existing ancestor BEFORE creating directories under it. */
+export async function assertAncestorInside(target: string, what = 'outputPath'): Promise<void> {
+    await assertRealpathInside(await deepestExistingAncestor(target), what);
+}
+
 /** Create the parent directory (mapping fs failures such as a file in the way) and check its real path. */
 export async function ensureParent(resolved: string, relativeLabel: string): Promise<void> {
+    await assertAncestorInside(path.dirname(resolved));
     try {
         await fs.mkdir(path.dirname(resolved), { recursive: true });
     } catch (err) {

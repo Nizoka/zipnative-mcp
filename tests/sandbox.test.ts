@@ -14,6 +14,9 @@ import path from 'node:path';
 import { MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES } from '../src/caps.js';
 import { SecurityError, ToolError } from '../src/errors.js';
 import { displayName, emitArchive, emitArchiveStream, writeSandboxedText } from '../src/output.js';
+import { readResource } from '../src/resources.js';
+import { callToolDirect, ensureEngineReady } from '../src/server.js';
+import { b64, basicZip } from './_zip-fixtures.js';
 import {
     assertRealpathInside,
     discardPartial,
@@ -128,7 +131,8 @@ describe('sandbox resolution', () => {
         const missing = await codeOf(resolveInputFile('nope.zip', null));
         expect(missing.code).toBe('INPUT_NOT_FOUND');
         expect(missing.message).not.toContain(sandboxDir);
-        expect(missing.data).toEqual({ path: 'nope.zip' });
+        expect(missing.data).toEqual({ path: 'nope.zip', remedy: 'resources/list' });
+        expect(missing.message).toContain('resources/list');
         await fs.mkdir(path.join(sandboxDir, 'dir'));
         expect((await codeOf(resolveInputFile('dir', null, 'sourcePath'))).message).toContain('not a regular file');
         await fs.writeFile(path.join(sandboxDir, 'real.bin'), Buffer.alloc(10));
@@ -279,13 +283,203 @@ describe('exclusive writes', () => {
             // Through the write path: mkdir -p succeeds (the link exists), the realpath check still refuses.
             const err = await codeOf(emitArchive(new Uint8Array([1]), { mode: 'file', outputPath: 'escape/out.zip' }));
             expect(err.code).toBe('SECURITY_VIOLATION');
-            expect(err.message).toContain('real location is outside the sandbox');
+            expect(err.message).toBe("Refusing outputPath 'escape': its real location (a symlink or junction) is outside the sandbox.");
+            expect(err.message).not.toContain(outside);
             await expect(fs.stat(path.join(outside, 'out.zip'))).rejects.toThrow();
             const streamed = await codeOf(emitArchiveStream((async function* () { yield new Uint8Array([1]); })(), 'escape/out2.zip'));
             expect(streamed.code).toBe('SECURITY_VIOLATION');
         } finally {
             await fs.rm(outside, { recursive: true, force: true });
         }
+    });
+});
+
+/**
+ * A-002 — the READ side of the sandbox follows no pre-planted junction /
+ * symlink outside ZIPNATIVE_MCP_OUTPUT_DIR: every path input (zipPath,
+ * sourcePath, resource URI) is refused when the file's real location lies
+ * outside the real sandbox, on win32 (junction) and POSIX (symlinks) alike.
+ */
+describe('A-002: junction / symlink escape is refused on every read path', () => {
+    let sandboxDir: string;
+    let outside: string;
+
+    beforeEach(async () => {
+        await ensureEngineReady();
+        sandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), 'zipnative-mcp-a002-'));
+        outside = await fs.mkdtemp(path.join(os.tmpdir(), 'zipnative-mcp-a002-outside-'));
+        process.env[ENV_KEY] = sandboxDir;
+        await fs.writeFile(path.join(outside, 'secret.zip'), basicZip());
+        await fs.writeFile(path.join(outside, 'secret.bin'), Buffer.from([1, 2, 3, 4]));
+    });
+    afterEach(async () => {
+        delete process.env[ENV_KEY];
+        await fs.rm(sandboxDir, { recursive: true, force: true });
+        await fs.rm(outside, { recursive: true, force: true });
+    });
+
+    /** Plant a directory link inside the sandbox pointing outside; false when the host grants no symlink privilege. */
+    async function plantDirLink(name: string, kind: 'junction' | 'dir'): Promise<boolean> {
+        try {
+            await fs.symlink(outside, path.join(sandboxDir, name), kind);
+            return true;
+        } catch (err) {
+            console.warn(`[sandbox] ${kind} link not available (${(err as Error).message}); skipping`);
+            return false;
+        }
+    }
+
+    async function refusal(tool: string, args: Record<string, unknown>): Promise<{ code: string; message: string }> {
+        const r = await callToolDirect(tool, args);
+        expect(r.isError, `${tool} must refuse: ${String(JSON.stringify(r.structuredContent)).slice(0, 200)}`).toBe(true);
+        return (r._meta as { error: { code: string; message: string } }).error;
+    }
+
+    const READ_PATHS: Array<[string, (rel: string) => Record<string, unknown>]> = [
+        ['inspect_zip', (rel) => ({ zipPath: `${rel}/secret.zip` })],
+        ['list_zip_entries', (rel) => ({ zipPath: `${rel}/secret.zip` })],
+        ['verify_zip', (rel) => ({ zipPath: `${rel}/secret.zip` })],
+        ['scan_zip_forward', (rel) => ({ zipPath: `${rel}/secret.zip` })],
+        ['extract_zip', (rel) => ({ zipPath: `${rel}/secret.zip`, includeData: false })],
+        ['modify_zip', (rel) => ({ zipPath: `${rel}/secret.zip`, operations: [{ op: 'setComment', comment: 'x' }] })],
+        ['compute_crc32', (rel) => ({ sourcePath: `${rel}/secret.bin` })],
+        ['inflate_raw', (rel) => ({ sourcePath: `${rel}/secret.bin`, maxOutput: 100, method: 'store' })],
+        ['create_zip', (rel) => ({ entries: [{ name: 'a', sourcePath: `${rel}/secret.bin` }] })],
+        ['create_zip', (rel) => ({ entries: [{ name: 'a', sourcePath: `${rel}/secret.bin`, stream: true }] })],
+    ];
+
+    it('a directory junction (win32) / directory symlink (POSIX) inside the sandbox is refused by every tool taking zipPath / sourcePath and by resources/read', async () => {
+        const kind = process.platform === 'win32' ? 'junction' : 'dir';
+        if (!(await plantDirLink('jump', kind))) return;
+        for (const [tool, args] of READ_PATHS) {
+            const err = await refusal(tool, args('jump'));
+            expect(err.code, tool).toBe('SECURITY_VIOLATION');
+            expect(err.message, tool).toContain('real location');
+            expect(err.message, tool).not.toContain(outside);
+            expect(err.message, tool).not.toContain(sandboxDir);
+        }
+        await expect(readResource('zipnative://output/jump/secret.zip')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
+        // The listing never follows the link either.
+        const list = await callToolDirect('describe_engine', {});
+        expect(list.isError).not.toBe(true);
+        // A regular file next to the link still reads: the guard is about the real path, not the presence of a link.
+        await fs.writeFile(path.join(sandboxDir, 'ok.zip'), basicZip());
+        expect((await callToolDirect('inspect_zip', { zipPath: 'ok.zip' })).isError).not.toBe(true);
+    });
+
+    it.skipIf(process.platform === 'win32')('a FILE symlink (POSIX) pointing outside the sandbox is refused too — the real path of the file itself is checked', async () => {
+        try {
+            await fs.symlink(path.join(outside, 'secret.zip'), path.join(sandboxDir, 'link.zip'), 'file');
+            await fs.symlink(path.join(outside, 'secret.bin'), path.join(sandboxDir, 'link.bin'), 'file');
+        } catch (err) {
+            console.warn(`[sandbox] file symlink not available (${(err as Error).message}); skipping`);
+            return;
+        }
+        expect((await refusal('inspect_zip', { zipPath: 'link.zip' })).code).toBe('SECURITY_VIOLATION');
+        expect((await refusal('scan_zip_forward', { zipPath: 'link.zip' })).code).toBe('SECURITY_VIOLATION');
+        expect((await refusal('compute_crc32', { sourcePath: 'link.bin' })).code).toBe('SECURITY_VIOLATION');
+        expect((await refusal('inflate_raw', { sourcePath: 'link.bin', maxOutput: 10, method: 'store' })).code).toBe('SECURITY_VIOLATION');
+        expect((await refusal('create_zip', { entries: [{ name: 'a', sourcePath: 'link.bin' }] })).code).toBe('SECURITY_VIOLATION');
+        await expect(readResource('zipnative://output/link.zip')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
+        await expect(resolveInputFile('link.zip', null)).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
+    });
+
+    it('a link that stays INSIDE the sandbox is fine (the check is about the real location, not the link)', async () => {
+        await fs.mkdir(path.join(sandboxDir, 'real'));
+        await fs.writeFile(path.join(sandboxDir, 'real', 'in.zip'), basicZip());
+        try {
+            await fs.symlink(path.join(sandboxDir, 'real'), path.join(sandboxDir, 'alias'), process.platform === 'win32' ? 'junction' : 'dir');
+        } catch (err) {
+            console.warn(`[sandbox] link not available (${(err as Error).message}); skipping`);
+            return;
+        }
+        const r = await callToolDirect('inspect_zip', { zipPath: 'alias/in.zip', verbosity: 'summary' });
+        expect(r.isError).not.toBe(true);
+        expect((r.structuredContent as { entryCount: number }).entryCount).toBe(4);
+    });
+
+    it('the write side refuses a junction parent as before (create_zip / extract_zip into the link)', async () => {
+        if (!(await plantDirLink('jump', process.platform === 'win32' ? 'junction' : 'dir'))) return;
+        expect((await refusal('create_zip', { entries: [{ name: 'a', text: 'a' }], outputMode: 'file', outputPath: 'jump/out.zip' })).code).toBe('SECURITY_VIOLATION');
+        expect((await refusal('extract_zip', { zipBase64: b64(basicZip()), outputMode: 'file', outputDir: 'jump/out' })).code).toBe('SECURITY_VIOLATION');
+        await expect(fs.stat(path.join(outside, 'out.zip'))).rejects.toThrow();
+        // No FILE ever lands outside. (extract_zip's `mkdir -p` of outputDir runs before the realpath check, so an
+        // empty directory may be created through the link — a known, harmless side effect; nothing is written into it.)
+        const leaked = await fs.readdir(path.join(outside, 'out')).catch(() => [] as string[]);
+        expect(leaked).toEqual([]);
+    });
+});
+
+describe.skipIf(process.platform !== 'win32')('win32 sandbox edge cases', () => {
+    let sandboxDir: string;
+
+    beforeEach(async () => {
+        sandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), 'zipnative-mcp-win32-'));
+        process.env[ENV_KEY] = sandboxDir;
+    });
+    afterEach(async () => {
+        delete process.env[ENV_KEY];
+        await fs.rm(sandboxDir, { recursive: true, force: true });
+    });
+
+    it('a case-folded name collision on NTFS is OUTPUT_EXISTS (the server never overwrites)', async () => {
+        await emitArchive(new Uint8Array([1]), { mode: 'file', outputPath: 'Report.zip' });
+        const err = await codeOf(emitArchive(new Uint8Array([2]), { mode: 'file', outputPath: 'report.zip' }));
+        expect(err.code).toBe('OUTPUT_EXISTS');
+        expect((await fs.readFile(path.join(sandboxDir, 'Report.zip')))[0]).toBe(1);
+    });
+
+    it("a reserved device name ('CON.zip', 'nul.zip') never escapes the sandbox: refused as IO_ERROR / OUTPUT_EXISTS, or (Windows 11) written as a regular file inside it", async () => {
+        // Windows 11 (22H2+) stopped mapping `CON.<ext>` to the console device; older hosts refuse the open.
+        // Either way the bytes must not leave the sandbox, and a second write must never overwrite.
+        const writers: Array<[string, () => Promise<unknown>]> = [
+            ['CON.zip', () => emitArchive(new Uint8Array([0x50, 0x4b, 0x05, 0x06]), { mode: 'file', outputPath: 'CON.zip' })],
+            ['nul.zip', () => emitArchiveStream((async function* () { yield new Uint8Array([0x50, 0x4b, 0x05, 0x06]); })(), 'nul.zip')],
+        ];
+        for (const [name, write] of writers) {
+            let first: ToolError | null = null;
+            try {
+                await write();
+            } catch (err) {
+                first = err as ToolError;
+            }
+            if (first !== null) {
+                expect(['IO_ERROR', 'OUTPUT_EXISTS'], name).toContain(first.code);
+                expect(first.message, name).not.toContain(sandboxDir);
+                expect((await fs.readdir(sandboxDir)).map((n) => n.toLowerCase()), name).not.toContain(name.toLowerCase());
+            } else {
+                const st = await fs.stat(path.join(sandboxDir, name));
+                expect(st.isFile(), name).toBe(true);
+                expect(st.size, name).toBe(4);
+                expect((await codeOf(write())).code, `${name} second write`).toBe('OUTPUT_EXISTS');
+            }
+        }
+        // The bare device name has no container extension and never reaches the filesystem.
+        expect(() => resolveOutputFile('CON')).toThrow(expect.objectContaining({ code: 'INVALID_EXTENSION' }));
+    });
+
+    it('a path beyond 260 characters is either written intact or refused as IO_ERROR without a partial file', async () => {
+        const deep = `${Array.from({ length: 12 }, (_, i) => `segment-${i}-${'x'.repeat(20)}`).join('/')}/deep.zip`;
+        expect(deep.length).toBeGreaterThan(260);
+        let outcome: ToolError | { filePath?: string };
+        try {
+            outcome = await emitArchive(new Uint8Array([0x50, 0x4b, 0x05, 0x06]), { mode: 'file', outputPath: deep });
+        } catch (err) {
+            outcome = err as ToolError;
+        }
+        if (outcome instanceof ToolError) {
+            expect(outcome.code).toBe('IO_ERROR');
+            expect(outcome.message).not.toContain(sandboxDir);
+        } else {
+            expect((await fs.stat(outcome.filePath as string)).size).toBe(4);
+        }
+    });
+
+    it('an outputDir written with backslashes stays inside the sandbox', async () => {
+        const r = await callToolDirect('extract_zip', { zipBase64: b64(basicZip()), outputMode: 'file', outputDir: 'out\\nested' });
+        expect(r.isError).not.toBe(true);
+        expect((await fs.stat(path.join(sandboxDir, 'out', 'nested', 'README.md'))).isFile()).toBe(true);
+        expect((await codeOf(callToolDirect('extract_zip', { zipBase64: b64(basicZip()), outputMode: 'file', outputDir: '..\\escape' }).then((x) => { if (x.isError === true) throw new ToolError((x._meta as { error: { code: string } }).error.code, 'x'); return x; }))).code).toBe('SECURITY_VIOLATION');
     });
 });
 

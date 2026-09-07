@@ -172,6 +172,46 @@ describe('MCP resources over the wire (resources/list, resources/read, resources
         }
     });
 
+    it('reads an EXTRACTED file and a governance draft back over the wire with their own MIME types; the listing sees both', async () => {
+        await freshSandbox();
+        await writeSampleZip('src.zip');
+        const extracted = await callToolDirect('extract_zip', { zipPath: 'src.zip', outputMode: 'file', outputDir: 'unpacked' });
+        expect(extracted.isError).not.toBe(true);
+        const draft = await callToolDirect('draft_governance_issue', {
+            title: 'inspect_zip reports the wrong ratio for stored entries',
+            summary: 'The ratio string is inverted for stored entries in the summary projection.',
+            issueType: 'bug',
+            reproduction: { command: 'inspect_zip { zipBase64, verbosity: "summary" }', result: 'ratio "0.5:1"' },
+            expectedBehavior: 'ratio "1.0:1"',
+            duplicateSearchPerformed: true,
+            outputMode: 'file',
+            outputPath: 'drafts/issue.md',
+        });
+        expect(draft.isError).not.toBe(true);
+        const client = await connectLegacy();
+        try {
+            const list = await client.request<{ resources: Array<{ uri: string; mimeType: string }> }>('resources/list');
+            expect(list.resources.map((r) => r.uri)).toEqual([
+                `${RESOURCE_URI_PREFIX}drafts/issue.md`,
+                `${RESOURCE_URI_PREFIX}src.zip`,
+                `${RESOURCE_URI_PREFIX}unpacked/README.md`,
+                `${RESOURCE_URI_PREFIX}unpacked/data.json`,
+                `${RESOURCE_URI_PREFIX}unpacked/src/index.js`,
+            ]);
+            const md = await client.readResource<{ contents: Array<{ uri: string; mimeType: string; blob: string }> }>(`${RESOURCE_URI_PREFIX}unpacked/README.md`);
+            expect(md.contents[0]).toMatchObject({ uri: `${RESOURCE_URI_PREFIX}unpacked/README.md`, mimeType: 'text/markdown' });
+            expect(Buffer.from(md.contents[0]!.blob, 'base64').toString('utf8')).toBe('# resources\n');
+            const json = await client.readResource<{ contents: Array<{ mimeType: string; blob: string }> }>(`${RESOURCE_URI_PREFIX}unpacked/data.json`);
+            expect(json.contents[0]?.mimeType).toBe('application/json');
+            expect(JSON.parse(Buffer.from(json.contents[0]!.blob, 'base64').toString('utf8'))).toEqual({ a: 1 });
+            const issue = await client.readResource<{ contents: Array<{ mimeType: string; blob: string }> }>(`${RESOURCE_URI_PREFIX}drafts/issue.md`);
+            expect(issue.contents[0]?.mimeType).toBe('text/markdown');
+            expect(Buffer.from(issue.contents[0]!.blob, 'base64').toString('utf8')).toContain('DRAFT ONLY');
+        } finally {
+            await client.close();
+        }
+    });
+
     it('maps UNKNOWN_RESOURCE and SECURITY_VIOLATION to JSON-RPC -32602 (Invalid params) on the legacy wire', async () => {
         await freshSandbox();
         const client = await connectLegacy();

@@ -17,19 +17,11 @@ import { promises as fs, type Dirent, type Stats } from 'node:fs';
 import path from 'node:path';
 
 import { ToolError } from './errors.js';
-import { getOutputSandbox, resolveOutputDir, ZIP_CONTAINER_EXTENSIONS } from './sandbox.js';
+import { MAX_LISTED_RESOURCES, MAX_RESOURCE_READ_BYTES, MAX_RESOURCE_WALK_DEPTH as MAX_WALK_DEPTH } from './caps.js';
+import { assertRealpathInside, getOutputSandbox, resolveOutputDir, ZIP_CONTAINER_EXTENSIONS } from './sandbox.js';
 
 /** URI scheme + authority for sandboxed resources. */
 export const RESOURCE_URI_PREFIX = 'zipnative://output/';
-
-/** Maximum number of resources returned by a single `resources/list`. */
-const MAX_LISTED_RESOURCES = 1000;
-
-/** Maximum directory-walk depth when enumerating the sandbox. */
-const MAX_WALK_DEPTH = 8;
-
-/** Maximum size of a single `resources/read` payload (mirrors the 50 MiB inline output cap). */
-const MAX_RESOURCE_READ_BYTES = 50 * 1024 * 1024;
 
 const MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
     '.zip': 'application/zip',
@@ -191,6 +183,8 @@ export async function readResource(uri: string): Promise<ResourceContents> {
     if (stat.size > MAX_RESOURCE_READ_BYTES) {
         throw new ToolError('OUTPUT_TOO_LARGE', `Resource ${uri} (${stat.size} bytes) exceeds the maximum read size (${MAX_RESOURCE_READ_BYTES} bytes).`);
     }
+    // A pre-planted junction / symlink inside the sandbox must not redirect a read outside it.
+    await assertRealpathInside(resolved, 'resource path');
     const bytes = await fs.readFile(resolved);
     return { uri, mimeType: mimeTypeFor(resolved), blob: bytes.toString('base64') };
 }

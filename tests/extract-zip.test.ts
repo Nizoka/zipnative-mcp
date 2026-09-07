@@ -9,7 +9,7 @@ import path from 'node:path';
 import { extractZipTool, extractSummary } from '../src/tools/extract-zip.js';
 import { callToolDirect } from '../src/server.js';
 import { cleanupSandbox, makeSandbox, patternBytes } from './_sandbox.js';
-import { b64, basicZip, bytesOf, raw, richZip, ZIP_SLIP, DEVICE_NAME, SYMLINK, DUPLICATE_PATHS, ENCRYPTED_FLAG, SFX_PREFIXED, OVERLAP, CRC_OVERRIDE } from './_zip-fixtures.js';
+import { b64, basicZip, bytesOf, raw, richZip, ZIP_SLIP, DEVICE_NAME, SYMLINK, DUPLICATE_PATHS, ENCRYPTED_FLAG, SFX_PREFIXED, OVERLAP, CRC_OVERRIDE, OFFSET_INTO_CD, ZIP64_CONTRADICTION } from './_zip-fixtures.js';
 
 const README = '# Hello\n\nA small archive for the tests.\n';
 const INDEX = 'export const answer = 42;\n';
@@ -161,6 +161,24 @@ describe('extract_zip', () => {
             await expect(extractZipTool({ zipBase64: b64(OVERLAP()) })).rejects.toMatchObject({ code: 'ZIP_ENTRY_OVERLAP' });
         });
 
+        it('B-003: the dry run (includeData:false) opens eagerly — overlap, offset-into-CD and Zip64 spoofing are refused before any plan', async () => {
+            for (const [label, bytes, code, errorClass] of [
+                ['OVERLAP', OVERLAP(), 'ZIP_ENTRY_OVERLAP', 'security'],
+                ['OFFSET_INTO_CD', OFFSET_INTO_CD(), 'ZIP_ENTRY_OVERLAP', 'security'],
+                ['ZIP64_CONTRADICTION', ZIP64_CONTRADICTION(), 'ZIP_ZIP64_CONTRADICTION', 'security'],
+            ] as const) {
+                await expect(extractZipTool({ zipBase64: b64(bytes), includeData: false }), label).rejects.toMatchObject({ code, data: { errorClass } });
+                const r = await callToolDirect('extract_zip', { zipBase64: b64(bytes), includeData: false });
+                expect(r.isError, label).toBe(true);
+                expect(r.structuredContent, `${label}: no plan may leak`).toBeUndefined();
+                // An entry whose offset lands just before the central directory is a parse refusal (no header there).
+            }
+            const plain = raw([{ name: 'a.txt', data: bytesOf('aaaa') }, { name: 'b.txt', data: bytesOf('bbbb') }]);
+            const cdStart = Buffer.from(plain).indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+            const nearCd = raw([{ name: 'a.txt', data: bytesOf('aaaa') }, { name: 'b.txt', data: bytesOf('bbbb'), localHeaderOffsetOverride: cdStart - 10 }]);
+            await expect(extractZipTool({ zipBase64: b64(nearCd), includeData: false })).rejects.toMatchObject({ code: 'ZIP_SIGNATURE_MISMATCH', data: { errorClass: 'parse' } });
+        });
+
         it('strict escalates a diagnostic; otherwise it is reported', async () => {
             const out = await extractZipTool({ zipBase64: b64(SFX_PREFIXED()) });
             expect(out.diagnostics.map((d) => d.code)).toContain('ZIP_PREPENDED_DATA');
@@ -273,6 +291,24 @@ describe('extract_zip', () => {
                 code: 'ZIP_UNSUPPORTED_ENCRYPTION',
                 data: { writtenCount: 0 },
             });
+        });
+
+        it('limits.maxTotalUncompressedSize refuses a file-mode extraction with data.writtenCount and leaves no partial file', async () => {
+            sandbox = await makeSandbox();
+            await expect(extractZipTool({ zipBase64: b64(basicZip()), outputMode: 'file', outputDir: 'capped', limits: { maxTotalUncompressedSize: 10 } })).rejects.toMatchObject({
+                code: 'ZIP_LIMIT_EXCEEDED',
+                data: { errorClass: 'limit', limit: 'maxTotalUncompressedSize', configured: 10, writtenCount: expect.any(Number) },
+            });
+            await expect(fs.stat(path.join(sandbox, 'capped', 'README.md'))).rejects.toBeDefined();
+            await expect(fs.stat(path.join(sandbox, 'capped', 'docs'))).rejects.toBeDefined();
+            // The symlink-as-file relaxation writes a REGULAR file (lstat, never a link), even in a nested directory.
+            const nested = raw([{ name: 'deep/link', data: bytesOf('../../etc/passwd'), externalAttributes: (0o120777 << 16) >>> 0 }]);
+            const out = await extractZipTool({ zipBase64: b64(nested), outputMode: 'file', outputDir: 'ln2', rejectSymlinks: false });
+            expect(out.fileCount).toBe(1);
+            const st = await fs.lstat(path.join(sandbox, 'ln2', 'deep', 'link'));
+            expect(st.isSymbolicLink()).toBe(false);
+            expect(st.isFile()).toBe(true);
+            expect(await fs.readFile(path.join(sandbox, 'ln2', 'deep', 'link'), 'utf8')).toBe('../../etc/passwd');
         });
 
         it('a CRC mismatch mid-stream discards the partial file and names the entry', async () => {
