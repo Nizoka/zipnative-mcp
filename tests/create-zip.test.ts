@@ -386,7 +386,7 @@ describe('create_zip', () => {
             expect(() => assertInputWithin(MAX_BASE64_INPUT_BYTES, MAX_BASE64_INPUT_BYTES, 'inline entry payloads (total)')).not.toThrow();
             expect(() => assertInputWithin(MAX_BASE64_INPUT_BYTES + 1, MAX_BASE64_INPUT_BYTES, 'inline entry payloads (total)')).toThrow(expect.objectContaining({
                 code: 'INPUT_TOO_LARGE',
-                data: { what: 'inline entry payloads (total)', observed: MAX_BASE64_INPUT_BYTES + 1, cap: MAX_BASE64_INPUT_BYTES },
+                data: { what: 'inline entry payloads (total)', observed: MAX_BASE64_INPUT_BYTES + 1, cap: MAX_BASE64_INPUT_BYTES, remedy: 'zipPath' },
             }));
         });
 

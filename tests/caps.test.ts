@@ -61,8 +61,19 @@ describe('caps', () => {
         } catch (e) {
             expect(e).toBeInstanceOf(ToolError);
             expect((e as ToolError).code).toBe('INPUT_TOO_LARGE');
-            expect((e as ToolError).message).toBe('zipBase64 (decoded) is 11 bytes, above the 10-byte cap.');
-            expect((e as ToolError).data).toEqual({ what: 'zipBase64 (decoded)', observed: 11, cap: 10 });
+            expect((e as ToolError).message).toMatch(/^zipBase64 \(decoded\) is 11 bytes, above the 10-byte cap — pass the bytes through a sandbox file instead \(zipPath \/ sourcePath under ZIPNATIVE_MCP_OUTPUT_DIR/);
+            expect((e as ToolError).data).toEqual({ what: 'zipBase64 (decoded)', observed: 11, cap: 10, remedy: 'zipPath' });
+        }
+    });
+
+    it('D-005: a file input over the path cap gets the split remedy in the message and no data.remedy (the sandbox route is already in use)', () => {
+        try {
+            assertInputWithin(11, 10, 'sourcePath');
+            expect.unreachable();
+        } catch (e) {
+            expect((e as ToolError).code).toBe('INPUT_TOO_LARGE');
+            expect((e as ToolError).message).toBe('sourcePath is 11 bytes, above the 10-byte cap — split the input into smaller archives.');
+            expect((e as ToolError).data).toEqual({ what: 'sourcePath', observed: 11, cap: 10 });
         }
     });
 

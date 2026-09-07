@@ -117,11 +117,18 @@ export function __resetCeilingsForTests(): void {
     _ceilings = null;
 }
 
-/** Throw `INPUT_TOO_LARGE` when `observed` exceeds `cap`. */
+/**
+ * Throw `INPUT_TOO_LARGE` when `observed` exceeds `cap`. An inline (base64)
+ * input names the sandbox file route as its remedy (`data.remedy: 'zipPath'`);
+ * a file input already over the path cap can only be split.
+ */
 export function assertInputWithin(observed: number, cap: number, what: string): void {
-    if (observed > cap) {
-        throw new ToolError('INPUT_TOO_LARGE', `${what} is ${observed} bytes, above the ${cap}-byte cap.`, { what, observed, cap });
-    }
+    if (observed <= cap) return;
+    const viaFile = /path/i.test(what);
+    const hint = viaFile
+        ? 'split the input into smaller archives'
+        : `pass the bytes through a sandbox file instead (zipPath / sourcePath under ZIPNATIVE_MCP_OUTPUT_DIR, up to ${MAX_PATH_INPUT_BYTES} bytes) or send a smaller payload`;
+    throw new ToolError('INPUT_TOO_LARGE', `${what} is ${observed} bytes, above the ${cap}-byte cap — ${hint}.`, { what, observed, cap, ...(viaFile ? {} : { remedy: 'zipPath' }) });
 }
 
 /** Serialisable view of every cap, for `describe_engine`. */

@@ -62,7 +62,7 @@ export async function emitArchive(
             throw new ToolError('MISSING_OUTPUT_PATH', "outputPath is required when outputMode='file'.");
         }
         if (bytes.byteLength > MAX_FILE_OUTPUT_BYTES) {
-            throw new ToolError('OUTPUT_TOO_LARGE', `Output (${bytes.byteLength} bytes) exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap.`);
+            throw new ToolError('OUTPUT_TOO_LARGE', `Output (${bytes.byteLength} bytes) exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap — split the content across several archives or lower the request.`, { sizeBytes: bytes.byteLength, cap: MAX_FILE_OUTPUT_BYTES });
         }
         const resolved = resolveOutputFile(options.outputPath, options.extensions ?? ZIP_CONTAINER_EXTENSIONS);
         await writeExclusive(resolved, bytes, relativeLabel(resolved));
@@ -101,7 +101,7 @@ export async function emitArchiveStream(
             total += chunk.byteLength;
             hasher?.update(chunk);
             if (total > MAX_FILE_OUTPUT_BYTES) {
-                throw new ToolError('OUTPUT_TOO_LARGE', `Output exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap.`);
+                throw new ToolError('OUTPUT_TOO_LARGE', `Output exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap — split the content across several archives or lower the request.`, { cap: MAX_FILE_OUTPUT_BYTES });
             }
             if (!stream.write(chunk)) {
                 // Detach whichever listener did not fire: one pair per drain, never accumulated.
@@ -144,7 +144,7 @@ export const OutputShape = {
 export async function writeSandboxedText(text: string, outputPath: string, extension = '.md'): Promise<{ filePath: string; sizeBytes: number }> {
     const bytes = Buffer.from(text, 'utf8');
     if (bytes.byteLength > MAX_BASE64_OUTPUT_BYTES) {
-        throw new ToolError('OUTPUT_TOO_LARGE', `The text artifact (${bytes.byteLength} bytes) exceeds the maximum allowed size (${MAX_BASE64_OUTPUT_BYTES} bytes).`);
+        throw new ToolError('OUTPUT_TOO_LARGE', `The text artifact (${bytes.byteLength} bytes) exceeds the maximum allowed size (${MAX_BASE64_OUTPUT_BYTES} bytes) — shorten the draft.`, { sizeBytes: bytes.byteLength, cap: MAX_BASE64_OUTPUT_BYTES });
     }
     const resolved = resolveOutputFile(outputPath, [extension]);
     await writeExclusive(resolved, bytes, relativeLabel(resolved));

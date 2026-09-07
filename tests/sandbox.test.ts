@@ -199,7 +199,8 @@ describe('exclusive writes', () => {
         const oversized = { byteLength: MAX_FILE_OUTPUT_BYTES + 1 } as unknown as Uint8Array;
         const file = await codeOf(emitArchive(oversized, { mode: 'file', outputPath: 'huge.zip' }));
         expect(file.code).toBe('OUTPUT_TOO_LARGE');
-        expect(file.message).toContain('file cap');
+        expect(file.message).toContain('file cap — split the content');
+        expect(file.data).toEqual({ sizeBytes: MAX_FILE_OUTPUT_BYTES + 1, cap: MAX_FILE_OUTPUT_BYTES });
         await expect(fs.stat(path.join(sandboxDir, 'huge.zip'))).rejects.toThrow();
     });
 
@@ -226,6 +227,7 @@ describe('exclusive writes', () => {
         }
         const capped = await codeOf(emitArchiveStream(oversized(), 'streamed/capped.zip'));
         expect(capped.code).toBe('OUTPUT_TOO_LARGE');
+        expect(capped.message).toContain('split the content');
         await expect(fs.stat(path.join(sandboxDir, 'streamed', 'capped.zip'))).rejects.toThrow();
         // Non-container extensions are refused before the stream is opened.
         expect((await codeOf(emitArchiveStream(good(), 'streamed/raw.bin'))).code).toBe('INVALID_EXTENSION');

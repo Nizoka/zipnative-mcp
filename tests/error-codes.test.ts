@@ -242,7 +242,7 @@ describe('previously uncovered codes', () => {
         }
         expect(err?.code).toBe('INPUT_TOO_LARGE');
         expect(err?.message).toContain(`${MAX_BASE64_INPUT_BYTES}-byte cap`);
-        expect(err?.data).toEqual({ what: 'zipBase64 (decoded)', observed: MAX_BASE64_INPUT_BYTES + 1, cap: MAX_BASE64_INPUT_BYTES });
+        expect(err?.data).toEqual({ what: 'zipBase64 (decoded)', observed: MAX_BASE64_INPUT_BYTES + 1, cap: MAX_BASE64_INPUT_BYTES, remedy: 'zipPath' });
     });
 
     it('ENTRY_NOT_UTF8: reading binary content as text names the remedy', async () => {
