@@ -31,7 +31,7 @@ the MCP registry publication job, Zip64 streaming, the engine's 1.1.0 asks (UTC 
 the engine, the zlib table removed).
 
 Counts (`docs/assets/ecosystem.json`): 15 tools (13 → 15), 7 prompts, 17 wrapper codes (16 → 17), 8 operator variables
-(7 → 8); examples 30 → 38; samples in the baseline 41 → 54; veraZIP corpus 38 → 43 archives; tests 1641 across
+(7 → 8); examples 30 → 38; samples in the baseline 41 → 54; veraZIP corpus 38 → 43 archives; tests 1643 across
 79 files.
 
 ## What changed
@@ -83,7 +83,7 @@ What actually ran on the release branch (Windows 11, Node 22.23.2):
 | Command | Result |
 |---|---|
 | `npx tsx scripts/gate.ts --publish --require-all` | 15 steps passed, 0 skipped (typecheck:all, lint, build, dist-check, dist-probe, smoke — 15 tools, verify:tool-shape, server-json, test:generate — 54 samples, test:coverage, verify:docs, verify:samples, corpus:zip — 39 conformant, 4 canaries, verazip, examples:check) |
-| `npm run test:coverage` — tests | 1633 passed, 8 skipped (the slow tests, run apart), 0 failed (1641) across 79 files |
+| `npm run test:coverage` — tests | 1635 passed, 8 skipped (the slow tests, run apart), 0 failed (1643) across 79 files |
 | `npm run test:coverage` — coverage | 98.16 % statements / 94.78 % branches / 98.74 % functions / 98.8 % lines (thresholds 94 / 90 / 95 / 94) |
 | `npm run build && npm run test:generate && npm run verify:samples` | 54 tracked samples match the baseline (16 byte-exact, 38 semantic) |
 | `npm run validate:zip` | 39 PASS, 4 XFAIL, 0 FAIL, 0 XPASS, 0 INFRA (of 43); level 1 locally: Info-ZIP unzip 6.00, 39/39 (the CI images add 7z, python, jar and bsdtar) |
@@ -107,7 +107,9 @@ A final independent review (fresh reviewer, the artefact, the fix commits, the b
 closed on the branch — a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame now run in the publish gate and
 weekly (`ZIPNATIVE_MCP_SLOW_TESTS`), a `__proto__` key is tested over a real stdio frame (the SDK strips a root-level
 one before the server; a nested one is `VALIDATION_ERROR`; an object whose prototype was replaced is refused by
-`parseInput`), and `release-prepare` re-dates the CHANGELOG heading and the Security Insights stamps.
+`parseInput`), `release-prepare` re-dates the CHANGELOG heading and the Security Insights stamps, `Cache-Control: no-store` now
+holds on the legacy-era 200 too (the SDK set `no-cache, no-transform` there — R-027, the review's one major), the
+head-before-body refusals are proven on `dist/cli.js`, and `scripts/README.md` documents the tooling as the siblings do.
 The 30 v1.0.0 examples replayed against the 1.1.0 build keep their shape. `tools/list` went from 134 857 to 118 944 bytes (`tool-shape.ts --stats`)
 (shorter shared descriptions, same schema shape).
 

@@ -8,6 +8,7 @@
  * CI (see tests/cli-stdio.test.ts).
  */
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import net from 'node:net';
 import { createServer as createNetServer, type AddressInfo } from 'node:net';
 
 import { describe, expect, it } from 'vitest';
@@ -112,5 +113,48 @@ describe.skipIf(!hasDist)('A-016: dist/cli.js in HTTP mode', () => {
         expect(stderr).toContain('ZIPNATIVE_MCP_HTTP_TOKEN');
         expect(stderr).not.toContain('short');
         expect(await portIsFree(port)).toBe(true);
+    }, 30_000);
+});
+
+describe.skipIf(!hasDist)('A-015 / R-012: the built server refuses on the headers before reading the body', () => {
+    /** Write only the request head (a large declared body never sent) and wait for a response line. */
+    function headOnly(port: number, host: string, extraHeaders = ''): Promise<string> {
+        return new Promise((resolve, reject) => {
+            const socket = net.connect(port, '127.0.0.1');
+            let received = '';
+            const timer = setTimeout(() => { socket.destroy(); reject(new Error('no response to a head-only request within 5 s (the server waited for the body)')); }, 5000);
+            socket.on('data', (c: Buffer) => {
+                received += c.toString('utf8');
+                if (received.includes('\r\n\r\n')) { clearTimeout(timer); socket.destroy(); resolve(received); }
+            });
+            socket.on('error', (e) => { clearTimeout(timer); reject(e); });
+            socket.on('connect', () => {
+                socket.write(`POST /mcp HTTP/1.1\r\nHost: ${host}\r\nContent-Type: application/json\r\nAccept: application/json, text/event-stream\r\nContent-Length: 10485760\r\n${extraHeaders}\r\n`);
+            });
+        });
+    }
+
+    it('a foreign Host is 403 while 10 MiB of body are still unsent', async () => {
+        const session = await startHttpServer();
+        try {
+            const response = await headOnly(session.port, 'evil.example');
+            expect(response).toMatch(/^HTTP\/1\.1 403/);
+            expect(response.toLowerCase()).toContain('cache-control: no-store');
+        } finally {
+            session.child.kill('SIGTERM');
+            await session.exited;
+        }
+    }, 30_000);
+
+    it('a missing bearer token is 401 while the body is still unsent', async () => {
+        const session = await startHttpServer({ ZIPNATIVE_MCP_HTTP_TOKEN: 'a-long-enough-test-token-0123' });
+        try {
+            const response = await headOnly(session.port, `127.0.0.1:${session.port}`);
+            expect(response).toMatch(/^HTTP\/1\.1 401/);
+            expect(response.toLowerCase()).toContain('www-authenticate: bearer realm="zipnative-mcp"');
+        } finally {
+            session.child.kill('SIGTERM');
+            await session.exited;
+        }
     }, 30_000);
 });

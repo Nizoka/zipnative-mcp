@@ -4,7 +4,7 @@ import type { Socket } from 'node:net';
 
 import { ensureEngineReady } from '../src/server.js';
 import { HTTP_SERVER_LIMITS, MAX_REQUEST_BODY_BYTES, SECURITY_HEADERS } from '../src/http.js';
-import { startHttpFixture, send, modernRequest, JSON_HEADERS, type HttpFixture } from './_http-fixture.js';
+import { startHttpFixture, send, modernRequest, legacyInitBody, JSON_HEADERS, type HttpFixture } from './_http-fixture.js';
 
 /**
  * HTTP transport hardening regressions:
@@ -83,12 +83,14 @@ describe('HTTP transport — 1.1.0 hardening: SDK body bound, timeouts, security
         expect(result._meta?.error?.code).toBe('VALIDATION_ERROR');
     });
 
-    it('every response carries nosniff and no-store, the MCP answer and the 404 alike', async () => {
+    it('R-027: every response carries nosniff and no-store — the modern answer, the legacy-era 200 (whose SDK Cache-Control is overridden) and the 404 alike', async () => {
         const { headers, body } = modernRequest('tools/list');
         const ok = await send(fx.port, { headers, body });
+        const legacy = await send(fx.port, { headers: { ...JSON_HEADERS }, body: legacyInitBody() });
+        expect(legacy.status).toBe(200);
         const missing = await send(fx.port, { path: '/elsewhere', headers, body });
         expect(missing.status).toBe(404);
-        for (const r of [ok, missing]) {
+        for (const r of [ok, legacy, missing]) {
             for (const [name, value] of Object.entries(SECURITY_HEADERS)) expect(r.headers[name.toLowerCase()]).toBe(value);
         }
     });

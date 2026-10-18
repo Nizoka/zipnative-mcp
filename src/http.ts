@@ -142,6 +142,9 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
     response.headers.forEach((value, key) => {
         headers[key] = value;
     });
+    // The SDK sets its own Cache-Control on a legacy-era 200 (`no-cache, no-transform`); the
+    // documented promise is `no-store` on every response, so the security headers win (R-027).
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers[name.toLowerCase()] = value;
     res.writeHead(response.status, headers);
     if (response.body === null) {
         res.end();

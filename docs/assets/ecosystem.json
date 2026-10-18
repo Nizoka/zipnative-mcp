@@ -18,12 +18,12 @@
     }
   },
   "declared": {
-    "tests": 1641,
+    "tests": 1643,
     "coverageStatements": 94,
     "coverageBranches": 90,
     "coverageFunctions": 95,
     "coverageLines": 94,
-    "coverageMeasured": 98.17,
+    "coverageMeasured": 98.18,
     "coverageMeasuredBranches": 94.82,
     "coverageMeasuredFunctions": 98.74,
     "coverageMeasuredLines": 98.81,
