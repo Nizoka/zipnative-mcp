@@ -286,6 +286,14 @@ describe('verazip.yml', () => {
         expect(wf).not.toMatch(/^\s*continue-on-error:/m);
     });
 
+    it('R-slow: the weekly schedule runs the slow tests on the Linux leg', () => {
+        const slow = steps[index('Slow tests (weekly schedule)')] ?? '';
+        expect(slow).toMatch(/if: github\.event_name == 'schedule' && runner\.os == 'Linux'/);
+        expect(slow).toMatch(/ZIPNATIVE_MCP_SLOW_TESTS:\s*'1'/);
+        expect(slow).toMatch(/npx vitest run tests\/zip64-streaming\.test\.ts tests\/cli-stdio\.test\.ts/);
+        expect(wf).toMatch(/schedule:\s*\n\s*- cron:/);
+    });
+
     it('declares the corpus counts docs/data/verazip.json declares', () => {
         const declared = (JSON.parse(readText('docs', 'data', 'verazip.json')) as {
             declared: { conformant: number; nonConformant: number; hostileConformant: number };
@@ -341,6 +349,11 @@ describe('publish.yml', () => {
     it('A-004: the publish gate fails closed on veraZIP (VERAZIP_REQUIRED on the gate step)', () => {
         const gate = (jobs.get('verify') ?? []).find((s) => s.includes('scripts/gate.ts --publish --require-all')) ?? '';
         expect(gate).toMatch(/VERAZIP_REQUIRED:\s*'1'/);
+    });
+
+    it('R-slow: the publish gate runs the slow tests (ZIPNATIVE_MCP_SLOW_TESTS on the gate step)', () => {
+        const gate = (jobs.get('verify') ?? []).find((s) => s.includes('scripts/gate.ts --publish --require-all')) ?? '';
+        expect(gate).toMatch(/ZIPNATIVE_MCP_SLOW_TESTS:\s*'1'/);
     });
 
     it('A-010: the pinned npm client is installed without lifecycle scripts', () => {

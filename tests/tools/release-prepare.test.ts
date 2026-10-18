@@ -19,6 +19,9 @@ import {
     bumpSecurityTable,
     bumpReadmeEngineBadge,
     bumpCurrentRelease,
+    bumpChangelogDate,
+    bumpInsightsDates,
+    changelogHeading,
     scaffoldFromTemplate,
     parseArgs,
     main,
@@ -275,6 +278,28 @@ describe('release-prepare: README badge and Current-release prose', () => {
     it('lists CLAUDE.md, whose Current release line is real', () => {
         expect(CURRENT_RELEASE_FILES).toContain('CLAUDE.md');
         expect(bumpCurrentRelease(readFileSync(join(ROOT, 'CLAUDE.md'), 'utf8'), '9.9.9').matched).toBe(1);
+    });
+});
+
+describe('release-prepare: release dates (a slipped tag)', () => {
+    it('re-dates the CHANGELOG heading of the version only, and reports 0 when the entry is not written yet', () => {
+        const text = '## [Unreleased]\n\n## [1.1.0] - 2026-10-18\n\n## [1.0.0] - 2026-09-07\n';
+        expect(bumpChangelogDate(text, '1.1.0', '2026-10-25').text).toBe('## [Unreleased]\n\n## [1.1.0] - 2026-10-25\n\n## [1.0.0] - 2026-09-07\n');
+        expect(bumpChangelogDate(text, '1.2.0', '2026-10-25').matched).toBe(0);
+        expect(changelogHeading('1.1.0').test('## [1.10.0] - 2026-01-01')).toBe(false);
+    });
+
+    it('re-stamps last-updated and last-reviewed, quoted, and nothing else', () => {
+        const text = "header:\n  schema-version: 2.0.0\n  last-updated: '2026-10-18'\n  last-reviewed: '2026-10-18'\n  url: x\n";
+        const r = bumpInsightsDates(text, '2026-10-25');
+        expect(r.matched).toBe(2);
+        expect(r.text).toBe("header:\n  schema-version: 2.0.0\n  last-updated: '2026-10-25'\n  last-reviewed: '2026-10-25'\n  url: x\n");
+    });
+
+    it('matches the real CHANGELOG heading of the current version and the real Security Insights stamps', () => {
+        const version = (JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as { version: string }).version;
+        expect(bumpChangelogDate(readFileSync(join(ROOT, 'CHANGELOG.md'), 'utf8'), version, '2099-01-01').matched).toBe(1);
+        expect(bumpInsightsDates(readFileSync(join(ROOT, '.github', 'SECURITY-INSIGHTS.yml'), 'utf8'), '2099-01-01').matched).toBe(2);
     });
 });
 

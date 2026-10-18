@@ -13,6 +13,8 @@
  *      and the "Verified on" stamp of every file verify-docs holds to it
  *      (llms.txt, docs/KNOWLEDGE_BASE.md, docs/AGENT_CONTRACT.md)
  *   4. CITATION.cff `version` + `date-released`
+ *   4b. CHANGELOG.md `## [X.Y.Z] - date` heading (when the entry exists) and
+ *       .github/SECURITY-INSIGHTS.yml `last-updated` / `last-reviewed`
  *   5. SECURITY.md supported-versions table
  *   6. README.md engine badge (the engine version is the package.json
  *      dependency floor) and the `Current release X.Y.Z` prose of llms.txt,
@@ -270,6 +272,26 @@ export function bumpCurrentRelease(text: string, version: string): Rewrite {
 /** The prose that names the server's current release (each one optional). */
 export const CURRENT_RELEASE_FILES: readonly string[] = ['llms.txt', 'CLAUDE.md', 'AGENTS.md', '.github/copilot-instructions.md'];
 
+// ── 8. Release dates a slipped tag leaves stale ─────────────────────
+
+/** The `## [X.Y.Z] - YYYY-MM-DD` heading of the version's CHANGELOG entry. */
+export function changelogHeading(version: string): RegExp {
+    return new RegExp(`^(## \\[${version.replace(/\./g, '\\.')}\\] - )(\\d{4}-\\d{2}-\\d{2})`, 'm');
+}
+
+/** Re-date the version's CHANGELOG heading; 0 matches when the entry is not written yet. */
+export function bumpChangelogDate(text: string, version: string, date: string): Rewrite {
+    return replaceCounting(text, changelogHeading(version), (_m, a) => `${a}${date}`);
+}
+
+const INSIGHTS_DATES = /^([ \t]*last-(?:updated|reviewed):[ \t]*)['"]?(\d{4}-\d{2}-\d{2})['"]?/gm;
+export const INSIGHTS_DATE_LINE = /^[ \t]*last-(?:updated|reviewed):/m;
+
+/** Re-stamp the OpenSSF Security Insights review dates (quoted, as the file writes them). */
+export function bumpInsightsDates(text: string, date: string): Rewrite {
+    return replaceCounting(text, INSIGHTS_DATES, (_m, a) => `${a}'${date}'`);
+}
+
 // ── 7. Release note and PR draft scaffolds ──────────────────────────
 
 /**
@@ -453,12 +475,17 @@ export function main(argv: readonly string[], root = resolve(import.meta.dirname
     scaffold(`release-notes/v${version}.md`, 'release-notes/TEMPLATE.md');
     scaffold(`.github/drafts/pr-v${version}.md`, 'release-notes/PR_TEMPLATE.md');
 
+    say('\n8. Release dates (a tag that slips re-runs this step)');
+    editOptional('CHANGELOG.md', `## [${version}] heading dated ${date}`, changelogHeading(version), (t) => bumpChangelogDate(t, version, date));
+    editOptional('.github/SECURITY-INSIGHTS.yml', `last-updated / last-reviewed ${date}`, INSIGHTS_DATE_LINE, (t) => bumpInsightsDates(t, date));
+
     say(`
 Next steps
   1. git diff --stat                      review: the diff should read as the bump and nothing else
   2. npm run verify:docs                  every count and version the docs quote
   3. write release-notes/v${version}.md and the CHANGELOG.md entry ## [${version}] - ${date}
-     (every sample rebaseline goes in the note's Upgrade section; add the compare link)
+     (every sample rebaseline goes in the note's Upgrade section; add the compare link;
+     re-run this script with --date if the tag slips: it re-dates the heading and the Security Insights stamps)
   4. decide whether TOOL_API_VERSION moves (docs/API_STABILITY.md) — it is not bumped here
   5. npx tsx scripts/gate.ts --publish --require-all   the full release gate, veraZIP included (previous release: v${previousVersion})
   6. fill .github/drafts/pr-v${version}.md — every figure from a command run on the branch

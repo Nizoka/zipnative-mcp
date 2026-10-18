@@ -163,6 +163,9 @@ jobs:
         env:
           # Fail closed: no usable level-1 extractor is an INFRA failure (exit 3), never a skip.
           VERAZIP_REQUIRED: '1'
+          # The slow tests run before every publish: the 256 MiB stdio frame edge and the
+          # 4 GiB + 1 Zip64 stream written into the sandbox and read back by ranges.
+          ZIPNATIVE_MCP_SLOW_TESTS: '1'
         run: npx tsx scripts/gate.ts --publish --require-all
 
       - name: Show the package contents

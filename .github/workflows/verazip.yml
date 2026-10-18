@@ -170,6 +170,16 @@ jobs:
           echo "exit_code=${code}" >> "$GITHUB_OUTPUT"
           exit "${code}"
 
+      # Weekly only, Linux leg: the slow tests — the 256 MiB stdio frame edge and the
+      # 4 GiB + 1 Zip64 stream written into the sandbox and read back by ranges — prove
+      # the large-archive promise on a real runner (about 8 GiB of disk, minutes). Too
+      # slow for every pull request; the publish gate runs them again before a release.
+      - name: Slow tests (weekly schedule)
+        if: github.event_name == 'schedule' && runner.os == 'Linux'
+        env:
+          ZIPNATIVE_MCP_SLOW_TESTS: '1'
+        run: npx vitest run tests/zip64-streaming.test.ts tests/cli-stdio.test.ts
+
       # Per-file JSON reports + summary.json live under
       # test-output/zip/reports/ — upload them so a FAIL / INFRA line can be
       # diagnosed without re-running the job.
