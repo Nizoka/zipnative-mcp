@@ -1,0 +1,254 @@
+{
+  "$comment": "Fingerprints of every sample in test-output/samples/ (written by the BUILT server, scripts/generate-samples.ts). Regenerate deliberately with `npx tsx scripts/verify-samples.ts --update`, and say why in the release notes: a changed hash means existing output changed. Mode `bytes` is a SHA-256 of the file (every archive written over pinned inputs: DOS-epoch default timestamps, explicit dates written in UTC, canonical layout); mode `semantic` is a SHA-256 of the canonical JSON of the result without its volatile members (filePath, outputDir: absolute paths into a temporary sandbox) and with its host members neutralised (the core count of describe_engine.capabilities and the Node / OS lines of a governance draft: the baseline is made on one machine and held on every CI runner). Each entry's `since` names the release whose output the hash is: it is carried forward untouched while the sample is unchanged, and moves to the release doing the rebaseline when the hash changes, so the chain 1.0.0 -> 1.1.0 -> … stays auditable and every re-anchoring is visible in the diff.",
+  "baselineVersion": "1.0.0",
+  "provenance": "1.0.0 baseline: captured on 2026-10-18 from the v1.0.0 tree (commit 144af6d, zipnative 1.0.0, @modelcontextprotocol/server 2.0.0) before any 1.1.0 change, by running every examples/*.json through the built server under TZ=UTC over the frozen inputs of tests/fixtures/examples/ (pinned by tests/fixtures/SHA256SUMS). Under TZ=UTC the 1.0.0 engine wrote DOS fields from UTC, so these hashes are also what 1.1.0 must write on every host once dosTimeMode: 'utc' is pinned; an entry that moves to a later since is a deliberate rebaseline explained in that release's notes.",
+  "timezone": "UTC",
+  "entries": {
+    "crc32.json": {
+      "mode": "semantic",
+      "hash": "a26991b8834c4c473c457aad888104c00a683779c163f7a2a7fcf042c49d2912",
+      "size": 197,
+      "since": "1.0.0"
+    },
+    "create-basic.json": {
+      "mode": "semantic",
+      "hash": "ec57163cbab1ba14e5c28612f0a75d68d424144b6d4da1de8919c8056c97faaa",
+      "size": 488,
+      "since": "1.0.0"
+    },
+    "create-basic.zip": {
+      "mode": "bytes",
+      "hash": "ddaa00f3bfbd47ba5db601584b048de89a46a20c8f4272b1977b832dba88f0d0",
+      "size": 381,
+      "since": "1.0.0"
+    },
+    "create-deterministic.json": {
+      "mode": "semantic",
+      "hash": "dc579995dee0e250bea90a4a2c3803c2e67550fa9ec25b2936e5a4eba2f9e759",
+      "size": 565,
+      "since": "1.0.0"
+    },
+    "create-deterministic.zip": {
+      "mode": "bytes",
+      "hash": "3454c3d969f7df97dc7b0780ff590c4419300f187b0d5b3a6bd8500a74b60b48",
+      "size": 235,
+      "since": "1.0.0"
+    },
+    "create-insertion-order-epub.json": {
+      "mode": "semantic",
+      "hash": "4536564942d9b6441c6a6f81fb30ef63aed042e1a75f65d376b01a77953c5d91",
+      "size": 489,
+      "since": "1.0.0"
+    },
+    "create-insertion-order-epub.zip": {
+      "mode": "bytes",
+      "hash": "fe4e12d2fcffffde13b6cee3f8e62c1ffc8d1b5374e6b58f03bb3fb9e53bd23e",
+      "size": 608,
+      "since": "1.0.0"
+    },
+    "create-parallel.json": {
+      "mode": "semantic",
+      "hash": "a283435fd1e5ff5d6a150135d4e1fb8a49ba4e7c9e4d23feeac1c3788a391cdf",
+      "size": 488,
+      "since": "1.0.0"
+    },
+    "create-parallel.zip": {
+      "mode": "bytes",
+      "hash": "c1ce8fa4020b7893997936f17707b10cab056b8b38e552fc8bb005d0d70843b8",
+      "size": 208,
+      "since": "1.0.0"
+    },
+    "create-streamed-source.json": {
+      "mode": "semantic",
+      "hash": "6c78baf93e136b134bd392e87a9c38c37b5c403ef9e51e4e750043febd11e11f",
+      "size": 710,
+      "since": "1.0.0"
+    },
+    "create-streamed-source.zip": {
+      "mode": "bytes",
+      "hash": "b955fd658e54cbb7788828abf260475d6d9888b59d78bb5d517954c9370bfc0c",
+      "size": 864,
+      "since": "1.0.0"
+    },
+    "create-with-attributes.json": {
+      "mode": "semantic",
+      "hash": "e9ce7a3cdc4a31776fb4618636f2530af854b5d0f76472a0bc06f425508420a0",
+      "size": 488,
+      "since": "1.0.0"
+    },
+    "create-with-attributes.zip": {
+      "mode": "bytes",
+      "hash": "4dbbd1a79ac208673091a6e443d23b86bb6dc3f75ac65a06e54d0253cc13a9ba",
+      "size": 299,
+      "since": "1.0.0"
+    },
+    "describe-engine.json": {
+      "mode": "semantic",
+      "hash": "63411756994f394f24d0bf1ff642a63df31af845496dda30c7d32369d0b0b962",
+      "size": 1601,
+      "since": "1.0.0"
+    },
+    "draft-governance-issue.json": {
+      "mode": "semantic",
+      "hash": "dd7465234b306a8e76568e9f9d096b2440a6800750ead889f370f3ff93d986dc",
+      "size": 4655,
+      "since": "1.0.0"
+    },
+    "extract-inline-filter.json": {
+      "mode": "semantic",
+      "hash": "c95d66c80c7ad75ada02c088b8f508f71f0e40f21ae5902beaa3ce7fdb5c7d70",
+      "size": 403,
+      "since": "1.0.0"
+    },
+    "extract-safe-dry-run.json": {
+      "mode": "semantic",
+      "hash": "796d4b8310b66519ae751a1e3b178fd9ea73ab5c1deb8be734db9723e58267bd",
+      "size": 590,
+      "since": "1.0.0"
+    },
+    "extract-to-sandbox.json": {
+      "mode": "semantic",
+      "hash": "34f99960fef53718fe11394110ae040b405e739a44da5ad7eb967d70c94b4e91",
+      "size": 1633,
+      "since": "1.0.0"
+    },
+    "hostile-zip-slip-refused.json": {
+      "mode": "semantic",
+      "hash": "838ff5f6d47d9317c0ac6b4279d203e348bb961dfb963b313204df431db3d7b8",
+      "size": 670,
+      "since": "1.0.0"
+    },
+    "inflate-raw.bin": {
+      "mode": "bytes",
+      "hash": "d4e10166a657fc3f93818e86c62b43bf5e8919edd4130d219009a0108b130cd9",
+      "size": 17,
+      "since": "1.0.0"
+    },
+    "inflate-raw.json": {
+      "mode": "semantic",
+      "hash": "f0d12199b59385ccf6ba29db350b6512e8ce64f41623e05e9c2b0da01ad52196",
+      "size": 400,
+      "since": "1.0.0"
+    },
+    "inspect-check-ci.json": {
+      "mode": "semantic",
+      "hash": "52d95b3b532eb0476310ae7e7ac1e10c9a3069fbadb61d066423fbe4a103ddc7",
+      "size": 1689,
+      "since": "1.0.0"
+    },
+    "inspect-summary.json": {
+      "mode": "semantic",
+      "hash": "c5ead606844cbe895529c37afbe11d9ca433bf7b0010de4bb55221549ba2d53c",
+      "size": 385,
+      "since": "1.0.0"
+    },
+    "list-entries-glob.json": {
+      "mode": "semantic",
+      "hash": "dea5cf3b780d347d750153c9a4483deef384921a0289efac6c174bf2ba99978e",
+      "size": 364,
+      "since": "1.0.0"
+    },
+    "modify-append.json": {
+      "mode": "semantic",
+      "hash": "b68dc75fe8e312097416196834baa3f959c4feed92d5c2aaf777a805031f09fe",
+      "size": 437,
+      "since": "1.0.0"
+    },
+    "modify-append.zip": {
+      "mode": "bytes",
+      "hash": "20c604ce823a745b81a81b16f69af9500555645bca3eb3cfd11b912f6c811051",
+      "size": 946,
+      "since": "1.0.0"
+    },
+    "modify-compact.json": {
+      "mode": "semantic",
+      "hash": "6538d122c483a7611b087e8e6eaa499293cb25b01e500ef86d399da2eb02aec2",
+      "size": 515,
+      "since": "1.0.0"
+    },
+    "modify-compact.zip": {
+      "mode": "bytes",
+      "hash": "ec06c6cab0673cfb245807375f7ff11956226a1d9c918c93201e3756319f8ad5",
+      "size": 372,
+      "since": "1.0.0"
+    },
+    "modify-rename.json": {
+      "mode": "semantic",
+      "hash": "32c12f0056a4c7cf47325e6e1629093e926ea74727f28dc49f5723f559238194",
+      "size": 437,
+      "since": "1.0.0"
+    },
+    "modify-rename.zip": {
+      "mode": "bytes",
+      "hash": "561ab8dfc1d25a72b30b92b0291e05e267f44cf3b0b493c4bd44618fffacc01d",
+      "size": 858,
+      "since": "1.0.0"
+    },
+    "read-entry-range.json": {
+      "mode": "semantic",
+      "hash": "f869b8b58fee1e217bcda69b907c80fec16411fb9b07d3edb62649da01866440",
+      "size": 1072,
+      "since": "1.0.0"
+    },
+    "read-entry-raw.json": {
+      "mode": "semantic",
+      "hash": "454f735c48b2dedba561be2fd6c898ec4de9faee09ff2c2a85ba54507adbe591",
+      "size": 1014,
+      "since": "1.0.0"
+    },
+    "read-entry-text.json": {
+      "mode": "semantic",
+      "hash": "cb70f1008770156abe432dfc58a40afae6f9ab6af2db9c0209e7c3a86ea0be2c",
+      "size": 974,
+      "since": "1.0.0"
+    },
+    "roundtrip-create-verify-extract.json": {
+      "mode": "semantic",
+      "hash": "1066c5e97496200ba6b7ebce3bd6bcc3503a552d868fce74bc4163149740d553",
+      "size": 1309,
+      "since": "1.0.0"
+    },
+    "roundtrip-create-verify-extract.step1.zip": {
+      "mode": "bytes",
+      "hash": "15d6cabfc022b38c0be4747f96c10b227c1c87e1f439b9f4acdee8274769db77",
+      "size": 285,
+      "since": "1.0.0"
+    },
+    "sanitize-paths.json": {
+      "mode": "semantic",
+      "hash": "c6f14f03e436b7bf2bea750c8de1a29ec5b077811945715940f1a4b20cc19d22",
+      "size": 675,
+      "since": "1.0.0"
+    },
+    "scan-forward-truncated.json": {
+      "mode": "semantic",
+      "hash": "4286db7d4fe0358d522b7670827af3aefd8a8ef6cae737befe6122b5fe3b41d9",
+      "size": 466,
+      "since": "1.0.0"
+    },
+    "scan-forward-verify.json": {
+      "mode": "semantic",
+      "hash": "cadebaeb0da82918000c1a36886a565ee313d5458cb39a370a3d90117d331e12",
+      "size": 506,
+      "since": "1.0.0"
+    },
+    "token-frugal-verify.json": {
+      "mode": "semantic",
+      "hash": "0e51b7d31bd7fec4a9db05a97b55d8de4cbaefc66f6541eafc7cea79a51fea1a",
+      "size": 182,
+      "since": "1.0.0"
+    },
+    "verify-failed-entries.json": {
+      "mode": "semantic",
+      "hash": "4b56e5a422676196f48254a94f839457ed2fd3bccc55416fb6433a18df32afe7",
+      "size": 262,
+      "since": "1.0.0"
+    },
+    "verify-zip.json": {
+      "mode": "semantic",
+      "hash": "0e0061e4b9fe7c2ef70f44fcfe525a2d76e1032b5a863233f8295f50fb44d4ee",
+      "size": 618,
+      "since": "1.0.0"
+    }
+  }
+}
