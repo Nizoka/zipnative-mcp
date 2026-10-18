@@ -53,6 +53,14 @@ compressed payload into memory before decoding it, so the ninth `ZipLimits` key 
 that payload (default 1 GiB + 1 MiB; ceiling `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`;
 `ZIP_LIMIT_EXCEEDED` above it). The in-memory reader never consults it.
 
+**`limits.maxEntryUncompressedSize` for entries above 1 GiB.** The engine's default
+bound on one entry's declared size (1 GiB) applies in range mode as everywhere else: an
+archive holding a 4 GiB entry is `ZIP_LIMIT_EXCEEDED` on open until the caller raises
+`limits.maxEntryUncompressedSize` (and `maxTotalUncompressedSize` when the sum matters),
+within the operator ceiling `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES` (8 GiB by default).
+`create_zip` writes such an entry without any limit (the bound guards reads), so an
+agent that just wrote a 4 GiB stream reads it back with the limit raised.
+
 ```jsonc
 // read_zip_entry — one entry of a large sandbox archive, no compressed payload above 64 MiB fetched
 { "zipPath": "big.zip", "name": "data/part-0001.bin", "access": "range", "limits": { "maxEntryCompressedSize": 67108864 } }

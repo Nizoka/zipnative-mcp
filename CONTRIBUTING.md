@@ -58,6 +58,8 @@ All new code must include tests. Coverage thresholds are enforced once, in `vite
 
 Opt-in git hooks: `npm run hooks:install` sets `core.hooksPath` to `.githooks/` for this clone (pre-commit and pre-push checks); `npm run hooks:uninstall` removes them. They are never activated automatically.
 
+Slow tests: the 256 MiB stdio frame edge and the real 4 GiB + 1 Zip64 stream (written into the sandbox, read back by byte ranges; about 8 GiB of disk and several minutes) run only under `ZIPNATIVE_MCP_SLOW_TESTS=1`. The publish gate and the weekly veraZIP run set it; run `ZIPNATIVE_MCP_SLOW_TESTS=1 npx vitest run tests/zip64-streaming.test.ts tests/cli-stdio.test.ts` before a release ([docs/guides/LOCAL_TESTING.md](docs/guides/LOCAL_TESTING.md) §2).
+
 ## Coding standards
 
 - TypeScript **strict** mode is mandatory; ESM with `.js` suffixes in relative imports; explicit return types on exports; 4-space indent, single quotes, trailing commas.

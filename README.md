@@ -669,7 +669,7 @@ npm run gate              # the CI profile: + build, dist checks, stdio smoke te
 npx tsx scripts/gate.ts --publish --require-all   # release branches: every step, a skipped step fails
 ```
 
-`npm run gate` ([`scripts/gate.ts`](scripts/gate.ts)) is the single definition of green — 1632 tests across 79 test files, the coverage thresholds of `vitest.config.ts` (94 / 90 / 95 / 94), and the **built** server driven over stdio, where stdout must carry JSON-RPC frames only. It prints one line per step and writes the logs to `test-output/.gate/<step>.log`; `--only <step>` runs one step, `--from <step>` resumes, `--json` gives machine output (call the script directly to pass flags: PowerShell swallows a bare `--` after `npm run`). The gate is hermetic: `TZ=UTC`, every inherited `ZIPNATIVE_MCP_*` variable scrubbed, no network. The individual steps are ordinary npm scripts:
+`npm run gate` ([`scripts/gate.ts`](scripts/gate.ts)) is the single definition of green — 1641 tests across 79 test files, the coverage thresholds of `vitest.config.ts` (94 / 90 / 95 / 94), and the **built** server driven over stdio, where stdout must carry JSON-RPC frames only. It prints one line per step and writes the logs to `test-output/.gate/<step>.log`; `--only <step>` runs one step, `--from <step>` resumes, `--json` gives machine output (call the script directly to pass flags: PowerShell swallows a bare `--` after `npm run`). The gate is hermetic: `TZ=UTC`, every inherited `ZIPNATIVE_MCP_*` variable scrubbed, no network. The individual steps are ordinary npm scripts:
 
 | Script | What it does |
 | ------ | ------------ |

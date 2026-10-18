@@ -61,6 +61,16 @@ forks pool, no shuffle), run under 60 s per file, and pass on Windows, macOS and
 (paths go through `node:path`; CRLF checkouts are handled). `.githooks/` holds an opt-in
 pre-commit / pre-push pair (`npm run hooks:install`).
 
+Two tests are too slow for every run and sit behind `ZIPNATIVE_MCP_SLOW_TESTS=1`: the
+256 MiB stdio frame edge (`tests/cli-stdio.test.ts`) and a real 4 GiB + 1 Zip64 stream
+written into the sandbox and read back by byte ranges (`tests/zip64-streaming.test.ts`,
+about 8 GiB of free disk under `test-output/`, several minutes). The publish gate and the
+weekly veraZIP run set the variable; locally, run them before a release:
+
+```bash
+ZIPNATIVE_MCP_SLOW_TESTS=1 npx vitest run tests/zip64-streaming.test.ts tests/cli-stdio.test.ts
+```
+
 ## 3. Verifying produced archives are correct
 
 An archive that merely starts with `PK` can still be structurally broken, lie about

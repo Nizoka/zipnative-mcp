@@ -31,7 +31,7 @@ the MCP registry publication job, Zip64 streaming, the engine's 1.1.0 asks (UTC 
 the engine, the zlib table removed).
 
 Counts (`docs/assets/ecosystem.json`): 15 tools (13 → 15), 7 prompts, 17 wrapper codes (16 → 17), 8 operator variables
-(7 → 8); examples 30 → 38; samples in the baseline 41 → 54; veraZIP corpus 38 → 43 archives; tests 1632 across
+(7 → 8); examples 30 → 38; samples in the baseline 41 → 54; veraZIP corpus 38 → 43 archives; tests 1641 across
 79 files.
 
 ## What changed
@@ -83,7 +83,7 @@ What actually ran on the release branch (Windows 11, Node 22.23.2):
 | Command | Result |
 |---|---|
 | `npx tsx scripts/gate.ts --publish --require-all` | 15 steps passed, 0 skipped (typecheck:all, lint, build, dist-check, dist-probe, smoke — 15 tools, verify:tool-shape, server-json, test:generate — 54 samples, test:coverage, verify:docs, verify:samples, corpus:zip — 39 conformant, 4 canaries, verazip, examples:check) |
-| `npm run test:coverage` — tests | 1625 passed, 7 skipped, 0 failed (1632) across 79 files |
+| `npm run test:coverage` — tests | 1633 passed, 8 skipped (the slow tests, run apart), 0 failed (1641) across 79 files |
 | `npm run test:coverage` — coverage | 98.16 % statements / 94.78 % branches / 98.74 % functions / 98.8 % lines (thresholds 94 / 90 / 95 / 94) |
 | `npm run build && npm run test:generate && npm run verify:samples` | 54 tracked samples match the baseline (16 byte-exact, 38 semantic) |
 | `npm run validate:zip` | 39 PASS, 4 XFAIL, 0 FAIL, 0 XPASS, 0 INFRA (of 43); level 1 locally: Info-ZIP unzip 6.00, 39/39 (the CI images add 7z, python, jar and bsdtar) |
@@ -103,6 +103,11 @@ blocker / major / minor finding is fixed on this branch with a lock test named a
 `tests/sandbox.test.ts` A-013, `tests/cli-stdio.test.ts` A-020, `tests/tools/workflows.test.ts` A-004 / A-009 / A-010)
 or a documentation fix; A-005 and A-008 are repository settings (steps 3 and 4 below); three engine root causes are
 drafted for zipnative (`.github/drafts/issue-zipnative-{verifyzip-signal,eager-local-headers,diagnostic-doc-path}.md`).
+A final independent review (fresh reviewer, the artefact, the fix commits, the blind spots) followed: its findings are
+closed on the branch — a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame now run in the publish gate and
+weekly (`ZIPNATIVE_MCP_SLOW_TESTS`), a `__proto__` key is tested over a real stdio frame (the SDK strips a root-level
+one before the server; a nested one is `VALIDATION_ERROR`; an object whose prototype was replaced is refused by
+`parseInput`), and `release-prepare` re-dates the CHANGELOG heading and the Security Insights stamps.
 The 30 v1.0.0 examples replayed against the 1.1.0 build keep their shape. `tools/list` went from 134 857 to 118 944 bytes (`tool-shape.ts --stats`)
 (shorter shared descriptions, same schema shape).
 
@@ -163,6 +168,7 @@ The 30 v1.0.0 examples replayed against the 1.1.0 build keep their shape. `tools
 
 Agents stop at this draft; everything below is done by the maintainer (`.github/AGENT_RULES.md`).
 
+0. If the tag is not created on 2026-10-18, re-run `npx tsx scripts/release-prepare.ts --version 1.1.0 --previous v1.0.0 --date <YYYY-MM-DD>`: it re-dates CITATION.cff, the ecosystem manifest and its stamps, the `## [1.1.0]` CHANGELOG heading and the Security Insights review dates; then set `_Released …_` in `release-notes/v1.1.0.md` by hand and commit.
 1. Push the branch, open the pull request with this body, wait for `ci (22)`, `ci (24)`, `os (windows-latest)`, `os (macos-latest)`, `sample-regression`, `verazip (ubuntu-latest)` and `verazip (windows-latest)`, merge.
 2. Close PRs #2, #4, #11 with the reasons above, and #3, #5, #6, #7, #8, #12, #13 as integrated if they do not close themselves; dismiss code-scanning #2 (won't fix, reason above) and, at your discretion, #5 and #6.
 3. Replace the live ruleset (it targets no branch): `gh api -X PUT repos/Nizoka/zipnative-mcp/rulesets/22472183 --input .github/rulesets/main.json`, then create the tag ruleset with `gh api -X POST repos/Nizoka/zipnative-mcp/rulesets --input .github/rulesets/tags.json`.

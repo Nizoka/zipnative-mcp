@@ -82,7 +82,7 @@ The consumer contract (results, the 17 wrapper codes, the 39 frozen `ZIP_*` code
 
 ## Counts and versions
 
-`docs/assets/ecosystem.json` is the source of every count and version (15 tools, 1632 tests, …). Coverage floors: 94 / 90 / 95 / 94.
+`docs/assets/ecosystem.json` is the source of every count and version (15 tools, 1641 tests, …). Coverage floors: 94 / 90 / 95 / 94.
 Engine zipnative 1.1.0 (`^1.1.0`); SDK `@modelcontextprotocol/server` ^2.3.1; Node ≥ 22.
 
 ## Releasing and governance

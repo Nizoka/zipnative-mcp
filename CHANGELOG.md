@@ -53,6 +53,7 @@ audit summary: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
 - **chore(errors):** the node:zlib table is gone; `scan_zip_forward` reports `ZIP_DEFLATE_*` where 1.0.0 reported `ZIP_DECOMPRESSION_FAILED` (C6).
 - **fix(http):** request bodies up to the documented 256 MiB (1.0.0 kept the SDK's 4 MiB default) (C10).
 - **chore(tooling):** veraZIP core re-vendored from zipnative 1.1.0 (23 check ids); corpus of 43 archives (39 conformant, 4 canaries).
+- **test(review):** a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame edge run under `ZIPNATIVE_MCP_SLOW_TESTS` (publish gate, weekly); prototype-pollution probes over a real stdio frame (the SDK strips a root `__proto__`, a nested one is `VALIDATION_ERROR`); `parseInput` refuses a replaced prototype; `release-prepare` re-dates the CHANGELOG heading and the Security Insights stamps.
 - **fix(audit):** cancellation reaches `compute_crc32` and `inflate_raw` and the start of `verify_zip` (A-003); `verify_zip` diagnostics de-duplicated and capped at 200 (B-009); `tools/list` about 12 % smaller through shorter shared descriptions (D-018); every documentation finding of the audit fixed; three upstream drafts for zipnative under `.github/drafts/`.
 
 ### Documentation
