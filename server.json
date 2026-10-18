@@ -41,7 +41,7 @@
         },
         {
           "name": "ZIPNATIVE_MCP_CACHE_DIR",
-          "description": "Opt-in content-addressed response cache directory (SHA-256 keyed, 1h TTL, 256 MiB LRU, plaintext at rest). Never caches zipPath / sourcePath inputs, file output, defaultDate='now', parallel, describe_engine or draft_governance_issue.",
+          "description": "Opt-in content-addressed response cache directory (absolute path) (SHA-256 keyed, 1h TTL, 256 MiB, oldest-written evicted first, plaintext at rest). Never caches zipPath / sourcePath inputs, file output, defaultDate='now', parallel, describe_engine or draft_governance_issue.",
           "isRequired": false,
           "isSecret": false,
           "format": "filepath"
@@ -61,7 +61,7 @@
         },
         {
           "name": "ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES",
-          "description": "Operator ceiling for limits.maxEntryUncompressedSize and limits.maxTotalUncompressedSize in bytes (default 8589934592 = 8 GiB, the engine default). Integer >= 1024, read once at startup; an invalid value refuses to start. A per-call value above it is refused with LIMIT_CEILING_EXCEEDED.",
+          "description": "Operator ceiling for limits.maxEntryUncompressedSize, limits.maxTotalUncompressedSize and limits.maxEntryCompressedSize in bytes (default 8589934592 = 8 GiB, the engine default). Integer >= 1024, read once at startup; an invalid value refuses to start. A per-call value above it is refused with LIMIT_CEILING_EXCEEDED.",
           "isRequired": false,
           "isSecret": false,
           "format": "number"

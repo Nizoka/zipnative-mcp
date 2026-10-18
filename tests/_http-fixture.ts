@@ -9,7 +9,7 @@ import type { AddressInfo } from 'node:net';
 import { createMcpHandler, type McpHttpHandler } from '@modelcontextprotocol/server';
 
 import { guardBearer } from '../src/auth.js';
-import { applySecurityHeaders, guardLoopback, hardenHttpServer, MAX_REQUEST_BODY_BYTES, RequestTooLargeError, sendWebResponse, toWebRequest } from '../src/http.js';
+import { applySecurityHeaders, guardLoopback, hardenHttpServer, MAX_REQUEST_BODY_BYTES, RequestTooLargeError, sendWebResponse, toWebHead, toWebRequest } from '../src/http.js';
 import { createServer } from '../src/server.js';
 
 export interface HttpFixture {
@@ -54,9 +54,15 @@ export async function startHttpFixture(opts?: HttpFixtureOptions): Promise<HttpF
                     res.end('Not Found. MCP endpoint is POST /mcp');
                     return;
                 }
+                const head = toWebHead(req, origin);
+                const refused = guardLoopback(head) ?? guardBearer(head, opts?.httpToken ?? null);
+                if (refused !== undefined) {
+                    req.resume();
+                    await sendWebResponse(res, refused);
+                    return;
+                }
                 const request = await toWebRequest(req, origin, res, opts?.maxBodyBytes !== undefined ? { maxBodyBytes: opts.maxBodyBytes } : undefined);
-                const response = guardLoopback(request) ?? guardBearer(request, opts?.httpToken ?? null) ?? (await handler.fetch(request));
-                await sendWebResponse(res, response);
+                await sendWebResponse(res, await handler.fetch(request));
             } catch (err) {
                 if (err instanceof RequestTooLargeError) {
                     if (!res.headersSent) res.writeHead(413, { 'Content-Type': 'text/plain' });

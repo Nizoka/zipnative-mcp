@@ -10,10 +10,11 @@
  *   - Key = SHA-256 of canonical JSON `{ tool, apiVersion, input }`.
  *   - Stored entries are JSON files (`<key>.json`) of the form
  *     `{ tool, apiVersion, createdAt, value }` plus an `.lock` discipline
- *     of last-modified time (mtime) used by the LRU eviction sweep.
+ *     of last-modified time (mtime) used by the eviction sweep.
  *   - TTL: 1 hour (3600 s) per entry.
- *   - Cap: 256 MiB across all `<key>.json` files combined; LRU eviction
- *     by mtime runs whenever a `set` would push the dir past the cap.
+ *   - Cap: 256 MiB across all `<key>.json` files combined; the oldest-written
+ *     entries (by mtime — a hit does not refresh it) are evicted whenever a
+ *     `set` would push the dir past the cap.
  *   - Outputs that write to the sandbox (outputMode='file') are NOT cached,
  *     because the produced filesystem side-effect is part of the contract.
  *   - The cache is purely local; no PII is hashed into the key besides the

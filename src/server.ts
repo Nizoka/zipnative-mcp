@@ -26,6 +26,7 @@ import { VERSION as ZIPNATIVE_VERSION } from 'zipnative';
 import { isPathInput } from './archive-input.js';
 import { cancelledError, NO_CONTEXT, progressReporter, type CallContext } from './call-context.js';
 import { getCached, setCached } from './cache.js';
+import { getCeilings } from './caps.js';
 import { ensureEngineReady } from './engine.js';
 import { redactAbsolutePaths, ToolError } from './errors.js';
 import { DRAFT_ISSUE_WORKFLOW, GOVERNANCE_CONTRACT_SUMMARY } from './governance.js';
@@ -98,6 +99,16 @@ const NON_CACHEABLE_TOOLS: ReadonlySet<string> = new Set([DESCRIBE_ENGINE_NAME, 
  * previous engine.
  */
 const CACHE_API_VERSION = `${TOOL_API_VERSION}/${ZIPNATIVE_MCP_VERSION}/${ZIPNATIVE_VERSION}`;
+
+/**
+ * The cache namespace: the tool API, package and engine versions plus the four operator ceilings
+ * (A-007) — a result stored under a looser ceiling is never served after the operator lowers it
+ * (a call that the lower ceiling refuses must be refused, not answered from the cache).
+ */
+export function cacheNamespace(): string {
+    const c = getCeilings();
+    return `${CACHE_API_VERSION}/ceilings:${c.maxUncompressedBytes},${c.maxEntries},${c.maxWorkers},${c.maxFileOutputBytes}`;
+}
 
 /** True when the call's input requests a file-mode output (filesystem side-effect). */
 function isFileOutput(input: unknown): boolean {
@@ -351,7 +362,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Modify archive (incremental, no recompression)',
         kind: 'archive-output',
         description:
-            "Edit an existing archive without recompressing anything: operations add / replace / remove / rename / setComment applied in order. mode 'append' (default) = save(): the original bytes stay verbatim and edits are appended — fast and byte-preserving, BUT removed or replaced payloads REMAIN in the file (data remanence: recoverable by anyone; a ZIP_DEAD_BYTES_RATIO diagnostic fires past 50 % dead bytes, and 7-Zip is known to read the stale payload). mode 'compact' = saveCompact(): a rewrite without the dead bytes (entries keep their order), still no recompression, removed data truly gone, SFX prefix dropped; add `canonical: {…}` for the canonical deterministic form (zipnative 1.1.0, the canonicalize_zip rules applied after the edits). No edits and an unchanged comment return the same bytes (`summary.noOp`). Archives with duplicate entry names are refused — prefer create_zip for a full rebuild or when the source has duplicate names. Output base64 or a sandbox file.",
+            "Edit an existing archive without recompressing anything: operations add / replace / remove / rename / setComment applied in order. mode 'append' (default) = save(): the original bytes stay verbatim and edits are appended — fast and byte-preserving, BUT removed or replaced payloads REMAIN in the file (data remanence: recoverable by anyone; a ZIP_DEAD_BYTES_RATIO diagnostic fires past 50 % dead bytes, and 7-Zip is known to read the stale payload). mode 'compact' = saveCompact(): a rewrite without the dead bytes, entries SORTED by raw name bytes (an insertion-ordered layout — EPUB mimetype first, JAR manifest first — is not kept; 'append' keeps it), still no recompression, removed data truly gone, SFX prefix dropped; add `canonical: {…}` for the canonical deterministic form (zipnative 1.1.0, the canonicalize_zip rules applied after the edits). No edits and an unchanged comment return the same bytes (`summary.noOp`). The input is opened eagerly and, in 'append' mode, every entry is cross-checked against its local header and declared sizes before its bytes are re-emitted (ZIP_ENTRY_OVERLAP / ZIP_CD_LFH_MISMATCH / ZIP_LIMIT_EXCEEDED). Entry names travel verbatim (an unsafe name stays unsafe — extract_zip sanitises on the way out). Archives with duplicate entry names are refused — prefer create_zip for a full rebuild or when the source has duplicate names. Output base64 or a sandbox file.",
         inputSchema: MODIFY_ZIP_INPUT_SCHEMA,
         outputSchema: MODIFY_ZIP_OUTPUT_SCHEMA,
         annotations: WRITES,
@@ -366,7 +377,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Canonicalise archive (reproducible, no recompression)',
         kind: 'archive-output',
         description:
-            "Make ANY archive reproducible: zipnative's canonicalizeZip() rewrites a Gradle, Maven, zip, Explorer or 7-Zip archive into the canonical deterministic form zipnative itself writes — entries sorted by raw name bytes, one timestamp (the DOS epoch, or a pinned `date`, read as UTC), the UTF-8 flag on every name, no extra field but Zip64, the constant version-made-by, no data descriptor — WITHOUT recompressing a payload (the compressed bytes travel bit for bit; nothing is decoded, so the result is identical on every runtime). Idempotent: canonicalising the result again returns the same bytes (summary.alreadyCanonical). summary.canonicalForm is the engine's own analyzeDeterminism() verdict on the output. keepComments (default false) and keepExternalAttributes (default true) choose what survives. Duplicate-name archives are refused. Verify with inspect_zip { check:['canonical-form'], canonicalDate } and compare summary.sha256 across builds.",
+            "Make ANY archive reproducible: zipnative's canonicalizeZip() rewrites a Gradle, Maven, zip, Explorer or 7-Zip archive into the canonical deterministic form zipnative itself writes — entries sorted by raw name bytes, one timestamp (the DOS epoch, or a pinned `date`, read as UTC), the UTF-8 flag on every name, no extra field but Zip64, the constant version-made-by, no data descriptor — WITHOUT recompressing a payload (the compressed bytes travel bit for bit; nothing is decoded, so the result is identical on every runtime). Idempotent: canonicalising the result again returns the same bytes (summary.alreadyCanonical). Entry names and payloads travel verbatim (a corrupt or unsafe entry stays so — run verify_zip first when integrity matters). summary.canonicalForm is the engine's own analyzeDeterminism() verdict on the output. keepComments (default false) and keepExternalAttributes (default true) choose what survives. Duplicate-name archives are refused. Verify with inspect_zip { check:['canonical-form'], canonicalDate } and compare summary.sha256 across builds.",
         inputSchema: CANONICALIZE_ZIP_INPUT_SCHEMA,
         outputSchema: CANONICALIZE_ZIP_OUTPUT_SCHEMA,
         annotations: WRITES,
@@ -381,7 +392,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Merge archives (no recompression)',
         kind: 'archive-output',
         description:
-            "Merge 1–32 archives into one WITHOUT recompressing anything: zipnative's addFromReader() transplants each entry's compressed bytes with its method, CRC, sizes, timestamp, attributes, comment and extra fields, in O(bytes copied). Each source is zipBase64 XOR zipPath with an optional filter. Every entry is CRC- and size-checked before it is copied (verify, default true), so a corrupt payload is refused with its ZIP_* code instead of being propagated; encrypted entries are refused. Name collisions: onConflict 'error' (default, ZIP_DUPLICATE_ENTRY_NAME), 'first' or 'last' (summary.dropped lists what was not kept). order 'canonical' (default) sorts like create_zip. Run canonicalize_zip on the result for the full canonical form. Output base64 or a sandbox file (streamed).",
+            "Merge 1–32 archives into one WITHOUT recompressing anything: zipnative's addFromReader() transplants each entry's compressed bytes with its method, CRC, sizes, timestamp, attributes, comment and extra fields, in O(bytes copied). Each source is zipBase64 XOR zipPath with an optional filter. Every entry is CRC- and size-checked before it is copied (verify, default true), so a corrupt payload is refused with its ZIP_* code instead of being propagated; an entry whose method has no codec here (ZIP_UNSUPPORTED_METHOD) and encrypted entries are refused. A foreign name the writer will not accept (e.g. a bsdtar './'-prefixed entry) is ZIP_INVALID_ENTRY_NAME — exclude it with that source's filter. Name collisions: onConflict 'error' (default, ZIP_DUPLICATE_ENTRY_NAME), 'first' or 'last' (summary.dropped lists what was not kept). order 'canonical' (default) sorts like create_zip. Run canonicalize_zip on the result for the full canonical form. Output base64 or a sandbox file (streamed).",
         inputSchema: MERGE_ZIP_INPUT_SCHEMA,
         outputSchema: MERGE_ZIP_OUTPUT_SCHEMA,
         annotations: WRITES,
@@ -424,7 +435,7 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Describe engine & server capabilities',
         kind: 'engine',
         description:
-            "Offline preflight (no archive needed): server / engine / tool-API versions, the deflate tier in use and the pinned deterministic tier, runtime codecs (node:zlib, CompressionStream, DecompressionStream) and worker threads, the codec registry, the engine's default `limits`, the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES, ZIPNATIVE_MCP_WORKERS), every server cap, whether the sandbox and the cache are enabled, the 39 frozen ZIP_* error codes and 12 diagnostic codes, and the engine exports this server deliberately does not expose (with why). `network` is always 'none'. Call it first in a session, or whenever a cap / ceiling refusal needs interpreting.",
+            "Offline preflight (no archive needed): server / engine / tool-API versions, the deflate tier in use and the pinned deterministic tier, runtime codecs (node:zlib, CompressionStream, DecompressionStream) and worker threads, the codec registry, the engine's default `limits`, the four operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES, ZIPNATIVE_MCP_WORKERS, ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES), every server cap, whether the sandbox and the cache are enabled, the 39 frozen ZIP_* error codes and 12 diagnostic codes, and the engine exports this server deliberately does not expose (with why). `network` is always 'none'. Call it first in a session, or whenever a cap / ceiling refusal needs interpreting.",
         inputSchema: DESCRIBE_ENGINE_INPUT_SCHEMA,
         outputSchema: projectableOutputSchema(DESCRIBE_ENGINE_OUTPUT_SCHEMA, {}, `Capability manifest.${PROJECTION_NOTE}`),
         annotations: READ_ONLY,
@@ -438,13 +449,13 @@ const TOOLS: readonly ToolDefinition[] = [
         title: 'Draft a governance-compliant GitHub issue (HITL)',
         kind: 'governance',
         description:
-            "Produce a LOCAL GitHub issue draft + compliance report for zipnative / zipnative-mcp and NEVER submit it — the agent drafts, a human reviews and files it under their own identity (Human-In-The-Loop contract, .github/AGENT_RULES.md). No GitHub write path and no network path exist in this server. The draft is checked against the zero-dependency + reproduction policy; a violation (new runtime dependency, missing reproduction, duplicateSearchPerformed:false) throws GOVERNANCE_VIOLATION. targetRepo 'zipnative' for engine behaviour (parsing, writing, limits, codecs), 'zipnative-mcp' for wrapper behaviour (schemas, sandbox, transport). Returns markdown inline (outputMode:'file' also writes a .md inside the sandbox). Use it only after reproducing a defect — for questions read describe_engine / docs/AGENT_CONTRACT.md instead. Present the draft AND the report to the user, then STOP.",
+            "Produce a LOCAL GitHub issue draft + compliance report for zipnative / zipnative-mcp and NEVER submit it — the agent drafts, a human reviews and files it under their own identity (Human-In-The-Loop contract, .github/AGENT_RULES.md). No GitHub write path and no network path exist in this server. The draft is checked against the zero-dependency + reproduction policy; a policy violation (a new runtime dependency, duplicateSearchPerformed:false) is GOVERNANCE_VIOLATION; a missing field (reproduction included) is VALIDATION_ERROR. targetRepo 'zipnative' for engine behaviour (parsing, writing, limits, codecs), 'zipnative-mcp' for wrapper behaviour (schemas, sandbox, transport). Returns markdown inline (outputMode:'file' also writes a .md inside the sandbox). Use it only after reproducing a defect — for questions read describe_engine / docs/AGENT_CONTRACT.md instead. Present the draft AND the report to the user, then STOP.",
         inputSchema: DRAFT_GOVERNANCE_ISSUE_INPUT_SCHEMA,
         outputSchema: DRAFT_GOVERNANCE_ISSUE_OUTPUT_SCHEMA,
         // Not readOnlyHint: outputMode='file' writes a .md into the sandbox. The default inline mode is side-effect-free.
         annotations: WRITES,
         examples: [
-            { title: 'Draft an engine bug report (never submitted)', input: { title: 'iterateZipEntries mis-detects the descriptor of a stored entry', summary: 'A stored entry followed by a signed data descriptor is reported as truncated by the forward reader.', issueType: 'bug', targetRepo: 'zipnative', reproduction: { command: "scan_zip_forward on an archive written with compression.method:'store' and stream:true", result: 'ZIP_STREAM_TRUNCATED' }, expectedBehavior: 'The entry is read and its CRC verified.', affectedPackages: ['zipnative', 'zipnative-mcp'], duplicateSearchPerformed: true } },
+            { title: 'Draft a wrapper feature request (never submitted)', input: { title: 'Expose a label-based nameEncoding input', summary: 'Shift-JIS / CP866 names without the UTF-8 flag are listed as CP437 mojibake; zipnative can decode them but no tool input reaches it.', issueType: 'feature', targetRepo: 'zipnative-mcp', reproduction: { command: 'list_zip_entries on an archive with Shift-JIS names and no flag bit 11', result: "nameEncoding: 'cp437', names unreadable" }, expectedBehavior: 'A closed-enum nameEncoding input decodes the names.', affectedPackages: ['zipnative-mcp'], duplicateSearchPerformed: true } },
         ],
         handler: draftGovernanceIssue,
     },
@@ -462,7 +473,7 @@ DECISION TREE:
   • Get files out → extract_zip (guards ON by default; outputMode:'file' + outputDir for the sandbox; filter for a subset)
   • Build an archive → create_zip (reproducible by default; compression.deterministic:true for cross-runtime identical bytes; order:'insertion' for EPUB/JAR; parallel for many large entries)
   • Change an existing archive → modify_zip (add/replace/remove/rename/setComment; mode:'compact' to truly delete — 'append' keeps old bytes)
-  • Make any archive reproducible → canonicalize_zip (no recompression, idempotent; verify with inspect_zip check:['canonical-form'])
+  • Make any archive reproducible → canonicalize_zip (no recompression, idempotent; verify with inspect_zip check:['canonical-form'] + canonicalDate when a date was pinned)
   • Combine archives → merge_zip (no recompression, every entry CRC-checked first; onConflict for duplicate names)
   • Archive above 1 GiB in the sandbox → inspect_zip / list_zip_entries / read_zip_entry read it by byte ranges (access:'auto', or 'range' always)
   • Truncated download, cut or unseekable stream, forensics → scan_zip_forward (local headers only — NOT authoritative; tolerateTruncation:true; the stream must start at a local header)
@@ -487,7 +498,7 @@ COMMON PITFALLS:
   • limits.* raise engine bounds for trusted input only and can never exceed the operator ceilings (LIMIT_CEILING_EXCEEDED names the environment variable).
   • verbosity:'summary' keeps the scalar verdict; fields:[…] projects dot-paths — unmatched paths are reported in _meta.unmatchedFields.
   • Dates are written and read as UTC (ZIP stores no zone); a date-time without an offset is taken as UTC wall clock.
-  • Long calls honour notifications/cancelled (CANCELLED, partial files removed) and report notifications/progress when the request carries a progressToken.
+  • notifications/cancelled stops every tool whose work grows with its input except verify_zip (the engine's verifyZip takes no signal); the work stops, nothing is cached, partial files are removed, and the client receives no response (MCP cancellation). notifications/progress is sent when the request carries a progressToken.
 
 TOKEN-FRUGAL READS & RESOURCES: read tools accept verbosity:'summary' and fields:[…]. Produced archives arrive as an embedded resource block (not duplicated in structuredContent); in file mode the result carries a resource_link and the file is listed under resources/list as zipnative://output/<path>. Prompts: secure_extraction, reproducible_archive, incremental_update, forensic_scan, verify_before_trust, governance_contract, draft_issue_workflow. Docs: docs/AI_GUIDE.md, docs/guides/*.md.`;
 
@@ -696,7 +707,7 @@ const FORENSIC_SCAN_RECIPE = `Forensics on a damaged or streamed archive with sc
 
 const VERIFY_BEFORE_TRUST_RECIPE = `Verify before you trust — the minimal safe sequence for any archive from an untrusted source:
 1. verify_zip { …, verbosity:'summary', fields:['ok','error','failedCount','skippedCount'] } — the smallest probe. ok:false with error:null means content mismatches (CRC / size); error:{code} means the structure itself was refused.
-2. inspect_zip { …, check:['safe-names','no-encryption','no-symlinks','no-duplicates','no-zip64'] , verbosity:'summary', fields:['checksPassed','checks'] }.
+2. inspect_zip { …, check:['safe-names','no-encryption','no-symlinks','no-duplicates','no-zip64'], fields:['checksPassed','checks'] }.
 3. list_zip_entries { …, verbosity:'summary' } to eyeball the names (a spec-valid archive can still carry '../' names — the extraction gate refuses them, but you want to know).
 4. extract_zip { …, includeData:false } for the plan, then the real extraction with the defaults.
 Every step is read-only until step 4; nothing leaves the process; every refusal carries a frozen ZIP_* code and the remedy in its message.`;
@@ -793,7 +804,7 @@ export async function callToolDirect(name: string, args: unknown, context: CallC
     try {
         const input = args ?? {};
         const cacheable = isCacheable(name, input);
-        const cacheKey = cacheable ? { tool: name, apiVersion: CACHE_API_VERSION } : null;
+        const cacheKey = cacheable ? { tool: name, apiVersion: cacheNamespace() } : null;
         if (cacheKey !== null) {
             const hit = getCached<ToolOutput>(cacheKey.tool, cacheKey.apiVersion, input);
             if (hit !== null) {

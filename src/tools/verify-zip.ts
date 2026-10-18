@@ -17,10 +17,11 @@
  * fabricated localHeaderMatch).
  */
 import { z } from 'zod';
-import { verifyZip, type VerifiedEntry } from 'zipnative';
+import { verifyZip, type VerifiedEntry, type ZipVerificationReport as VerifyZipReport } from 'zipnative';
 
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
-import { DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticRow } from '../diagnostics.js';
+import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
+import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticRow } from '../diagnostics.js';
 import { LIMITS_INPUT_SCHEMA, LimitsSchema, resolveCallLimits } from '../limits.js';
 import { PROJECTION_INPUT_PROPERTIES } from '../projection.js';
 import { guard } from '../zip-errors.js';
@@ -65,6 +66,7 @@ export interface VerifyZipResult {
     readonly entries: readonly VerifiedEntry[];
     readonly entriesTruncated?: true;
     readonly diagnostics: readonly DiagnosticRow[];
+    readonly diagnosticsTruncated?: true;
 }
 
 export const VERIFY_ZIP_OUTPUT_SCHEMA = {
@@ -101,6 +103,7 @@ export const VERIFY_ZIP_OUTPUT_SCHEMA = {
         },
         entriesTruncated: { type: 'boolean' },
         diagnostics: DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics,
+        diagnosticsTruncated: { type: 'boolean', description: 'Present (true) when more than 200 distinct diagnostics were raised and the list was cut.' },
     },
 } as const;
 
@@ -109,10 +112,13 @@ function passesAsSkipped(e: VerifiedEntry): boolean {
     return (e.skipped === 'encrypted' || e.skipped === 'stream-only-codec') && e.localHeaderMatch;
 }
 
-export async function verifyZipTool(rawInput: unknown): Promise<VerifyZipResult> {
+export async function verifyZipTool(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<VerifyZipResult> {
     const input = parseInput(InputSchema, rawInput);
     const { bytes } = await loadArchive(input);
     const limits = resolveCallLimits(input.limits);
+    // zipnative's verifyZip is synchronous and takes no signal (A-003): a cancellation is honoured
+    // up to the start of the verification, which then runs to completion.
+    throwIfCancelled(context);
     // Only caller mistakes throw here (invalid limits) — mapped like every other engine error.
     const report = guard('Failed to verify archive', () => verifyZip(bytes, limits !== undefined ? { limits } : undefined));
     let verifiedCount = 0;
@@ -140,8 +146,19 @@ export async function verifyZipTool(rawInput: unknown): Promise<VerifyZipResult>
         skippedCount,
         entries: truncated ? selected.slice(0, input.maxEntries) : [...selected],
         ...(truncated ? { entriesTruncated: true as const } : {}),
-        diagnostics: report.diagnostics.map((d) => ({ code: d.code, severity: d.severity, message: d.message, ...(d.entryName !== undefined ? { entryName: d.entryName } : {}) })),
+        ...diagnosticsOf(report.diagnostics),
     };
+}
+
+/**
+ * The report's diagnostics through the shared sink (B-009): de-duplicated by code + entry and capped at
+ * 200 rows like every other tool. `diagnosticCounts` stays out to keep the 1.0.0 result shape;
+ * `diagnosticsTruncated` appears only when the cap bites.
+ */
+function diagnosticsOf(raised: VerifyZipReport['diagnostics']): { diagnostics: DiagnosticRow[]; diagnosticsTruncated?: true } {
+    const sink = createDiagnosticSink();
+    for (const d of raised) sink.options.onDiagnostic?.(d);
+    return { diagnostics: [...sink.diagnostics], ...(sink.truncated ? { diagnosticsTruncated: true as const } : {}) };
 }
 
 export function verifySummary(r: VerifyZipResult): Record<string, unknown> {

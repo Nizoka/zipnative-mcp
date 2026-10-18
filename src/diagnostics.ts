@@ -100,7 +100,7 @@ export const DIAGNOSTICS_OUTPUT_PROPERTIES = {
     diagnostics: {
         type: 'array',
         description:
-            'Non-fatal conformance concerns the engine raised while parsing or writing (de-duplicated by code + entry, at most 200). Empty for a clean archive. Codes: ZIP_PREPENDED_DATA, ZIP_MULTIPLE_EOCD, ZIP_NAME_MISMATCH, ZIP_UNICODE_PATH_CONFLICT, ZIP_INVALID_UTF8_NAME, ZIP_DUPLICATE_NAME, ZIP_EXTRA_FIELD_MALFORMED, ZIP_ZIP64_EXTRA_IGNORED, ZIP_TIMESTAMP_NOT_PINNED, ZIP_NONDETERMINISTIC_CODEC, ZIP_DEAD_BYTES_RATIO, ZIP_TIMESTAMP_CLAMPED.',
+            'Non-fatal engine concerns (de-duplicated by code + entry, ≤ 200; codes in describe_engine.diagnosticCodes). Empty for a clean archive.',
         items: {
             type: 'object',
             additionalProperties: false,
@@ -115,8 +115,8 @@ export const DIAGNOSTICS_OUTPUT_PROPERTIES = {
     },
     diagnosticCounts: {
         type: 'object',
-        description: 'Number of diagnostics received per code (counts every occurrence, including de-duplicated ones).',
+        description: 'Occurrences per code, duplicates included.',
         additionalProperties: { type: 'integer', minimum: 0 },
     },
-    diagnosticsTruncated: { type: 'boolean', description: 'Present (true) when more than 200 distinct diagnostics were dropped from `diagnostics`.' },
+    diagnosticsTruncated: { type: 'boolean', description: 'true when rows beyond 200 were dropped.' },
 } as const;

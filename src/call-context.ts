@@ -2,10 +2,11 @@
  * The per-call context a `tools/call` request carries into a tool: the MCP
  * cancellation signal and, when the client asked for it, a progress sink.
  *
- * zipnative 1.1.0 takes `signal` and `onProgress` on every engine call
- * (`ZipCommonOptions`), so the tools hand both to the engine through their
- * diagnostic sink (src/diagnostics.ts) and nothing else has to know about
- * them: an aborted request stops the engine between chunks and releases what
+ * zipnative 1.1.0 takes `signal` and `onProgress` on the engine calls that
+ * accept `ZipCommonOptions` (not `verifyZip`, which is synchronous), so the
+ * tools hand both to the engine through their diagnostic sink
+ * (src/diagnostics.ts), and the wrapper's own loops (compute_crc32,
+ * inflate_raw, merge_zip, the verify_zip start) check the signal themselves: an aborted request stops the engine between chunks and releases what
  * it held (stream locks, worker pools, partial output files), and the
  * progress snapshots become `notifications/progress` — only when the request
  * carries a `_meta.progressToken`, never otherwise. A cancelled call is the

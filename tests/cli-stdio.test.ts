@@ -357,3 +357,12 @@ describe.skipIf(!process.env['ZIPNATIVE_MCP_SLOW_TESTS'])('stdio transport — t
         }
     }, 300_000);
 });
+
+describe.skipIf(!hasDist)('A-020: a relative ZIPNATIVE_MCP_CACHE_DIR refuses to start', () => {
+    it('A-020: the server exits with one clean line instead of caching under the launch directory', async () => {
+        const { code, stderr } = await bootWith({ ZIPNATIVE_MCP_CACHE_DIR: 'relative-cache' });
+        expect(code, stderr).toBe(1);
+        expect(stderr).toContain('ZIPNATIVE_MCP_CACHE_DIR must be an absolute path');
+        expect(stderr).not.toContain('ready (stdio transport');
+    });
+});

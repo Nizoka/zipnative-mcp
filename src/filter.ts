@@ -143,55 +143,69 @@ function close(tokens: readonly Token[], state: number, into: Set<number>): void
 export function compileGlob(pattern: string): GlobMatcher {
     const tokens = tokenize(pattern);
     const accept = 2 * tokens.length;
-    const start = new Set<number>();
-    close(tokens, 0, start);
+    // The ε-closure of every state, computed once (A-001): a step then only
+    // walks precomputed arrays and marks visited states with a generation
+    // counter instead of allocating and re-closing a Set per character.
+    const closures: number[][] = [];
+    for (let s = 0; s <= accept; s++) {
+        const set = new Set<number>();
+        close(tokens, s, set);
+        closures.push([...set]);
+    }
+    const start = closures[0] ?? [accept];
     return {
         test(name: string): boolean {
-            let current = start;
-            for (let at = 0; at < name.length && current.size > 0; at++) {
+            const mark = new Uint32Array(accept + 1);
+            let generation = 0;
+            let current: number[] = start;
+            for (let at = 0; at < name.length && current.length > 0; at++) {
                 const code = name.charCodeAt(at);
-                const next = new Set<number>();
+                generation++;
+                const next: number[] = [];
+                const add = (state: number): void => {
+                    for (const s of closures[state] ?? []) {
+                        if (mark[s] === generation) continue;
+                        mark[s] = generation;
+                        next.push(s);
+                    }
+                };
                 for (const state of current) {
                     const index = state >> 1;
                     const token = tokens[index];
                     if (token === undefined) continue;
                     if (state % 2 === 1) {
-                        if (token.kind === 'dirs') {
-                            close(tokens, state, next);
-                            if (code === SLASH) close(tokens, 2 * index + 2, next);
-                        } else {
-                            close(tokens, state, next);
-                        }
+                        add(state);
+                        if (token.kind === 'dirs' && code === SLASH) add(2 * index + 2);
                         continue;
                     }
                     switch (token.kind) {
                         case 'literal':
-                            if (code === token.char) close(tokens, state + 2, next);
+                            if (code === token.char) add(state + 2);
                             break;
                         case 'one':
-                            if (code !== SLASH) close(tokens, state + 2, next);
+                            if (code !== SLASH) add(state + 2);
                             break;
                         case 'class':
-                            if (classMatches(token, code)) close(tokens, state + 2, next);
+                            if (classMatches(token, code)) add(state + 2);
                             break;
                         case 'star':
-                            if (code !== SLASH) close(tokens, state, next);
+                            if (code !== SLASH) add(state);
                             break;
                         case 'globstar':
-                            close(tokens, state, next);
+                            add(state);
                             break;
                         case 'dirs':
-                            close(tokens, state + 1, next);
-                            if (code === SLASH) close(tokens, state + 2, next);
+                            add(state + 1);
+                            if (code === SLASH) add(state + 2);
                             break;
                         case 'subtree':
-                            if (code === SLASH) close(tokens, state + 1, next);
+                            if (code === SLASH) add(state + 1);
                             break;
                     }
                 }
                 current = next;
             }
-            return current.has(accept);
+            return current.includes(accept);
         },
     };
 }
@@ -212,11 +226,11 @@ export const FILTER_INPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     description:
-        "Select entries by name. `names` (exact, case-sensitive), `prefix` (path prefix) and `glob` (patterns: `*` within a segment, `**` across segments, `?` one character, `[a-z]` / `[^…]` one character of a class; a pattern without `/` matches at any depth, a trailing `/` matches a whole subtree) are ANDed when several are given; `includeDirectories` (default false) keeps explicit directory entries.",
+        "Select entries: `names` (exact), `prefix`, `glob` (`*` in a segment, `**` across, `?`, `[a-z]`; no `/` = any depth, trailing `/` = subtree), ANDed; `includeDirectories` (default false).",
     properties: {
         names: { type: 'array', maxItems: MAX_FILTER_NAMES, items: { type: 'string', minLength: 1 }, description: 'Exact entry names to keep (case-sensitive; every duplicate of a name is kept).' },
         prefix: { type: 'string', minLength: 1, description: "Keep entries whose name starts with this prefix (e.g. 'src/')." },
-        glob: { type: 'array', maxItems: MAX_FILTER_GLOBS, items: { type: 'string', minLength: 1, maxLength: MAX_GLOB_LENGTH }, description: `Glob patterns (≤ ${MAX_GLOB_LENGTH} characters each, matched in linear time); an entry matching ANY pattern is kept (e.g. ['**/*.json', 'docs/']). An invalid class range such as '[z-a]' is a VALIDATION_ERROR.` },
+        glob: { type: 'array', maxItems: MAX_FILTER_GLOBS, items: { type: 'string', minLength: 1, maxLength: MAX_GLOB_LENGTH }, description: `Patterns (≤ ${MAX_GLOB_LENGTH} characters); ANY match keeps the entry (e.g. ['**/*.json', 'docs/']).` },
         includeDirectories: { type: 'boolean', default: false, description: 'Keep explicit directory entries (names ending in `/`).' },
     },
 } as const;
@@ -254,7 +268,8 @@ export function compileEntryFilter(input: FilterInput | undefined): NameFilter {
         const bare = n.endsWith('/') ? n.slice(0, -1) : n;
         if (names !== null && !names.has(n) && !names.has(bare)) return false;
         if (prefix !== undefined && !n.startsWith(prefix)) return false;
-        if (globs !== null && !globs.some((re) => re.test(n) || re.test(bare))) return false;
+        // `bare` differs from `n` only for a directory name; a failing match is not run twice (A-001).
+        if (globs !== null && !globs.some((re) => re.test(n) || (bare !== n && re.test(bare)))) return false;
         return true;
     };
 }

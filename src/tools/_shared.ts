@@ -26,7 +26,7 @@ export const STRICT_INPUT_PROPERTY = {
     strict: {
         type: 'boolean',
         default: false,
-        description: 'Escalate the first engine diagnostic (prepended data, duplicate name, name mismatch, …) to a ZIP_STRICT_DIAGNOSTIC error instead of reporting it.',
+        description: 'Turn the first engine diagnostic into a ZIP_STRICT_DIAGNOSTIC error.',
     },
 } as const;
 

@@ -34,17 +34,17 @@ export const LIMITS_INPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     description:
-        "Override zipnative's named security bounds for this call (CWE-400 / CWE-409 guards). Every key is optional; absent keys keep the engine defaults (maxEntries 100000, maxEntryUncompressedSize 1 GiB, maxEntryCompressedSize 1 GiB + 1 MiB (read by the byte-range reader only), maxTotalUncompressedSize 8 GiB, maxCompressionRatio 1024, maxNameBytes 4096, maxExtraFieldBytes 65535, maxCommentBytes 65535, maxCentralDirectoryBytes 256 MiB). Values above the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES) are refused with LIMIT_CEILING_EXCEEDED (the uncompressed ceiling also bounds maxEntryCompressedSize). Raise a bound for trusted input only.",
+        "Per-call override of zipnative's security bounds (CWE-400/409); absent keys keep the engine defaults (describe_engine.defaultLimits). A value above its operator ceiling is LIMIT_CEILING_EXCEEDED. Raise only for trusted input.",
     properties: {
-        maxEntries: { type: 'integer', minimum: 1, description: 'Maximum central-directory entry count.' },
-        maxEntryUncompressedSize: { type: 'integer', minimum: 1, description: 'Maximum decompressed size of one entry, bytes.' },
-        maxEntryCompressedSize: { type: 'integer', minimum: 1, description: 'Maximum compressed payload of one entry the byte-range reader fetches into memory (zipPath archives above the 1 GiB in-memory cap; CWE-770), bytes. The in-memory reader never consults it.' },
-        maxTotalUncompressedSize: { type: 'integer', minimum: 1, description: 'Maximum total decompressed size across an extraction, bytes.' },
-        maxCompressionRatio: { type: 'number', minimum: 1, description: 'Maximum declared uncompressed/compressed ratio for entries >= 1 KiB compressed (zip-bomb guard).' },
-        maxNameBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Maximum entry-name length in bytes.' },
-        maxExtraFieldBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Maximum extra-field block length in bytes.' },
-        maxCommentBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Maximum comment length in bytes.' },
-        maxCentralDirectoryBytes: { type: 'integer', minimum: 1, description: 'Maximum central-directory size in bytes.' },
+        maxEntries: { type: 'integer', minimum: 1, description: 'Entries.' },
+        maxEntryUncompressedSize: { type: 'integer', minimum: 1, description: 'Bytes, one entry decompressed.' },
+        maxEntryCompressedSize: { type: 'integer', minimum: 1, description: 'Bytes, one compressed payload fetched by the byte-range reader (access range).' },
+        maxTotalUncompressedSize: { type: 'integer', minimum: 1, description: 'Bytes, all entries decompressed.' },
+        maxCompressionRatio: { type: 'number', minimum: 1, description: 'Declared ratio (entries ≥ 1 KiB compressed).' },
+        maxNameBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Bytes.' },
+        maxExtraFieldBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Bytes.' },
+        maxCommentBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Bytes.' },
+        maxCentralDirectoryBytes: { type: 'integer', minimum: 1, description: 'Bytes.' },
     },
 } as const;
 

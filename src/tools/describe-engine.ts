@@ -39,7 +39,7 @@ export const UNEXPOSED_EXPORTS: ReadonlyArray<{ readonly export: string; readonl
     { export: 'ZipWriter.addRaw / RawEntryMeta', rationale: 'The caller vouches for the CRC and the sizes: an agent could forge an inconsistent archive. merge_zip exposes addFromReader, the checked transplant.' },
     { export: 'ZipCommonOptions.nameDecoder / ZipNameDecoder', rationale: 'A decoder is a function; legacy code-page names (Shift-JIS, CP866) stay CP437-decoded with rawNameHex kept for forensics. A label-based input is a later candidate.' },
     { export: 'ZipCodec.createDecompressor / ZipDecompressor', rationale: 'Part of the codec contract; no codec can be registered here (registerCodec is unexposed). codecs[].incremental reports it for the built-in store and deflate.' },
-    { export: 'openZipRange over a remote ByteRangeSource (rangeSourceFromBytes)', rationale: 'No network path, ever: the byte-range reader is fed only by a sandbox file (access: range on inspect_zip, list_zip_entries, read_zip_entry) or by inline bytes.' },
+    { export: 'openZipRange over a remote ByteRangeSource', rationale: 'No network path, ever: the byte-range reader is fed only by a sandbox file (access: range on inspect_zip, list_zip_entries, read_zip_entry) or by inline bytes.' },
 ];
 
 export interface DescribeEngineResult {

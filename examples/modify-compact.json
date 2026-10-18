@@ -1,5 +1,5 @@
 {
-  "description": "Remove an entry for real: mode 'compact' (saveCompact) rewrites the archive without the dead bytes — still no recompression of the surviving entries, entries keep their order — so the removed payload is truly gone (an SFX prefix would be dropped too). summary.entryCountBefore / entryCountAfter and grewByBytes show the effect; includeSha256 proves the result. Add canonical: {} for the canonical deterministic form (modify-compact-canonical.json).",
+  "description": "Remove an entry for real: mode 'compact' (saveCompact) rewrites the archive without the dead bytes — still no recompression of the surviving entries, entries re-sorted by raw name bytes (an insertion-ordered layout such as an EPUB is not kept — use mode 'append' for that) — so the removed payload is truly gone (an SFX prefix would be dropped too). summary.entryCountBefore / entryCountAfter and grewByBytes show the effect; includeSha256 proves the result. Add canonical: {} for the canonical deterministic form (modify-compact-canonical.json).",
   "tool": "modify_zip",
   "arguments": {
     "zipBase64": "<zip-base64>",

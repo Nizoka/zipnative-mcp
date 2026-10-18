@@ -31,12 +31,12 @@ export const ARCHIVE_INPUT_PROPERTIES = {
     zipBase64: {
         type: 'string',
         minLength: 4,
-        description: 'The archive bytes as base64 (exactly once; a data: URI prefix is tolerated). Exclusive with zipPath. Decoded size ≤ 128 MiB.',
+        description: 'Archive bytes, base64 (≤ 128 MiB decoded). Exclusive with zipPath.',
     },
     zipPath: {
         type: 'string',
         minLength: 1,
-        description: "Relative path of an archive inside the ZIPNATIVE_MCP_OUTPUT_DIR sandbox (no absolute paths, no '..'; container extensions only: .zip .jar .docx .epub …). Exclusive with zipBase64. Lets a create/modify → verify/extract chain avoid re-sending the bytes.",
+        description: "Archive path relative to the ZIPNATIVE_MCP_OUTPUT_DIR sandbox (container extensions: .zip .jar .docx .epub …). Exclusive with zipBase64; saves re-sending bytes between calls.",
     },
 } as const;
 
@@ -128,7 +128,7 @@ export const ACCESS_INPUT_PROPERTY = {
         type: 'string',
         enum: ['auto', 'memory', 'range'],
         default: 'auto',
-        description: `'auto' (default): the archive is read into memory (≤ ${MAX_PATH_INPUT_BYTES} bytes for a zipPath), and a larger zipPath is opened by byte ranges instead of being refused. 'range': always by byte ranges — zipnative's openZipRange over the sandbox file's own handle (never a URL): the end record and the central directory are read, then only the entries you touch, so memory stays at the size of the central directory; limits.maxEntryCompressedSize bounds one fetched payload. 'memory': always buffered (INPUT_TOO_LARGE above the cap).`,
+        description: `'auto' (default): in memory, and a zipPath above ${MAX_PATH_INPUT_BYTES} bytes by byte ranges. 'range': always by byte ranges over the sandbox file (never a URL; memory ≈ the central directory). 'memory': always buffered (INPUT_TOO_LARGE above the cap).`,
     },
 } as const;
 

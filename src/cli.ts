@@ -10,9 +10,9 @@
  *
  * Transport selection:
  *   - stdio (default): suitable for local host integration (Claude Desktop, Cursor, etc.)
- *   - ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES / ZIPNATIVE_MCP_MAX_ENTRIES / ZIPNATIVE_MCP_WORKERS
- *     are the operator ceilings per-call `limits` cannot exceed (read once; an
- *     invalid value refuses to start).
+ *   - ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES / ZIPNATIVE_MCP_MAX_ENTRIES / ZIPNATIVE_MCP_WORKERS /
+ *     ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES are the four operator ceilings per-call
+ *     `limits` and outputs cannot exceed (read once; an invalid value refuses to start).
  *   - HTTP: set ZIPNATIVE_MCP_PORT=<port> to expose the MCP endpoint on that port.
  *           Requests are POST /mcp (2026-07-28 clients send `Mcp-Method` / `Mcp-Name`
  *           headers and the `_meta` envelope; 2025-era clients use `initialize`).
@@ -71,11 +71,16 @@ async function main(): Promise<void> {
     if (outputDir !== undefined && outputDir.trim() !== '' && !isAbsolute(outputDir.trim())) {
         throw new Error(`ZIPNATIVE_MCP_OUTPUT_DIR must be an absolute path (got ${JSON.stringify(outputDir)}).`);
     }
+    // The same rule for the opt-in cache (A-020): a relative directory would follow the launch directory.
+    const cacheDir = process.env['ZIPNATIVE_MCP_CACHE_DIR'];
+    if (cacheDir !== undefined && cacheDir.trim() !== '' && !isAbsolute(cacheDir.trim())) {
+        throw new Error(`ZIPNATIVE_MCP_CACHE_DIR must be an absolute path (got ${JSON.stringify(cacheDir)}).`);
+    }
 
     if (port !== null) {
         // --- HTTP / Streamable HTTP transport ---
         const { createMcpHandler } = await import('@modelcontextprotocol/server');
-        const { applySecurityHeaders, guardLoopback, hardenHttpServer, sendWebResponse, toWebRequest, RequestTooLargeError, MAX_REQUEST_BODY_BYTES } = await import('./http.js');
+        const { applySecurityHeaders, guardLoopback, hardenHttpServer, sendWebResponse, toWebHead, toWebRequest, RequestTooLargeError, MAX_REQUEST_BODY_BYTES } = await import('./http.js');
         const { createServer: createHttpServer } = await import('node:http');
         const { guardBearer, readHttpToken } = await import('./auth.js');
         // Opt-in bearer token (ZIPNATIVE_MCP_HTTP_TOKEN); a weak value throws before we listen.
@@ -98,9 +103,16 @@ async function main(): Promise<void> {
                         res.end('Not Found. MCP endpoint is POST /mcp');
                         return;
                     }
+                    // Host / Origin and the bearer token are checked on the headers before the body is read.
+                    const head = toWebHead(req, origin);
+                    const refused = guardLoopback(head) ?? guardBearer(head, httpToken);
+                    if (refused !== undefined) {
+                        req.resume();
+                        await sendWebResponse(res, refused);
+                        return;
+                    }
                     const request = await toWebRequest(req, origin, res);
-                    const response = guardLoopback(request) ?? guardBearer(request, httpToken) ?? (await handler.fetch(request));
-                    await sendWebResponse(res, response);
+                    await sendWebResponse(res, await handler.fetch(request));
                 } catch (err) {
                     if (err instanceof RequestTooLargeError) {
                         if (!res.headersSent) res.writeHead(413, { 'Content-Type': 'text/plain' });

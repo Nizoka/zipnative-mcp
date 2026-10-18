@@ -6,7 +6,11 @@
  * copied). Every entry is verified against its CRC and size before it is
  * copied (`verify: true`, the default), so a corrupt payload is refused with
  * its frozen code instead of being propagated; encrypted entries are refused
- * by the engine (they cannot be read raw).
+ * by the engine (they cannot be read raw). The engine copies an entry whose
+ * method has no registered codec without checking it (it cannot decode it);
+ * under `verify: true` this tool refuses such an entry instead
+ * (`ZIP_UNSUPPORTED_METHOD`, raised by the engine's own read), so
+ * `summary.verified: true` means every copied payload was checked (A-002).
  *
  * Name collisions: `onConflict: 'error'` (default) lets the engine refuse the
  * second occurrence (`ZIP_DUPLICATE_ENTRY_NAME`); `'first'` / `'last'` keep
@@ -20,7 +24,7 @@
  * full canonical form (one timestamp, Zip64-only extras).
  */
 import { z } from 'zod';
-import { createZip, openZip, type ZipEntry, type ZipReader } from 'zipnative';
+import { createZip, getCodec, openZip, type ZipEntry, type ZipReader } from 'zipnative';
 
 import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
@@ -216,6 +220,10 @@ export async function mergeZipTool(rawInput: unknown, context: CallContext = NO_
     }));
     for (const c of plan) {
         throwIfCancelled(context);
+        if (input.verify && !c.entry.isDirectory && !c.entry.isEncrypted && getCodec(c.entry.compressionMethod) === null) {
+            // No codec here: the payload cannot be checked, so let the engine's read refuse it with its own code.
+            guard(`Cannot verify '${c.entry.name}' from source ${c.source}`, () => c.reader.readEntry(c.entry), c.entry.name, { sourceIndex: c.source });
+        }
         guard(`Failed to transplant '${c.entry.name}' from source ${c.source}`, () => writer.addFromReader(c.reader, c.entry, { verify: input.verify }), c.entry.name, { sourceIndex: c.source });
     }
 

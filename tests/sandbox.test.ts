@@ -6,7 +6,7 @@
  * re-checks the real path of the parent (symlinked directories), bounds the
  * output size, and removes a partial file when a streamed write fails.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fsSync, { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -579,5 +579,38 @@ describe('writeSandboxedText (governance drafts)', () => {
         // Buffer.from(text) is what the guard measures; build a string just over the cap cheaply.
         const text = 'x'.repeat(huge.byteLength);
         expect((await codeOf(writeSandboxedText(text, 'huge.md'))).code).toBe('OUTPUT_TOO_LARGE');
+    });
+});
+
+describe('A-013: a file swapped between the open and the real-path check is refused', () => {
+    let sandboxDir: string;
+
+    beforeEach(async () => {
+        sandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), 'zipnative-mcp-a013-'));
+        process.env[ENV_KEY] = sandboxDir;
+        await fs.writeFile(path.join(sandboxDir, 'in.zip'), basicZip());
+    });
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        delete process.env[ENV_KEY];
+        await fs.rm(sandboxDir, { recursive: true, force: true });
+    });
+
+    it('A-013: the path resolving to another inode than the opened handle is SECURITY_VIOLATION, and the handle is closed', async () => {
+        const resolved = resolveSandboxPath('in.zip', 'zipPath');
+        const realStat = fs.stat.bind(fs);
+        // The located file (stat of the real path) is no longer the one the handle holds: a swap.
+        vi.spyOn(fs, 'stat').mockImplementation((async (p: fsSync.PathLike, opts?: fsSync.StatOptions) => {
+            const s = await realStat(p, { ...opts, bigint: true });
+            return Object.assign(Object.create(Object.getPrototypeOf(s) as object) as fsSync.BigIntStats, s, { ino: s.ino + 1n });
+        }) as typeof fs.stat);
+        const err = await codeOf(openSandboxFile(resolved, 'zipPath'));
+        expect(err).toBeInstanceOf(SecurityError);
+        expect(err.code).toBe('SECURITY_VIOLATION');
+        expect(err.message).toMatch(/changed while it was being opened/);
+        expect(err.message).not.toContain(sandboxDir);
+        vi.restoreAllMocks();
+        // The handle was closed: the file can be removed and reopened at once (Windows refuses an unlink of an open file).
+        await fs.rm(path.join(sandboxDir, 'in.zip'));
     });
 });

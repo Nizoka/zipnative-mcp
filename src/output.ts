@@ -43,7 +43,7 @@ export const OUTPUT_INPUT_PROPERTIES = {
         type: 'string',
         enum: ['base64', 'file'],
         default: 'base64',
-        description: "'base64' (default) returns the bytes inline as an embedded resource (≤ 50 MiB). 'file' writes them inside ZIPNATIVE_MCP_OUTPUT_DIR (never overwrites; ≤ 4 GiB, streamed) and returns a resource_link.",
+        description: "'base64' (default): inline embedded resource (≤ 50 MiB; the bytes appear in both its data: uri and its blob). 'file': written into the sandbox (never overwrites; ≤ ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES, default 4 GiB) and returned as a resource_link — far fewer tokens.",
     },
     outputPath: {
         type: 'string',

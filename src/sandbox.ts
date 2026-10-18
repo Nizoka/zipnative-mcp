@@ -9,7 +9,11 @@
  * applies to its output sandbox (NUL bytes, absolute / UNC paths, `..`
  * traversal, extension allow-list) plus a realpath check on the parent
  * directory so a symlinked directory inside the sandbox cannot redirect a
- * write outside it.
+ * write outside it. Every read goes through ONE open handle: opened, fstat-ed,
+ * its real path proven inside the sandbox and bound to the handle by device
+ * and inode, then only the handle is read — a planted link or a file swapped
+ * during the open is SECURITY_VIOLATION, a file that grows or shrinks under
+ * the read is IO_ERROR.
  */
 import { promises as fs, createWriteStream, type WriteStream } from 'node:fs';
 import path from 'node:path';

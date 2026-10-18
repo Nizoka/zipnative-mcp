@@ -18,7 +18,7 @@
 import { z } from 'zod';
 import { createZipModifier, openZip, type ZipModifierOptions } from 'zipnative';
 
-import { NO_CONTEXT, type CallContext } from '../call-context.js';
+import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
 import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_MODIFY_OPERATIONS } from '../caps.js';
 import { CANONICAL_OPTION_PROPERTIES, CanonicalOptionShape, toCanonicalOptions } from '../canonical.js';
@@ -180,6 +180,19 @@ export async function modifyZipTool(rawInput: unknown, context: CallContext = NO
     // into the output unchecked. Every local header and the overlap table are
     // cross-checked up front, as inspect_zip does by default.
     const reader = guard('Failed to open archive', () => openZip(bytes, { validate: 'eager', ...(limits !== undefined ? { limits } : {}), ...sink.options }));
+    // A-006: the eager pass checks extents only; the append path also needs each
+    // entry's local header and declared sizes cross-checked before its bytes are
+    // re-emitted (a method / CRC / size divergence, a declared-size bomb). The
+    // engine's raw read does exactly that without decompressing; compaction
+    // reads every entry anyway. Encrypted entries cannot be read raw and are
+    // carried as they are (their extents were checked by the eager pass).
+    if (input.mode === 'append') {
+        for (const entry of reader.entries()) {
+            throwIfCancelled(context);
+            if (entry.isDirectory || entry.isEncrypted) continue;
+            guard('Failed to check an entry of the archive', () => reader.readEntryRaw(entry), entry.name);
+        }
+    }
     const defaultDate = toDefaultDate(input.defaultDate);
     const compression = toCompression(input.compression);
     const options: ZipModifierOptions = {

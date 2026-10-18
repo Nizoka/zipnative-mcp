@@ -46,6 +46,20 @@ export interface ToWebRequestOptions {
     readonly maxBodyBytes?: number;
 }
 
+/**
+ * The request line and headers only, as a Web `Request` without a body (A-015): the Host / Origin
+ * and bearer guards run on it BEFORE the body is buffered, so a foreign or unauthenticated client
+ * cannot make the server read up to 256 MiB first.
+ */
+export function toWebHead(req: IncomingMessage, origin: string): Request {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+        if (value === undefined) continue;
+        headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    }
+    return new Request(new URL(req.url ?? '/', origin), { method: 'GET', headers });
+}
+
 export async function toWebRequest(req: IncomingMessage, origin: string, res?: ServerResponse, opts?: ToWebRequestOptions): Promise<Request> {
     const maxBodyBytes = opts?.maxBodyBytes ?? MAX_REQUEST_BODY_BYTES;
     const headers = new Headers();

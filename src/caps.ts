@@ -73,7 +73,7 @@ export const MAX_LISTED_RESOURCES = 1000;
 export const MAX_RESOURCE_WALK_DEPTH = 8;
 /** `resources/read`: largest payload returned (mirrors the inline output cap). */
 export const MAX_RESOURCE_READ_BYTES = MAX_BASE64_OUTPUT_BYTES;
-/** Opt-in response cache (`ZIPNATIVE_MCP_CACHE_DIR`): entry TTL and total size (LRU by mtime). */
+/** Opt-in response cache (`ZIPNATIVE_MCP_CACHE_DIR`): entry TTL and total size (the oldest-written entries are evicted first, by mtime). */
 export const CACHE_TTL_SECONDS = 3600;
 export const CACHE_MAX_BYTES = 256 * MiB;
 

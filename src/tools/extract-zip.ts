@@ -299,7 +299,13 @@ export async function extractZipTool(rawInput: unknown, context: CallContext = N
                     stream.end(() => resolveEnd());
                 });
             } catch (err) {
-                stream.destroy();
+                // Close before the unlink (B-024): Windows refuses to remove a file that is still open.
+                if (!stream.closed) {
+                    await new Promise<void>((resolveClose) => {
+                        stream.once('close', () => resolveClose());
+                        stream.destroy();
+                    });
+                }
                 await discardPartial(target);
                 if (err instanceof ToolError) throw err;
                 if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string' && !/^ZIP_/.test(String((err as NodeJS.ErrnoException).code))) {

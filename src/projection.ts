@@ -132,12 +132,12 @@ export const PROJECTION_INPUT_PROPERTIES = {
         type: 'string',
         enum: ['full', 'summary'],
         default: 'full',
-        description: "'summary' returns only the scalar verdict fields (drops arrays and payloads) — the token-frugal form.",
+        description: "'summary': scalar verdict fields only (the token-frugal form).",
     },
     fields: {
         type: 'array',
         maxItems: 16,
         items: { type: 'string', minLength: 1, pattern: FIELD_PATH_PATTERN },
-        description: "Dot-path projection applied after verbosity (e.g. ['entryCount', 'entries.name']); array segments map over elements; unmatched paths are reported in _meta.unmatchedFields.",
+        description: "Dot-paths to keep, after verbosity (e.g. ['entryCount', 'entries.name']); unmatched ones are listed in _meta.unmatchedFields.",
     },
 } as const;

@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { VERSION as ZIPNATIVE_VERSION } from 'zipnative';
 
+import { getCeilings } from '../src/caps.js';
 import { callToolDirect, ensureEngineReady } from '../src/server.js';
 import { TOOL_API_VERSION, ZIPNATIVE_MCP_VERSION } from '../src/version.js';
 import { assertValidZip } from './_zip-assert.js';
@@ -79,7 +80,7 @@ describe('response cache policy', () => {
         const [file] = cachedFiles();
         const entry = JSON.parse(readFileSync(join(cacheDir, file!), 'utf8')) as { apiVersion: string; tool: string };
         expect(entry.tool).toBe('create_zip');
-        expect(entry.apiVersion).toBe(`${TOOL_API_VERSION}/${ZIPNATIVE_MCP_VERSION}/${ZIPNATIVE_VERSION}`);
+        expect(entry.apiVersion).toBe(`${TOOL_API_VERSION}/${ZIPNATIVE_MCP_VERSION}/${ZIPNATIVE_VERSION}/ceilings:${[getCeilings().maxUncompressedBytes, getCeilings().maxEntries, getCeilings().maxWorkers, getCeilings().maxFileOutputBytes].join(',')}`);
     });
 
     it("never caches defaultDate:'now' (wall-clock timestamps)", async () => {

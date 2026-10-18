@@ -70,9 +70,13 @@ describe('createDiagnosticSink', () => {
         expect(sink.counts['ZIP_NAME_MISMATCH']).toBe(251);
     });
 
-    it('the shared output schema lists every diagnostic code', () => {
+    it('the shared output schema points at describe_engine, which lists every diagnostic code (D-018: not repeated in 11 schemas)', async () => {
         const description = DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics.description;
-        for (const code of ZIP_DIAGNOSTIC_CODES) expect(description).toContain(code);
+        expect(description).toContain('describe_engine.diagnosticCodes');
+        const { callToolDirect } = await import('../src/server.js');
+        const r = await callToolDirect('describe_engine', { fields: ['diagnosticCodes'] });
+        const listed = JSON.stringify(r.structuredContent);
+        for (const code of ZIP_DIAGNOSTIC_CODES) expect(listed).toContain(code);
         expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
         expect(DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics.items.required).toEqual(['code', 'severity', 'message']);
         expect(DIAGNOSTICS_OUTPUT_PROPERTIES.diagnosticsTruncated.description).toContain('200');

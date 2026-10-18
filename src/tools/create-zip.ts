@@ -139,7 +139,7 @@ export const ARCHIVE_OUTPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     required: ['mode', 'sizeBytes', 'summary', 'diagnostics'],
-    description: 'Result of an archive-producing tool. base64 mode: the archive arrives as an embedded `resource` content block (not duplicated here); file mode: `filePath` + a resource_link.',
+    description: 'Archive result: base64 mode = an embedded `resource` block (not repeated here); file mode = `filePath` + a resource_link.',
     properties: {
         mode: { type: 'string', enum: ['base64', 'file'] },
         sizeBytes: { type: 'integer', minimum: 0 },

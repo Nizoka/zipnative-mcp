@@ -166,7 +166,13 @@ export async function readResource(uri: string): Promise<ResourceContents> {
     if (!uri.startsWith(RESOURCE_URI_PREFIX)) {
         throw new ToolError('UNKNOWN_RESOURCE', `Unsupported resource URI: ${uri}`);
     }
-    const relative = decodeURIComponent(uri.slice(RESOURCE_URI_PREFIX.length));
+    let relative: string;
+    try {
+        relative = decodeURIComponent(uri.slice(RESOURCE_URI_PREFIX.length));
+    } catch {
+        // A malformed percent-escape is a bad URI from the client (-32602), not an internal error (A-014).
+        throw new ToolError('UNKNOWN_RESOURCE', `Malformed resource URI: ${uri}`);
+    }
     if (relative.length === 0) {
         throw new ToolError('UNKNOWN_RESOURCE', 'Resource URI is missing a path.');
     }
@@ -206,7 +212,7 @@ export function listResourceTemplates(): ResourceTemplate[] {
             name: 'sandbox-file',
             title: 'Sandbox file (archives and extracted files)',
             description:
-                'An archive written by create_zip / modify_zip, a file written by extract_zip, or an archive placed in the sandbox for zipPath, addressed by its path relative to ZIPNATIVE_MCP_OUTPUT_DIR. Enumerate concrete URIs with resources/list.',
+                'An archive written by create_zip / modify_zip / canonicalize_zip / merge_zip, a file written by extract_zip or inflate_raw, or a file placed in the sandbox for zipPath / sourcePath, addressed by its path relative to ZIPNATIVE_MCP_OUTPUT_DIR. The template names the archive type; each resources/list entry carries the MIME type of its own extension. Enumerate concrete URIs with resources/list.',
             mimeType: 'application/zip',
         },
     ];
