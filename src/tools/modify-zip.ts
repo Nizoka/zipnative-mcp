@@ -175,7 +175,11 @@ export async function modifyZipTool(rawInput: unknown, context: CallContext = NO
     const { bytes } = await loadArchive(input);
     const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
-    const reader = guard('Failed to open archive', () => openZip(bytes, { ...(limits !== undefined ? { limits } : {}), ...sink.options }));
+    // Eager: the append path never re-reads the existing entries, so a lazy
+    // open would carry an overlapping (smuggling) or truncated-header archive
+    // into the output unchecked. Every local header and the overlap table are
+    // cross-checked up front, as inspect_zip does by default.
+    const reader = guard('Failed to open archive', () => openZip(bytes, { validate: 'eager', ...(limits !== undefined ? { limits } : {}), ...sink.options }));
     const defaultDate = toDefaultDate(input.defaultDate);
     const compression = toCompression(input.compression);
     const options: ZipModifierOptions = {
