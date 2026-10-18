@@ -118,7 +118,7 @@ describe('server', () => {
         expect((err as McpRpcError).message).toContain('[UNKNOWN_PROMPT]');
     });
 
-    it('lists all 13 tools with apiVersion, 1–2 examples and annotations each', async () => {
+    it('lists all 15 tools with apiVersion, 1–2 examples and annotations each', async () => {
         const response = (await rpc('tools/list')) as {
             tools: Array<{ name: string; title?: string; description: string; _meta?: { apiVersion?: string; examples?: Array<{ title: string; input: unknown }> }; annotations?: Record<string, boolean> }>;
         };
@@ -130,7 +130,7 @@ describe('server', () => {
 
         for (const t of response.tools) {
             expect(t._meta?.apiVersion, t.name).toBe(TOOL_API_VERSION);
-            expect(t._meta?.apiVersion).toBe('1.0.0');
+            expect(t._meta?.apiVersion).toBe('1.1.0');
             expect(Array.isArray(t._meta?.examples), t.name).toBe(true);
             expect((t._meta?.examples ?? []).length, t.name).toBeGreaterThan(0);
             expect((t._meta?.examples ?? []).length, `${t.name}: at most 2 examples (token budget)`).toBeLessThanOrEqual(2);

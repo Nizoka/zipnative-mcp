@@ -9,7 +9,7 @@ repository-code: "https://github.com/Nizoka/zipnative-mcp"
 url: "https://github.com/Nizoka/zipnative-mcp"
 abstract: >-
   Model Context Protocol (MCP) server bridging the zero-dependency zipnative
-  ZIP engine to AI clients. Provides 13 tools for deterministic, reproducible
+  ZIP engine to AI clients. Provides 15 tools for deterministic, reproducible
   archive creation (store / deflate, a pinned pure-TypeScript encoder for
   identical bytes on every runtime, worker-parallel and streamed writers),
   listing and forensic inspection without extraction (with determinism and
@@ -18,14 +18,16 @@ abstract: >-
   duplicate-path and Windows-device-name refusals with frozen ZIP_* error
   codes), one-call deep integrity verification, forward scanning of truncated
   or unseekable streams, incremental modification without recompression,
+  canonicalization of any archive into the reproducible form, merging without
+  recompression, byte-range reads of archives larger than memory,
   CRC-32, bounded raw-DEFLATE inflation, an offline capability preflight and
   human-in-the-loop governance issue drafting. Every archive the server writes
   is validated against ISO/IEC 21320-1:2015 by an engine-independent validator
   in continuous integration. Speaks MCP 2026-07-28 with automatic fallback for
   2025-era clients and makes no network call, ever.
 license: MIT
-version: 1.0.0
-date-released: "2026-09-07"
+version: 1.1.0
+date-released: "2026-10-18"
 keywords:
   - mcp
   - model-context-protocol
@@ -36,6 +38,7 @@ keywords:
   - compression
   - deflate
   - deterministic
+  - canonical
   - reproducible-builds
   - secure-by-default
   - zip-slip

@@ -2,19 +2,19 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.Nizoka/zipnative-mcp",
   "title": "zipnative MCP — ZIP creation, inspection, secure extraction & verification",
-  "description": "ZIP MCP server: create, inspect, verify, extract securely, modify without recompression. 13 tools",
+  "description": "ZIP MCP server: create, inspect, verify, extract, canonicalize, merge, modify. 15 tools",
   "repository": {
     "url": "https://github.com/Nizoka/zipnative-mcp",
     "source": "github"
   },
-  "version": "1.0.0",
+  "version": "1.1.0",
   "websiteUrl": "https://github.com/Nizoka/zipnative-mcp#readme",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "zipnative-mcp",
-      "version": "1.0.0",
+      "version": "1.1.0",
       "runtimeHint": "npx",
       "runtimeArguments": [
         {
@@ -76,6 +76,13 @@
         {
           "name": "ZIPNATIVE_MCP_WORKERS",
           "description": "Operator ceiling for create_zip parallel.workers (default 8; with no explicit workers the engine default max(1, min(cores - 1, 8)) applies, bounded by this ceiling; 0 disables worker threads and keeps compression on the calling thread). Integer >= 0, read once at startup; an invalid value refuses to start.",
+          "isRequired": false,
+          "isSecret": false,
+          "format": "number"
+        },
+        {
+          "name": "ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES",
+          "description": "Operator ceiling for every file written in outputMode='file' (create_zip, modify_zip, canonicalize_zip, merge_zip, extract_zip, inflate_raw), enforced while streaming (default 4294967296 = 4 GiB, the 1.0.0 behaviour). Integer >= 1048576, read once at startup; an invalid value refuses to start. Raise it to write Zip64 archives above 4 GiB into the sandbox (create_zip stream entries with zip64: true).",
           "isRequired": false,
           "isSecret": false,
           "format": "number"

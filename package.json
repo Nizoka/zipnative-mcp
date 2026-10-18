@@ -1,7 +1,7 @@
 {
     "name": "zipnative-mcp",
-    "version": "1.0.0",
-    "description": "Model Context Protocol (MCP) server for ZIP archives: create deterministic, reproducible archives (store/deflate, worker-parallel), list and inspect without extracting, read single entries by random access, extract with secure-by-default guards (zip-slip, zip-bomb, symlink, duplicate-path and device-name refusals), verify integrity in one call, scan unseekable streams, modify archives without recompression, compute CRC-32 and inflate raw DEFLATE. 13 tools on the zipnative engine, ISO/IEC 21320-1 conformance validated in CI, no network ever, for Claude, Cursor, ChatGPT and any MCP client.",
+    "version": "1.1.0",
+    "description": "Model Context Protocol (MCP) server for ZIP archives: create deterministic, reproducible archives (store/deflate, worker-parallel), list and inspect without extracting, read single entries by random access, extract with secure-by-default guards (zip-slip, zip-bomb, symlink, duplicate-path and device-name refusals), verify integrity in one call, scan unseekable streams, modify archives without recompression, rewrite any archive into a canonical reproducible form, merge archives without recompressing, read huge archives by byte ranges, compute CRC-32 and inflate raw DEFLATE. 15 tools on the zipnative engine, ISO/IEC 21320-1 conformance validated in CI, no network ever, for Claude, Cursor, ChatGPT and any MCP client.",
     "mcpName": "io.github.Nizoka/zipnative-mcp",
     "keywords": [
         "mcp",
@@ -24,6 +24,8 @@
         "random-access",
         "incremental",
         "deterministic",
+        "canonical",
+        "merge-zip",
         "reproducible-builds",
         "zip-slip",
         "zip-bomb",
