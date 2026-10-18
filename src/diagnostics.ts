@@ -16,6 +16,7 @@
  */
 import type { ZipCommonOptions, ZipDiagnostic } from 'zipnative';
 
+import { NO_CONTEXT, type CallContext } from './call-context.js';
 import { MAX_DIAGNOSTICS } from './caps.js';
 
 /** Wire shape of one diagnostic (identical to the engine's, minus nothing). */
@@ -27,8 +28,8 @@ export interface DiagnosticRow {
 }
 
 export interface DiagnosticSink {
-    /** Pass to the engine: `onDiagnostic`, `strict` and the pinned `dosTimeMode: 'utc'`. */
-    readonly options: Pick<ZipCommonOptions, 'onDiagnostic' | 'strict' | 'dosTimeMode'>;
+    /** Pass to the engine: `onDiagnostic`, `strict`, the pinned `dosTimeMode: 'utc'` and the call's `signal` / `onProgress`. */
+    readonly options: Pick<ZipCommonOptions, 'onDiagnostic' | 'strict' | 'dosTimeMode' | 'signal' | 'onProgress'>;
     /** De-duplicated rows (by code + entryName), capped at {@link MAX_DIAGNOSTICS}. */
     readonly diagnostics: DiagnosticRow[];
     /** Count per code over EVERY diagnostic received (not capped). */
@@ -47,8 +48,11 @@ export interface DiagnosticsReport {
     readonly diagnosticsTruncated?: true;
 }
 
-/** Create a sink. `strict: true` asks the engine to escalate the first diagnostic (`ZIP_STRICT_DIAGNOSTIC`). */
-export function createDiagnosticSink(strict = false): DiagnosticSink {
+/**
+ * Create a sink. `strict: true` asks the engine to escalate the first diagnostic (`ZIP_STRICT_DIAGNOSTIC`);
+ * the call context's cancellation signal and progress sink ride along to every engine call (src/call-context.ts).
+ */
+export function createDiagnosticSink(strict = false, context: CallContext = NO_CONTEXT): DiagnosticSink {
     const diagnostics: DiagnosticRow[] = [];
     const counts: Record<string, number> = {};
     const seen = new Set<string>();
@@ -70,7 +74,13 @@ export function createDiagnosticSink(strict = false): DiagnosticSink {
         });
     };
     return {
-        options: { onDiagnostic, dosTimeMode: 'utc', ...(strict ? { strict: true } : {}) },
+        options: {
+            onDiagnostic,
+            dosTimeMode: 'utc',
+            ...(strict ? { strict: true } : {}),
+            ...(context.signal !== undefined ? { signal: context.signal } : {}),
+            ...(context.onProgress !== undefined ? { onProgress: context.onProgress } : {}),
+        },
         diagnostics,
         counts,
         get truncated() {

@@ -419,6 +419,78 @@ export function buildCorpus({ call, sandboxDir }) {
             },
         },
         {
+            // zipnative 1.1.0 saveCompact({ canonical }): the edits, then the canonical form.
+            file: 'incremental-compacted-canonical.zip',
+            tool: 'modify_zip',
+            arguments: { zipBase64: '<bytes of incremental-original.zip>', operations: [{ op: 'add', name: 'CHANGES.md', text: '# Changes\n' }], mode: 'compact', canonical: {} },
+            note: "mode 'compact' + canonical — saveCompact({ canonical }), no recompression",
+            produce: (ctx, entry) => archive(ctx, entry.tool, { ...entry.arguments, zipBase64: b64(ctx.get('incremental-original.zip')) }),
+            after: async (bytes, ctx) => {
+                assert(ctx.resultOf('incremental-compacted-canonical.zip').structuredContent?.summary?.canonical === true, 'incremental-compacted-canonical.zip', 'summary.canonical should be true');
+                const names = await entryNames(ctx, bytes);
+                assert(names.join('\n') === [...names].sort().join('\n'), 'incremental-compacted-canonical.zip', `entries not in canonical order: ${names.join(',')}`);
+            },
+        },
+        {
+            // zipnative 1.1.0 canonicalizeZip(): an append-mode archive (dead bytes, a second central
+            // directory, appended entries out of order) rewritten into the canonical form — idempotently.
+            file: 'canonical-from-appended.zip',
+            tool: 'canonicalize_zip',
+            arguments: { zipBase64: '<bytes of incremental-appended.zip>', includeSha256: true },
+            note: 'canonicalize_zip over an append-mode archive (canonical form, idempotent, no recompression)',
+            produce: (ctx, entry) => archive(ctx, entry.tool, { ...entry.arguments, zipBase64: b64(ctx.get('incremental-appended.zip')) }),
+            after: async (bytes, ctx) => {
+                const summary = ctx.resultOf('canonical-from-appended.zip').structuredContent?.summary;
+                assert(summary?.canonicalForm === true && summary?.alreadyCanonical === false, 'canonical-from-appended.zip', `unexpected summary ${JSON.stringify(summary)}`);
+                const { bytes: again } = await archive(ctx, 'canonicalize_zip', { zipBase64: b64(bytes) });
+                assert(equal(again, bytes), 'canonical-from-appended.zip', 'canonicalising the canonical output changed its bytes (not idempotent)');
+                assert(!Buffer.from(bytes).includes(REMANENT.trim()), 'canonical-from-appended.zip', 'the canonical rewrite still carries the removed payload');
+            },
+        },
+        {
+            file: 'canonical-pinned-date.zip',
+            tool: 'canonicalize_zip',
+            arguments: { zipBase64: '<bytes of order-insertion-epub.zip>', date: '2026-10-08T00:00:00Z', keepExternalAttributes: false },
+            note: 'canonicalize_zip with a pinned date (read as UTC) and canonical attributes',
+            produce: (ctx, entry) => archive(ctx, entry.tool, { ...entry.arguments, zipBase64: b64(ctx.get('order-insertion-epub.zip')) }),
+            after: async (bytes, ctx) => {
+                const rows = await entryRows(ctx, bytes);
+                const off = rows.filter((e) => e.lastModified !== '2026-10-08T00:00:00.000Z').map((e) => e.name);
+                assert(off.length === 0, 'canonical-pinned-date.zip', `entries without the pinned date: ${off.join(', ')}`);
+            },
+        },
+        {
+            // zipnative 1.1.0 ZipWriter.addFromReader(): two archives into one, no recompression, every entry verified first.
+            file: 'merged-two.zip',
+            tool: 'merge_zip',
+            arguments: { sources: [{ zipBase64: '<bytes of incremental-original.zip>' }, { zipBase64: '<bytes of comments-entries.zip>' }], onConflict: 'last' },
+            note: 'merge_zip of two archives (transplant without recompression, verify on)',
+            produce: (ctx, entry) => archive(ctx, entry.tool, { ...entry.arguments, sources: [{ zipBase64: b64(ctx.get('incremental-original.zip')) }, { zipBase64: b64(ctx.get('comments-entries.zip')) }] }),
+            after: async (bytes, ctx) => {
+                const names = await entryNames(ctx, bytes);
+                const expected = [...(await entryNames(ctx, ctx.get('incremental-original.zip'))), ...(await entryNames(ctx, ctx.get('comments-entries.zip')))];
+                assert(new Set(expected).size === names.length, 'merged-two.zip', `expected ${new Set(expected).size} entries, got ${names.length}`);
+                assert(ctx.resultOf('merged-two.zip').structuredContent?.summary?.verified === true, 'merged-two.zip', 'summary.verified should be true');
+            },
+        },
+        {
+            // zipnative 1.1.0 AddEntryOptions.zip64 on a streamed entry: the APPNOTE 4.3.9.2 layout (Zip64 extra in
+            // the local header, 24-byte descriptor) the validator keys WF/DESCRIPTOR-WIDTH on.
+            file: 'streaming-zip64.zip',
+            tool: 'create_zip',
+            arguments: { entries: [{ name: 'streamed.bin', sourcePath: 'inputs/streamed64.bin', stream: true, zip64: true }, { name: 'buffered.txt', text: 'buffered' }] },
+            note: 'stream: true + zip64: true — the Zip64 streaming opt-in (needs the sandbox)',
+            produce: async (ctx, entry) => {
+                await ctx.sandboxFile('inputs/streamed64.bin', PATTERN);
+                return archive(ctx, entry.tool, entry.arguments);
+            },
+            after: async (bytes, ctx) => {
+                const rows = await entryRows(ctx, bytes);
+                const streamed = rows.find((e) => e.name === 'streamed.bin');
+                assert(streamed?.usesZip64 === true && streamed?.usesDataDescriptor === true, 'streaming-zip64.zip', `streamed.bin should use Zip64 + a data descriptor, got ${JSON.stringify(streamed)}`);
+            },
+        },
+        {
             file: 'edge-empty-entries.zip',
             tool: 'create_zip',
             arguments: { entries: [{ name: 'empty.txt', text: '' }, { name: 'empty-dir', directory: true }, { name: 'nonempty.txt', text: 'x\n' }] },

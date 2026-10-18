@@ -26,6 +26,7 @@
 import { z } from 'zod';
 import { iterateZipEntries } from 'zipnative';
 
+import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, openArchiveSource, refineArchiveInput } from '../archive-input.js';
 import { encodeBase64 } from '../base64.js';
 import { getCeilings, MAX_ENTRIES_ENV, MAX_ENTRY_INLINE_BYTES, MAX_EXTRACT_INLINE_TOTAL_BYTES, MAX_SCAN_ENTRIES_DEFAULT } from '../caps.js';
@@ -126,7 +127,7 @@ export const SCAN_ZIP_FORWARD_OUTPUT_SCHEMA = {
     },
 } as const;
 
-export async function scanZipForward(rawInput: unknown): Promise<ScanZipForwardResult> {
+export async function scanZipForward(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<ScanZipForwardResult> {
     const input = parseInput(InputSchema, rawInput);
     const ceilings = getCeilings();
     // The schema default is clamped to the operator ceiling; only an EXPLICIT value above it is refused.
@@ -135,7 +136,7 @@ export async function scanZipForward(rawInput: unknown): Promise<ScanZipForwardR
     }
     const maxEntries = input.maxEntries ?? Math.min(MAX_SCAN_ENTRIES_DEFAULT, ceilings.maxEntries);
     const { source, sizeBytes } = await openArchiveSource(input);
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
     // Looking one header past the budget is only safe while the engine's own
     // entry-count bound would not fire first (the budget may equal that bound).
@@ -166,9 +167,11 @@ export async function scanZipForward(rawInput: unknown): Promise<ScanZipForwardR
     let inlineTotal = 0;
     const state: { stoppedAt: ScanZipForwardResult['stoppedAt']; error?: { code: string; message: string } } = { stoppedAt: 'eof' };
 
-    const fail = (err: unknown, context: string, name?: string): void => {
+    const fail = (err: unknown, label: string, name?: string): void => {
         if (err instanceof ToolError) throw err;
-        const mapped = mapZipError(err, context, name);
+        // A cancellation is never a tolerated truncation.
+        throwIfCancelled(context);
+        const mapped = mapZipError(err, label, name);
         if (!input.tolerateTruncation) throw mapped;
         state.error = { code: mapped.code, message: mapped.message };
         state.stoppedAt = 'error';

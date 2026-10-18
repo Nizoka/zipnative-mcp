@@ -62,7 +62,7 @@ describe('HTTP fixture with a bearer token (end-to-end)', () => {
             expect(denied.headers['www-authenticate']).toMatch(/^Bearer /);
             const ok = await send(fx.port, { headers: { ...req.headers, authorization: `Bearer ${TOKEN}` }, body: req.body });
             expect(ok.status).toBe(200);
-            expect(((ok.json?.['result'] as { tools?: unknown[] })?.tools ?? []).length).toBe(13);
+            expect(((ok.json?.['result'] as { tools?: unknown[] })?.tools ?? []).length).toBe(15);
         } finally {
             await fx.close();
         }

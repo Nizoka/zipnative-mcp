@@ -131,8 +131,8 @@ describe('create_zip', () => {
         it('omitted defaultDate → DOS epoch, deterministic by the inspect verdict', async () => {
             const out = await createZipTool({ entries: [{ name: 'a.txt', text: 'a' }] });
             const inspected = await inspectZip({ zipBase64: out.base64 as string });
-            expect(inspected.determinism.deterministic).toBe(true);
-            expect(inspected.determinism.epochTimestamps).toBe(true);
+            expect(inspected.determinism?.deterministic).toBe(true);
+            expect(inspected.determinism?.epochTimestamps).toBe(true);
             expect(out.diagnostics).toEqual([]);
         });
 
@@ -142,7 +142,7 @@ describe('create_zip', () => {
             expect(out.diagnosticCounts['ZIP_TIMESTAMP_NOT_PINNED']).toBe(1);
             expect(out.summary.deterministic).toBe(false);
             assertValidZip(out.base64 as string, 'now');
-            expect((await inspectZip({ zipBase64: out.base64 as string })).determinism.epochTimestamps).toBe(false);
+            expect((await inspectZip({ zipBase64: out.base64 as string })).determinism?.epochTimestamps).toBe(false);
             await expect(createZipTool({ entries: [{ name: 'a.txt', text: 'a' }], defaultDate: 'now', strict: true })).rejects.toMatchObject({ code: 'ZIP_STRICT_DIAGNOSTIC' });
         });
 
@@ -159,7 +159,7 @@ describe('create_zip', () => {
             expect(Math.abs(b - Date.UTC(2031, 1, 3, 4, 5, 7, 900))).toBeLessThanOrEqual(2000);
             expect(out.summary.deterministic).toBe(false);
             const inspected = await inspectZip({ zipBase64: out.base64 as string });
-            expect(inspected.determinism.epochTimestamps).toBe(false);
+            expect(inspected.determinism?.epochTimestamps).toBe(false);
             expect(inspected.diagnostics).toEqual([]);
         });
 
@@ -272,8 +272,8 @@ describe('create_zip', () => {
             assertValidZip(out.base64 as string, 'streamed');
             const inspected = await inspectZip({ zipBase64: out.base64 as string });
             expect(inspected.dataDescriptorCount).toBe(1);
-            expect(inspected.determinism.canonicalLayout).toBe(false);
-            expect(inspected.determinism.deterministic).toBe(true);
+            expect(inspected.determinism?.canonicalLayout).toBe(false);
+            expect(inspected.determinism?.deterministic).toBe(true);
             const back = await readZipEntry({ zipBase64: out.base64 as string, name: 'big.bin', range: { offset: MiB, length: 7 } });
             expect(Buffer.from(back.dataBase64 as string, 'base64').equals(Buffer.from(patternBytes(MiB + 7).subarray(MiB)))).toBe(true);
         });
@@ -466,7 +466,7 @@ describe('create_zip', () => {
             expect(one.summary.deflateTier).toBe('node-zlib');
             expect(one.summary.sha256).toBe(two.summary.sha256);
             // The structural verdict of inspect_zip is a different question (canonical defaults) and says true.
-            expect((await inspectZip({ zipBase64: one.base64 as string })).determinism.deterministic).toBe(true);
+            expect((await inspectZip({ zipBase64: one.base64 as string })).determinism?.deterministic).toBe(true);
         });
 
         it("compression.deterministic:true → summary.deterministic true with deflateTier 'pure-pinned'", async () => {

@@ -61,7 +61,7 @@ describe('HTTP transport — legacy 2025-era clients', () => {
         });
         expect(list.status).toBe(200);
         const tools = (list.json?.['result'] as { tools: Array<{ name: string }> }).tools;
-        expect(tools.length).toBe(13);
+        expect(tools.length).toBe(15);
 
         const args = { zipBase64: b64(basicZip()), verbosity: 'summary' };
         const call = await send(fx.port, {

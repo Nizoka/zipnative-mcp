@@ -13,6 +13,7 @@
 import { z } from 'zod';
 import { activeDeflateTier, createZip, type AddEntryOptions, type CreateZipOptions } from 'zipnative';
 
+import { NO_CONTEXT, type CallContext } from '../call-context.js';
 import { assertInputWithin, getCeilings, MAX_BASE64_INPUT_BYTES, MAX_CREATE_ENTRIES, WORKERS_ENV } from '../caps.js';
 import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
 import { ensureEngineReady, probeRuntime } from '../engine.js';
@@ -56,7 +57,8 @@ export const CREATE_ZIP_INPUT_SCHEMA = {
                 required: ['name'],
                 properties: {
                     ...ENTRY_PAYLOAD_PROPERTIES,
-                    stream: { type: 'boolean', default: false, description: 'With sourcePath: feed the file through addStream (bounded memory, data-descriptor layout; entries > 4 GiB refused). The archive is then assembled by streaming.' },
+                    stream: { type: 'boolean', default: false, description: 'With sourcePath: feed the file through addStream (bounded memory, data-descriptor layout). The archive is then assembled by streaming. An entry that crosses 4 GiB is refused with ZIP_UNSUPPORTED_ZIP64_STREAMING unless zip64: true.' },
+                    zip64: { type: 'boolean', default: false, description: "stream: true only (zipnative 1.1.0 AddEntryOptions.zip64): write this streamed entry in the Zip64 streaming layout (APPNOTE 4.3.9.2: version 45, a Zip64 extra in the local header, a 24-byte data descriptor) so it may exceed 4 GiB. An opted-in entry below 4 GiB still carries the Zip64 records, which some streaming readers (Java's ZipInputStream) cannot read — opt in only for entries that may cross 4 GiB. The archive in a file is bounded by ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES (default 4 GiB); compression.deterministic caps a streamed entry at 2 GiB." },
                 },
             },
         },
@@ -83,10 +85,11 @@ export const CREATE_ZIP_INPUT_SCHEMA = {
 } as const;
 
 const EntrySchema = z
-    .strictObject({ ...EntryPayloadShape, stream: z.boolean().default(false) })
+    .strictObject({ ...EntryPayloadShape, stream: z.boolean().default(false), zip64: z.boolean().default(false) })
     .superRefine((v, ctx) => {
         refineEntryPayload(v, ctx);
         if (v.stream && v.sourcePath === undefined) ctx.addIssue({ code: 'custom', message: 'stream: true requires sourcePath', path: ['stream'] });
+        if (v.zip64 && !v.stream) ctx.addIssue({ code: 'custom', message: 'zip64: true applies to stream: true entries only (a buffered entry takes Zip64 automatically when it needs it)', path: ['zip64'] });
     });
 
 const InputSchema = z
@@ -174,10 +177,10 @@ export const CREATE_ZIP_OUTPUT_SCHEMA = archiveOutputSchemaWith(
 );
 
 
-export async function createZipTool(rawInput: unknown): Promise<CreateZipResult> {
+export async function createZipTool(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<CreateZipResult> {
     const input = parseInput(InputSchema, rawInput);
     await ensureEngineReady();
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
     const defaultDate = toDefaultDate(input.defaultDate);
     const compression = toCompression(input.compression);
@@ -226,7 +229,7 @@ export async function createZipTool(rawInput: unknown): Promise<CreateZipResult>
         let anyNonDeterministic = compression?.deterministic !== true;
 
         for (let i = 0; i < input.entries.length; i++) {
-            const spec = input.entries[i] as EntryPayload & { stream: boolean };
+            const spec = input.entries[i] as EntryPayload & { stream: boolean; zip64: boolean };
             const where = `entries[${i}]`;
             const entryOptions = toAddEntryOptions(spec, where);
             if (spec.compression?.deterministic === false || (spec.compression !== undefined && spec.compression.deterministic === undefined && compression?.deterministic !== true)) {
@@ -245,7 +248,7 @@ export async function createZipTool(rawInput: unknown): Promise<CreateZipResult>
                 opened.push(file);
                 streamedCount++;
                 uncompressedBytes += file.size;
-                guard(`Failed to add streamed entry '${spec.name}'`, () => writer.addStream(spec.name, file.chunks(64 * 1024), entryOptions), spec.name, { entryIndex: i });
+                guard(`Failed to add streamed entry '${spec.name}'`, () => writer.addStream(spec.name, file.chunks(64 * 1024), spec.zip64 ? { ...entryOptions, zip64: true } : entryOptions), spec.name, { entryIndex: i });
                 continue;
             }
             const { data } = await loadPayload(spec, where);

@@ -160,7 +160,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
         const init = session.frames.find((f) => f.id === 1)?.result as { protocolVersion?: string } | undefined;
         expect(init?.protocolVersion).toBe(version);
         const tools = (session.frames.find((f) => f.id === 2)?.result as { tools?: Array<{ name: string }> } | undefined)?.tools ?? [];
-        expect(tools.length).toBe(13);
+        expect(tools.length).toBe(15);
     });
 
     it('serves a legacy initialize → tools/list → tools/call session with JSON-only stdout', async () => {
@@ -192,7 +192,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
         expect(init?.serverInfo?.name).toBe('zipnative-mcp');
 
         const tools = (session.frames.find((f) => f.id === 2)?.result as { tools?: Array<{ name: string }> } | undefined)?.tools ?? [];
-        expect(tools.length).toBe(13);
+        expect(tools.length).toBe(15);
 
         const call = session.frames.find((f) => f.id === 3)?.result as { isError?: boolean; content?: Array<{ type: string; resource?: { mimeType?: string } }>; structuredContent?: { diagnostics?: Array<{ code: string }> } } | undefined;
         expect(call?.isError).not.toBe(true);

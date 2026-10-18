@@ -12,7 +12,7 @@ import { z } from 'zod';
 import { createInflator, getCodec, METHOD_DEFLATE, METHOD_STORE } from 'zipnative';
 
 import { decodeBase64Field } from '../base64.js';
-import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES, MAX_PATH_INPUT_BYTES } from '../caps.js';
+import { assertInputWithin, getCeilings, MAX_BASE64_INPUT_BYTES, MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES, MAX_PATH_INPUT_BYTES } from '../caps.js';
 import { ensureEngineReady } from '../engine.js';
 import { ToolError } from '../errors.js';
 import { emitArchive, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
@@ -30,7 +30,7 @@ export const INFLATE_RAW_INPUT_SCHEMA = {
     properties: {
         dataBase64: { type: 'string', description: 'The compressed stream as base64 (e.g. the payload from read_zip_entry mode:"raw"). Exclusive with sourcePath.' },
         sourcePath: { type: 'string', minLength: 1, description: 'Relative path of a file inside the sandbox holding the compressed stream (streamed). Exclusive with dataBase64.' },
-        maxOutput: { type: 'integer', minimum: 1, description: `Mandatory output bound in bytes: decompression stops with ZIP_INFLATE_OUTPUT_OVERFLOW beyond it (zip-bomb guard). Inline results are further capped at ${MAX_BASE64_OUTPUT_BYTES} bytes, file results at ${MAX_FILE_OUTPUT_BYTES}.` },
+        maxOutput: { type: 'integer', minimum: 1, description: `Mandatory output bound in bytes: decompression stops with ZIP_INFLATE_OUTPUT_OVERFLOW beyond it (zip-bomb guard). Inline results are further capped at ${MAX_BASE64_OUTPUT_BYTES} bytes, file results at the file cap (ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES, default ${MAX_FILE_OUTPUT_BYTES}).` },
         method: { type: 'string', pattern: '^(?:deflate|store|[0-9]+)$', default: 'deflate', description: "'deflate' (default, method 8), 'store' (method 0, bounded pass-through) or a numeric method id for a registered codec." },
         allowTrailing: { type: 'boolean', default: false, description: 'Accept bytes after the end of the deflate stream silently (they are always reported as `leftover`).' },
         ...OUTPUT_INPUT_PROPERTIES,
@@ -101,7 +101,7 @@ export async function inflateRaw(rawInput: unknown): Promise<InflateRawResult> {
     const input = parseInput(InputSchema, rawInput);
     await ensureEngineReady();
     const method = input.method === 'deflate' ? METHOD_DEFLATE : input.method === 'store' ? METHOD_STORE : Number(input.method);
-    const cap = input.outputMode === 'file' ? MAX_FILE_OUTPUT_BYTES : MAX_BASE64_OUTPUT_BYTES;
+    const cap = input.outputMode === 'file' ? getCeilings().maxFileOutputBytes : MAX_BASE64_OUTPUT_BYTES;
     const bound = Math.min(input.maxOutput, cap);
 
     let bytesIn = 0;

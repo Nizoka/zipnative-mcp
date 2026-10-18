@@ -11,7 +11,7 @@ import { TOOL_API_VERSION, ZIPNATIVE_MCP_VERSION } from '../src/version.js';
 import { ZIP_DIAGNOSTIC_CODES, ZIP_ERROR_CODES } from '../src/zip-errors.js';
 import { cleanupSandbox, makeSandbox } from './_sandbox.js';
 
-const ENV = ['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES', 'ZIPNATIVE_MCP_MAX_ENTRIES', 'ZIPNATIVE_MCP_WORKERS'] as const;
+const ENV = ['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES', 'ZIPNATIVE_MCP_MAX_ENTRIES', 'ZIPNATIVE_MCP_WORKERS', 'ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES'] as const;
 
 describe('describe_engine', () => {
     let sandbox: string | null = null;
@@ -33,7 +33,7 @@ describe('describe_engine', () => {
 
     it('reports the server, engine and runtime shape', async () => {
         const out = await describeEngine({});
-        expect(out.server).toEqual({ name: 'zipnative-mcp', version: ZIPNATIVE_MCP_VERSION, toolApiVersion: TOOL_API_VERSION, protocol: expect.stringContaining('MCP'), toolCount: 13 });
+        expect(out.server).toEqual({ name: 'zipnative-mcp', version: ZIPNATIVE_MCP_VERSION, toolApiVersion: TOOL_API_VERSION, protocol: expect.stringContaining('MCP'), toolCount: 15 });
         expect(out.server.toolCount).toBe(toolNames().length);
         expect(out.engine.name).toBe('zipnative');
         expect(out.engine.version).toBe(ZIPNATIVE_VERSION);
@@ -46,7 +46,7 @@ describe('describe_engine', () => {
         expect(out.capabilities.cpuCount).toBeGreaterThanOrEqual(1);
         expect(out.capabilities.defaultWorkers).toBeGreaterThanOrEqual(1);
         expect(out.capabilities.defaultWorkers).toBeLessThanOrEqual(8);
-        expect(out.codecs).toEqual([{ id: 0, name: 'store', sync: true, stream: expect.any(Boolean) }, { id: 8, name: 'deflate', sync: true, stream: expect.any(Boolean) }]);
+        expect(out.codecs).toEqual([{ id: 0, name: 'store', sync: true, stream: expect.any(Boolean), incremental: true }, { id: 8, name: 'deflate', sync: true, stream: expect.any(Boolean), incremental: true }]);
         expect(out.defaultLimits).toEqual({ ...DEFAULT_ZIP_LIMITS });
         expect(out.caps).toEqual(CAPS);
         expect(out.network).toBe('none');
@@ -79,7 +79,7 @@ describe('describe_engine', () => {
 
     it('ceilings reflect the operator environment', async () => {
         const defaults = await describeEngine({});
-        expect(defaults.ceilings).toEqual({ maxUncompressedBytes: 8 * 1024 * 1024 * 1024, maxEntries: 100_000, maxWorkers: 8, env: [...ENV] });
+        expect(defaults.ceilings).toEqual({ maxUncompressedBytes: 8 * 1024 * 1024 * 1024, maxEntries: 100_000, maxWorkers: 8, maxFileOutputBytes: 4 * 1024 * 1024 * 1024, env: [...ENV] });
         process.env['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES'] = '1048576';
         process.env['ZIPNATIVE_MCP_MAX_ENTRIES'] = '500';
         process.env['ZIPNATIVE_MCP_WORKERS'] = '2';

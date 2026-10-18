@@ -133,10 +133,10 @@ describe.each(AGENT_TRANSPORTS)('C17 autonomous scenario over %s', (transport) =
             }
         });
 
-        it('S1 tools/list: the 13-tool catalogue in registration order (public 24 h cache hint on the modern era)', async () => {
+        it('S1 tools/list: the 15-tool catalogue in registration order (public 24 h cache hint on the modern era)', async () => {
             const list = await agent.request<{ tools: Array<{ name: string; inputSchema: unknown; outputSchema?: unknown }>; ttlMs?: number; cacheScope?: string; resultType?: string }>('tools/list');
             expect(list.tools.map((t) => t.name)).toEqual(toolNames());
-            expect(list.tools).toHaveLength(13);
+            expect(list.tools).toHaveLength(15);
             for (const t of list.tools) expect(t.inputSchema).toBeDefined();
             if (modern) {
                 expect(list.resultType).toBe('complete');
@@ -151,9 +151,9 @@ describe.each(AGENT_TRANSPORTS)('C17 autonomous scenario over %s', (transport) =
             const r = ok(await agent.callTool('describe_engine', {}));
             const d = sc(r);
             expect(d['sandbox']).toEqual({ enabled: true, cacheEnabled: true });
-            expect(d['ceilings']).toMatchObject({ maxEntries: 5000, maxWorkers: 2, env: ['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES', 'ZIPNATIVE_MCP_MAX_ENTRIES', 'ZIPNATIVE_MCP_WORKERS'] });
+            expect(d['ceilings']).toMatchObject({ maxEntries: 5000, maxWorkers: 2, env: ['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES', 'ZIPNATIVE_MCP_MAX_ENTRIES', 'ZIPNATIVE_MCP_WORKERS', 'ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES'] });
             expect(d['network']).toBe('none');
-            expect((d['server'] as { toolCount: number }).toolCount).toBe(13);
+            expect((d['server'] as { toolCount: number }).toolCount).toBe(15);
             expect((d['errorCodes'] as string[]).length).toBe(39);
             expect((d['diagnosticCodes'] as string[]).length).toBe(12);
             expect((r._meta as Record<string, unknown> | undefined)?.['cached']).toBeUndefined();

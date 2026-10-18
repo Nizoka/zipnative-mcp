@@ -5,12 +5,12 @@ import { describe, it, expect, afterEach } from 'vitest';
 
 import * as caps from '../src/caps.js';
 import {
-    __resetCeilingsForTests, assertInputWithin, CAPS, DEFAULT_MAX_ENTRIES_CEILING, DEFAULT_MAX_UNCOMPRESSED_CEILING, DEFAULT_WORKERS_CEILING,
+    __resetCeilingsForTests, assertInputWithin, CAPS, DEFAULT_MAX_ENTRIES_CEILING, DEFAULT_MAX_UNCOMPRESSED_CEILING, DEFAULT_WORKERS_CEILING, DEFAULT_MAX_FILE_OUTPUT_CEILING, MAX_FILE_OUTPUT_ENV,
     getCeilings, MAX_BASE64_INPUT_BYTES, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, readCeilings, WORKERS_ENV,
 } from '../src/caps.js';
 import { ToolError } from '../src/errors.js';
 
-const ENV = [MAX_UNCOMPRESSED_ENV, MAX_ENTRIES_ENV, WORKERS_ENV];
+const ENV = [MAX_UNCOMPRESSED_ENV, MAX_ENTRIES_ENV, WORKERS_ENV, MAX_FILE_OUTPUT_ENV];
 
 describe('caps', () => {
     afterEach(() => {
@@ -19,7 +19,12 @@ describe('caps', () => {
     });
 
     it('readCeilings returns the engine defaults for an empty environment', () => {
-        expect(readCeilings({})).toEqual({ maxUncompressedBytes: DEFAULT_MAX_UNCOMPRESSED_CEILING, maxEntries: DEFAULT_MAX_ENTRIES_CEILING, maxWorkers: DEFAULT_WORKERS_CEILING });
+        expect(readCeilings({})).toEqual({ maxUncompressedBytes: DEFAULT_MAX_UNCOMPRESSED_CEILING, maxEntries: DEFAULT_MAX_ENTRIES_CEILING, maxWorkers: DEFAULT_WORKERS_CEILING, maxFileOutputBytes: DEFAULT_MAX_FILE_OUTPUT_CEILING });
+        // The file-output ceiling defaults to the 1.0.0 cap: nothing moves unless the operator raises it.
+        expect(DEFAULT_MAX_FILE_OUTPUT_CEILING).toBe(4 * 1024 * 1024 * 1024);
+        expect(readCeilings({ [MAX_FILE_OUTPUT_ENV]: String(16 * 1024 * 1024 * 1024) }).maxFileOutputBytes).toBe(16 * 1024 * 1024 * 1024);
+        expect(() => readCeilings({ [MAX_FILE_OUTPUT_ENV]: '1000' })).toThrow(/ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES must be an integer >= 1048576/);
+        expect(() => readCeilings({ [MAX_FILE_OUTPUT_ENV]: '4GiB' })).toThrow(/ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES must be a non-negative integer/);
         expect(readCeilings({ [MAX_ENTRIES_ENV]: '' })).toEqual(readCeilings({}));
         expect(DEFAULT_MAX_UNCOMPRESSED_CEILING).toBe(8 * 1024 * 1024 * 1024);
         expect(DEFAULT_MAX_ENTRIES_CEILING).toBe(100_000);
@@ -27,7 +32,7 @@ describe('caps', () => {
     });
 
     it('readCeilings parses valid values (whitespace tolerated)', () => {
-        expect(readCeilings({ [MAX_UNCOMPRESSED_ENV]: '1024', [MAX_ENTRIES_ENV]: ' 1 ', [WORKERS_ENV]: '0' })).toEqual({ maxUncompressedBytes: 1024, maxEntries: 1, maxWorkers: 0 });
+        expect(readCeilings({ [MAX_UNCOMPRESSED_ENV]: '1024', [MAX_ENTRIES_ENV]: ' 1 ', [WORKERS_ENV]: '0' })).toEqual({ maxUncompressedBytes: 1024, maxEntries: 1, maxWorkers: 0, maxFileOutputBytes: DEFAULT_MAX_FILE_OUTPUT_CEILING });
         expect(readCeilings({ [WORKERS_ENV]: '64' }).maxWorkers).toBe(64);
     });
 
@@ -106,7 +111,7 @@ describe('caps', () => {
 
     it('A-008: every numeric constant exported by src/caps.ts (except the ceiling defaults) is advertised in CAPS', () => {
         // Ceiling defaults are reported by describe_engine under `ceilings`, not `caps`.
-        const ceilingNames = new Set(['DEFAULT_MAX_UNCOMPRESSED_CEILING', 'DEFAULT_MAX_ENTRIES_CEILING', 'DEFAULT_WORKERS_CEILING']);
+        const ceilingNames = new Set(['DEFAULT_MAX_UNCOMPRESSED_CEILING', 'DEFAULT_MAX_ENTRIES_CEILING', 'DEFAULT_WORKERS_CEILING', 'DEFAULT_MAX_FILE_OUTPUT_CEILING']);
         expect(DEFAULT_MAX_UNCOMPRESSED_CEILING + DEFAULT_MAX_ENTRIES_CEILING + DEFAULT_WORKERS_CEILING).toBeGreaterThan(0);
         const advertised = new Set(Object.values(CAPS));
         const numericExports = Object.entries(caps).filter(([name, value]) => typeof value === 'number' && !ceilingNames.has(name));

@@ -1,0 +1,17 @@
+{
+  "description": "Edit, then rewrite into the canonical form in the same call: mode 'compact' with canonical: {} (zipnative 1.1.0 saveCompact({ canonical })) applies the operations, drops the dead bytes and normalises every entry like canonicalize_zip — still without recompression. summary.canonical: true says so.",
+  "tool": "modify_zip",
+  "arguments": {
+    "zipBase64": "<rich-zip-base64>",
+    "operations": [
+      {
+        "op": "add",
+        "name": "CHANGES.md",
+        "text": "# Changes\n"
+      }
+    ],
+    "mode": "compact",
+    "canonical": {},
+    "includeSha256": true
+  }
+}

@@ -15,10 +15,12 @@
  * than silently summarised. The report shape mirrors `zipnative inspect --json`.
  */
 import { z } from 'zod';
-import { METHOD_DEFLATE, METHOD_STORE, analyzeDeterminism, isSymlinkEntry, openZip, type DeterminismReport, type ZipEntry } from 'zipnative';
+import { METHOD_DEFLATE, METHOD_STORE, analyzeDeterminism, isSymlinkEntry, type DeterminismReport, type ZipEntry, type ZipLimits } from 'zipnative';
 
-import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
-import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
+import { NO_CONTEXT, type CallContext } from '../call-context.js';
+import { ACCESS_INPUT_PROPERTY, AccessShape, ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, openArchive, refineArchiveInput, type ArchiveHandle } from '../archive-input.js';
+import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticSink, type DiagnosticsReport } from '../diagnostics.js';
+import { ToolError } from '../errors.js';
 import { MAX_DETERMINISM_OFFENDERS } from '../caps.js';
 import { ISO_DATE_PATTERN, parseEntryDate } from '../entry-spec.js';
 import { bytesToHex, decodeComment, formatRatio, methodName, sanitizedPathOf } from '../entry.js';
@@ -78,6 +80,7 @@ export const INSPECT_ZIP_INPUT_SCHEMA = {
                 method: { type: 'string', enum: ['store', 'deflate'], description: 'Every entry must use this method.' },
             },
         },
+        ...ACCESS_INPUT_PROPERTY,
         ...STRICT_INPUT_PROPERTY,
         limits: LIMITS_INPUT_SCHEMA,
         ...PROJECTION_INPUT_PROPERTIES,
@@ -91,6 +94,7 @@ const InputSchema = z
         check: z.array(z.enum(INSPECT_CHECKS)).max(18).optional(),
         determinismReport: z.boolean().default(false),
         canonicalDate: z.string().regex(new RegExp(ISO_DATE_PATTERN)).optional(),
+        ...AccessShape,
         assert: z
             .strictObject({
                 maxEntries: z.number().int().min(0).optional(),
@@ -137,7 +141,8 @@ export interface InspectZipResult extends DiagnosticsReport {
     readonly unsafeNameCount: number;
     readonly earliestDate: string | null;
     readonly latestDate: string | null;
-    readonly determinism: {
+    /** Absent when the archive was read by byte ranges (`access: 'range'`): the analysis needs the whole archive. */
+    readonly determinism?: {
         readonly epochTimestamps: boolean;
         readonly canonicalOrder: boolean;
         readonly utf8Flags: boolean;
@@ -160,12 +165,14 @@ export interface InspectZipResult extends DiagnosticsReport {
     };
     readonly checks?: readonly CheckResult[];
     readonly checksPassed?: boolean;
+    /** Present ('range') when the archive was read by byte ranges. */
+    readonly access?: 'range';
 }
 
 export const INSPECT_ZIP_OUTPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
-    required: ['archiveBytes', 'entryCount', 'isZip64', 'determinism', 'diagnostics'],
+    required: ['archiveBytes', 'entryCount', 'isZip64', 'diagnostics'],
     properties: {
         archiveBytes: { type: 'integer', minimum: 0 },
         entryCount: { type: 'integer', minimum: 0 },
@@ -247,22 +254,44 @@ export const INSPECT_ZIP_OUTPUT_SCHEMA = {
             },
         },
         checksPassed: { type: 'boolean', description: 'Present when check / assert was supplied: true when every assertion holds.' },
+        access: { type: 'string', enum: ['range'], description: "Present when the archive was read by byte ranges (access 'range', or a zipPath above the in-memory cap): `determinism` is then absent and the determinism checks fail with that reason." },
     },
 } as const;
 
 type Report = Omit<InspectZipResult, 'checks' | 'checksPassed'>;
 
-function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: readonly ZipEntry[], engine: DeterminismReport): CheckResult[] {
+type Determinism = NonNullable<Report['determinism']>;
+
+/** The checks that read the determinism analysis (unavailable over a byte-range reader). */
+const DETERMINISM_CHECKS: ReadonlySet<string> = new Set(['deterministic', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'canonical-form', 'canonical-extras', 'canonical-version-made-by']);
+
+const NOT_EVALUATED = "not evaluated: the archive was read by byte ranges and the determinism analysis needs the whole archive in memory (access 'memory', archives up to 1 GiB)";
+
+/** One determinism check over the default verdict (d) or the engine's canonical-form report (engine). */
+function determinismCheck(c: string, d: Determinism, engine: DeterminismReport): { ok: boolean; detail: string } {
+    switch (c) {
+        case 'deterministic': return { ok: d.deterministic, detail: JSON.stringify(d) };
+        case 'epoch-timestamps': return { ok: d.epochTimestamps, detail: d.epochTimestamps ? 'all entries at the DOS epoch' : 'non-epoch timestamps present' };
+        case 'canonical-order': return { ok: d.canonicalOrder, detail: d.canonicalOrder ? 'central directory in canonical raw-name order' : 'not in canonical order' };
+        case 'utf8-names': return { ok: d.utf8Flags, detail: d.utf8Flags ? 'non-ASCII names carry the UTF-8 flag' : 'non-ASCII name without the UTF-8 flag' };
+        case 'canonical-form': return { ok: engine.deterministic, detail: engine.deterministic ? 'the canonical form zipnative writes (analyzeDeterminism)' : `rules broken: ${[...new Set(engine.offenders.map((o) => o.concern))].join(', ')}` };
+        case 'canonical-extras': return { ok: engine.canonicalExtras, detail: engine.canonicalExtras ? 'no extra field but Zip64' : `${engine.offenders.filter((o) => o.concern === 'extra-field').length} entries carry other extra fields` };
+        default: return { ok: engine.canonicalVersionMadeBy, detail: engine.canonicalVersionMadeBy ? 'version-made-by 0x032D on every entry' : `${engine.offenders.filter((o) => o.concern === 'version-made-by').length} entries with another version-made-by` };
+    }
+}
+
+function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: readonly ZipEntry[], engine: DeterminismReport | null): CheckResult[] {
     const results: CheckResult[] = [];
     const d = report.determinism;
     for (const c of input.check ?? []) {
+        if (DETERMINISM_CHECKS.has(c)) {
+            // Fail closed: a gate that cannot be evaluated never passes.
+            results.push({ check: c, ...(d === undefined || engine === null ? { ok: false, detail: NOT_EVALUATED } : determinismCheck(c, d, engine)) });
+            continue;
+        }
         let ok = false;
         let detail = '';
         switch (c) {
-            case 'deterministic': ok = d.deterministic; detail = JSON.stringify(d); break;
-            case 'epoch-timestamps': ok = d.epochTimestamps; detail = ok ? 'all entries at the DOS epoch' : 'non-epoch timestamps present'; break;
-            case 'canonical-order': ok = d.canonicalOrder; detail = ok ? 'central directory in canonical raw-name order' : 'not in canonical order'; break;
-            case 'utf8-names': ok = d.utf8Flags; detail = ok ? 'non-ASCII names carry the UTF-8 flag' : 'non-ASCII name without the UTF-8 flag'; break;
             case 'no-data-descriptor':
             case 'canonical-layout': ok = report.dataDescriptorCount === 0; detail = `${report.dataDescriptorCount} data-descriptor entries`; break;
             case 'no-zip64': ok = !report.isZip64 && report.zip64EntryCount === 0; detail = `zip64 EOCD: ${report.isZip64}, zip64 entries: ${report.zip64EntryCount}`; break;
@@ -274,9 +303,6 @@ function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: r
             case 'no-diagnostics': ok = report.diagnostics.length === 0; detail = `${report.diagnostics.length} diagnostics`; break;
             case 'store-only': ok = entries.every((e) => e.compressionMethod === METHOD_STORE); detail = `methods: ${report.methods.map((m) => m.name).join(',') || 'none'}`; break;
             case 'deflate-only': ok = entries.every((e) => e.compressionMethod === METHOD_DEFLATE); detail = `methods: ${report.methods.map((m) => m.name).join(',') || 'none'}`; break;
-            case 'canonical-form': ok = engine.deterministic; detail = ok ? 'the canonical form zipnative writes (analyzeDeterminism)' : `rules broken: ${[...new Set(engine.offenders.map((o) => o.concern))].join(', ')}`; break;
-            case 'canonical-extras': ok = engine.canonicalExtras; detail = ok ? 'no extra field but Zip64' : `${engine.offenders.filter((o) => o.concern === 'extra-field').length} entries carry other extra fields`; break;
-            case 'canonical-version-made-by': ok = engine.canonicalVersionMadeBy; detail = ok ? 'version-made-by 0x032D on every entry' : `${engine.offenders.filter((o) => o.concern === 'version-made-by').length} entries with another version-made-by`; break;
         }
         results.push({ check: c, ok, detail });
     }
@@ -302,13 +328,24 @@ function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: r
     return results;
 }
 
-export async function inspectZip(rawInput: unknown): Promise<InspectZipResult> {
+export async function inspectZip(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<InspectZipResult> {
     const input = parseInput(InputSchema, rawInput);
-    const { bytes } = await loadArchive(input);
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
-    const reader = guard('Failed to open archive', () => openZip(bytes, { validate: input.validate, ...(limits !== undefined ? { limits } : {}), ...sink.options }));
-    const entries: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);
+    const reader = await openArchive(input, input.access, { validate: input.validate, ...(limits !== undefined ? { limits } : {}), ...sink.options });
+    try {
+        return inspectOpened(input, reader, sink, limits);
+    } finally {
+        await reader.close();
+    }
+}
+
+function inspectOpened(input: z.infer<typeof InputSchema>, reader: ArchiveHandle, sink: DiagnosticSink, limits: Partial<ZipLimits> | undefined): InspectZipResult {
+    const bytes = reader.bytes;
+    if (bytes === null && (input.determinismReport || input.canonicalDate !== undefined)) {
+        throw new ToolError('VALIDATION_ERROR', "determinismReport / canonicalDate need the whole archive in memory (zipnative's analyzeDeterminism takes bytes), but this archive was read by byte ranges — pass access:'memory' (archives up to 1 GiB).", { remedy: "access:'memory'" });
+    }
+    const entries: ZipEntry[] = guard('Failed to read the central directory', () => reader.entries());
 
     let fileCount = 0;
     let directoryCount = 0;
@@ -348,13 +385,12 @@ export async function inspectZip(rawInput: unknown): Promise<InspectZipResult> {
     // The engine's definition (analyzeDeterminism, silent on diagnostics, same limits): the default report
     // keeps the 1.0.0 shape and verdict, the full engine report is opt-in. The default comparison is
     // always the DOS epoch; canonicalDate only re-targets the opt-in canonical-form verdict.
-    const engineDefault = guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, { ...(limits !== undefined ? { limits } : {}), dosTimeMode: 'utc' }));
+    const engineDefault = bytes === null ? null : guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, { ...(limits !== undefined ? { limits } : {}), dosTimeMode: 'utc' }));
     const pinned = input.canonicalDate !== undefined ? parseEntryDate(input.canonicalDate, 'canonicalDate') : undefined;
-    const engine = pinned === undefined ? engineDefault : guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, { ...(limits !== undefined ? { limits } : {}), date: pinned, dosTimeMode: 'utc' }));
-    const { epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors } = engineDefault;
+    const engine = bytes === null || pinned === undefined ? engineDefault : guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, { ...(limits !== undefined ? { limits } : {}), date: pinned, dosTimeMode: 'utc' }));
 
     const report: Report = {
-        archiveBytes: bytes.byteLength,
+        archiveBytes: reader.size,
         entryCount: reader.entryCount,
         fileCount,
         directoryCount,
@@ -378,18 +414,23 @@ export async function inspectZip(rawInput: unknown): Promise<InspectZipResult> {
         unsafeNameCount,
         earliestDate: earliest === null ? null : (earliest as Date).toISOString(),
         latestDate: latest === null ? null : (latest as Date).toISOString(),
-        determinism: {
-            epochTimestamps,
-            canonicalOrder,
-            utf8Flags,
-            noDataDescriptors,
-            canonicalLayout: noDataDescriptors,
-            deterministic: epochTimestamps && canonicalOrder && utf8Flags,
-        },
+        ...(engineDefault !== null
+            ? {
+                determinism: {
+                    epochTimestamps: engineDefault.epochTimestamps,
+                    canonicalOrder: engineDefault.canonicalOrder,
+                    utf8Flags: engineDefault.utf8Flags,
+                    noDataDescriptors: engineDefault.noDataDescriptors,
+                    canonicalLayout: engineDefault.noDataDescriptors,
+                    deterministic: engineDefault.epochTimestamps && engineDefault.canonicalOrder && engineDefault.utf8Flags,
+                },
+            }
+            : {}),
         ...sink.report(),
+        ...(reader.access === 'range' ? { access: 'range' as const } : {}),
     };
 
-    const withEngine: Report = input.determinismReport
+    const withEngine: Report = input.determinismReport && engine !== null
         ? {
             ...report,
             determinismReport: {
@@ -423,8 +464,8 @@ export function inspectSummary(r: InspectZipResult): Record<string, unknown> {
         encryptedCount: r.encryptedCount,
         unsafeNameCount: r.unsafeNameCount,
         duplicateNameCount: r.duplicateNameCount,
-        deterministic: r.determinism.deterministic,
-        canonicalLayout: r.determinism.canonicalLayout,
+        ...(r.determinism !== undefined ? { deterministic: r.determinism.deterministic, canonicalLayout: r.determinism.canonicalLayout } : {}),
+        ...(r.access !== undefined ? { access: r.access } : {}),
         diagnosticCount: r.diagnostics.length,
         ...(r.checksPassed !== undefined ? { checksPassed: r.checksPassed } : {}),
     };

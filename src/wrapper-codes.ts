@@ -28,6 +28,7 @@ export const WRAPPER_CODES: readonly WrapperCodeEntry[] = [
     { code: 'LIMIT_CEILING_EXCEEDED', meaning: 'A limits.* value, an explicit scan maxEntries or parallel.workers above its operator ceiling (data.env names the variable).', remedy: 'Lower the value, or the operator raises the ceiling for trusted input only.' },
     { code: 'UNKNOWN_RESOURCE', meaning: 'resources/read with a URI outside zipnative://output/, an empty path, or a missing file — surfaced as JSON-RPC error -32602.', remedy: 'List URIs with resources/list.' },
     { code: 'GOVERNANCE_VIOLATION', meaning: 'A draft_governance_issue draft breaks the AI-governance contract (a runtime dependency, no reproduction block, duplicateSearchPerformed: false).', remedy: 'Remove the dependency proposal, include the reproduction, confirm the duplicate search.' },
+    { code: 'CANCELLED', meaning: 'The client cancelled the request (notifications/cancelled, or the HTTP client went away) before it completed; the engine stopped between chunks, nothing was cached and a partial output file was removed.', remedy: 'Retry the call if the result is still wanted (data.remedy: retry).' },
     { code: 'ENGINE_ERROR', meaning: 'Something that is not a ZipError escaped the engine or the runtime (a bug — data.errorClass: internal); the message never carries an absolute path.', remedy: 'Report it with a reproduction via draft_governance_issue.' },
 ];
 

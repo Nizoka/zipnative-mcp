@@ -12,7 +12,7 @@ import { callToolDirect, ensureEngineReady } from '../src/server.js';
 import { buildExtraField } from './_fixtures/raw-zip-builder.js';
 import { b64, basicZip, bytesOf, highRatioZip, raw } from './_zip-fixtures.js';
 
-const DEFAULT_CEILINGS: Ceilings = { maxUncompressedBytes: 8 * 1024 * 1024 * 1024, maxEntries: 100_000, maxWorkers: 8 };
+const DEFAULT_CEILINGS: Ceilings = { maxUncompressedBytes: 8 * 1024 * 1024 * 1024, maxEntries: 100_000, maxWorkers: 8, maxFileOutputBytes: 4 * 1024 * 1024 * 1024 };
 
 describe('limits', () => {
     afterEach(() => {
@@ -46,7 +46,7 @@ describe('limits', () => {
     });
 
     it('a ceiling below the engine default tightens the default silently', () => {
-        const tight: Ceilings = { maxUncompressedBytes: 1024 * 1024, maxEntries: 50, maxWorkers: 8 };
+        const tight: Ceilings = { maxUncompressedBytes: 1024 * 1024, maxEntries: 50, maxWorkers: 8, maxFileOutputBytes: 4 * 1024 * 1024 * 1024 };
         expect(resolveCallLimits(undefined, tight)).toEqual({ maxEntries: 50, maxEntryUncompressedSize: 1024 * 1024, maxEntryCompressedSize: 1024 * 1024, maxTotalUncompressedSize: 1024 * 1024 });
         expect(resolveCallLimits({ maxEntries: 20 }, tight)).toEqual({ maxEntries: 20, maxEntryUncompressedSize: 1024 * 1024, maxEntryCompressedSize: 1024 * 1024, maxTotalUncompressedSize: 1024 * 1024 });
         process.env[MAX_ENTRIES_ENV] = '7';

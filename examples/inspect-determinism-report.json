@@ -1,0 +1,11 @@
+{
+  "description": "Why is this archive not reproducible? determinismReport: true adds zipnative's analyzeDeterminism() report — the canonical-form verdict (stricter than determinism.deterministic: also Zip64-only extras and the constant version-made-by) and every offending entry with the rule it breaks (timestamp, order, utf8-flag, extra-field, version-made-by, data-descriptor). The default determinism block is unchanged.",
+  "tool": "inspect_zip",
+  "arguments": {
+    "zipBase64": "<rich-zip-base64>",
+    "determinismReport": true,
+    "check": [
+      "canonical-form"
+    ]
+  }
+}

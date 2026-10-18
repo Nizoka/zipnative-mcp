@@ -260,8 +260,8 @@ describe('exclusive writes', () => {
         const oversized = { byteLength: MAX_FILE_OUTPUT_BYTES + 1 } as unknown as Uint8Array;
         const file = await codeOf(emitArchive(oversized, { mode: 'file', outputPath: 'huge.zip' }));
         expect(file.code).toBe('OUTPUT_TOO_LARGE');
-        expect(file.message).toContain('file cap — split the content');
-        expect(file.data).toEqual({ sizeBytes: MAX_FILE_OUTPUT_BYTES + 1, cap: MAX_FILE_OUTPUT_BYTES });
+        expect(file.message).toContain('file cap (ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES) — split the content');
+        expect(file.data).toEqual({ sizeBytes: MAX_FILE_OUTPUT_BYTES + 1, cap: MAX_FILE_OUTPUT_BYTES, env: 'ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES' });
         await expect(fs.stat(path.join(sandboxDir, 'huge.zip'))).rejects.toThrow();
     });
 

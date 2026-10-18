@@ -1,0 +1,17 @@
+{
+  "description": "Needs ZIPNATIVE_MCP_OUTPUT_DIR: stream a sandbox file that may exceed 4 GiB — stream: true + zip64: true writes the Zip64 streaming layout (APPNOTE 4.3.9.2: a Zip64 extra in the local header, a 24-byte data descriptor) that every random-access extractor reads. Opt in only for entries that may cross 4 GiB: some streaming readers (Java's ZipInputStream) cannot read the speculative layout of a smaller entry. A file output above 4 GiB also needs the operator to raise ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES.",
+  "tool": "create_zip",
+  "arguments": {
+    "entries": [
+      {
+        "name": "data/dump.bin",
+        "sourcePath": "incoming/dump.bin",
+        "stream": true,
+        "zip64": true
+      }
+    ],
+    "outputMode": "file",
+    "outputPath": "builds/dump64.zip",
+    "includeSha256": true
+  }
+}

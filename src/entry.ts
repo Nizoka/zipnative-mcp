@@ -14,6 +14,8 @@ import {
     METHOD_DEFLATE,
     METHOD_STORE,
     getCodec,
+    getExtendedTimestamps,
+    getUnixIds,
     getUnixMode,
     isSymlinkEntry,
     sanitizeEntryPath,
@@ -78,6 +80,10 @@ export interface EntryView {
     readonly rawNameHex: string;
     /** The stored comment bytes, hex (present when the entry has a comment). */
     readonly commentHex?: string;
+    /** Opt-in (`includeExtendedTimestamps`, zipnative 1.1.0 getExtendedTimestamps): UT, then NTFS, then the DOS fields. */
+    readonly extendedTimestamps?: { readonly mtime: string | null; readonly atime: string | null; readonly ctime: string | null; readonly source: 'ut' | 'ntfs' | 'dos' };
+    /** Opt-in (`includeUnixIds`, zipnative 1.1.0 getUnixIds): the Info-ZIP 0x7875 owner ids, or null when absent. */
+    readonly unixIds?: { readonly uid: number; readonly gid: number } | null;
 }
 
 const EXTRA_FIELD_NAMES: Readonly<Record<number, string>> = {
@@ -175,6 +181,10 @@ export function sanitizedPathOf(name: string, isDirectory: boolean): string | nu
 
 export interface EntryViewOptions {
     readonly includeExtraData?: boolean;
+    /** Add `extendedTimestamps` (central-directory entries only). */
+    readonly includeExtendedTimestamps?: boolean;
+    /** Add `unixIds` (central-directory entries only). */
+    readonly includeUnixIds?: boolean;
 }
 
 /** View from a central-directory entry (full metadata). */
@@ -212,7 +222,15 @@ export function viewFromEntry(entry: ZipEntry, index: number, options: EntryView
         extraFields: extraRows(entry.extraFields, options.includeExtraData === true),
         rawNameHex: bytesToHex(entry.rawName),
         ...(entry.comment.length > 0 ? { commentHex: bytesToHex(entry.comment) } : {}),
+        ...(options.includeExtendedTimestamps === true ? { extendedTimestamps: extendedTimestampsOf(entry) } : {}),
+        ...(options.includeUnixIds === true ? { unixIds: getUnixIds(entry) } : {}),
     };
+}
+
+function extendedTimestampsOf(entry: ZipEntry): NonNullable<EntryView['extendedTimestamps']> {
+    const t = getExtendedTimestamps(entry);
+    const iso = (d: Date | null): string | null => (d === null ? null : d.toISOString());
+    return { mtime: iso(t.mtime), atime: iso(t.atime), ctime: iso(t.ctime), source: t.source };
 }
 
 /** View from a forward-streamed local header (no central-directory-only fields). */
@@ -302,5 +320,22 @@ export const ENTRY_VIEW_SCHEMA = {
         },
         rawNameHex: { type: 'string' },
         commentHex: { type: 'string' },
+        extendedTimestamps: {
+            type: 'object',
+            additionalProperties: false,
+            description: "With includeExtendedTimestamps: modification / access / creation instants (ISO-8601, UTC) from the UT (0x5455) extra, else the NTFS (0x000a) extra, else the DOS fields (source names which); a missing one is null.",
+            properties: {
+                mtime: { type: ['string', 'null'] },
+                atime: { type: ['string', 'null'] },
+                ctime: { type: ['string', 'null'] },
+                source: { type: 'string', enum: ['ut', 'ntfs', 'dos'] },
+            },
+        },
+        unixIds: {
+            type: ['object', 'null'],
+            additionalProperties: false,
+            description: 'With includeUnixIds: the Unix owner uid / gid from the Info-ZIP ux (0x7875) extra; null when the archive carries none.',
+            properties: { uid: { type: 'integer', minimum: 0 }, gid: { type: 'integer', minimum: 0 } },
+        },
     },
 } as const;

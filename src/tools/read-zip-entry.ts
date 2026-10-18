@@ -3,15 +3,19 @@
  * archive: its decompressed content (`mode: 'data'`, base64 or UTF-8 text,
  * optionally a byte `range` read through the chunked stream API), its
  * compressed payload verbatim (`mode: 'raw'`), or a non-throwing integrity
- * check (`mode: 'verify'`). CRC-verified by default.
+ * check (`mode: 'verify'`). CRC-verified by default. A `zipPath` above the
+ * 1 GiB in-memory cap (or any archive with `access: 'range'`) is read through
+ * zipnative's byte-range reader: the end record, the central directory and
+ * this one entry's bytes, nothing else.
  */
 import { z } from 'zod';
-import { openZip, type EntrySkipReason, type ZipEntry } from 'zipnative';
+import type { EntrySkipReason, ZipEntry } from 'zipnative';
 
-import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
+import { NO_CONTEXT, type CallContext } from '../call-context.js';
+import { ACCESS_INPUT_PROPERTY, AccessShape, ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, openArchive, refineArchiveInput, type ArchiveHandle } from '../archive-input.js';
 import { encodeBase64 } from '../base64.js';
 import { MAX_ENTRY_INLINE_BYTES, MAX_RANGE_LENGTH } from '../caps.js';
-import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
+import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticSink, type DiagnosticsReport } from '../diagnostics.js';
 import { ENTRY_VIEW_SCHEMA, viewFromEntry, type EntryView } from '../entry.js';
 import { ToolError } from '../errors.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
@@ -46,6 +50,9 @@ export const READ_ZIP_ENTRY_INPUT_SCHEMA = {
                 length: { type: 'integer', minimum: 1, maximum: MAX_RANGE_LENGTH, description: 'Window length in bytes; fewer are returned at the end of the entry (`range.returned`).' },
             },
         },
+        includeExtendedTimestamps: { type: 'boolean', default: false, description: "Add the entry's `extendedTimestamps` (zipnative getExtendedTimestamps: UT, then NTFS, then the DOS fields; ISO-8601, UTC)." },
+        includeUnixIds: { type: 'boolean', default: false, description: "Add the entry's `unixIds` (zipnative getUnixIds: the Info-ZIP ux uid / gid, or null)." },
+        ...ACCESS_INPUT_PROPERTY,
         ...STRICT_INPUT_PROPERTY,
         limits: LIMITS_INPUT_SCHEMA,
         ...PROJECTION_INPUT_PROPERTIES,
@@ -61,6 +68,9 @@ const InputSchema = z
         encoding: z.enum(['base64', 'utf8']).default('base64'),
         verifyCrc: z.boolean().default(true),
         range: z.strictObject({ offset: z.number().int().min(0), length: z.number().int().min(1).max(MAX_RANGE_LENGTH) }).optional(),
+        includeExtendedTimestamps: z.boolean().default(false),
+        includeUnixIds: z.boolean().default(false),
+        ...AccessShape,
         ...EngineOptionsShape,
         ...ProjectionShape,
     })
@@ -83,6 +93,8 @@ export interface ReadZipEntryResult extends DiagnosticsReport {
     readonly textLength?: number;
     readonly range?: { readonly offset: number; readonly length: number; readonly returned: number };
     readonly verification?: { readonly ok: boolean; readonly crcMatch: boolean; readonly sizeMatch: boolean; readonly localHeaderMatch: boolean; readonly skipped?: EntrySkipReason };
+    /** Present ('range') when the archive was read by byte ranges. */
+    readonly access?: 'range';
 }
 
 export const READ_ZIP_ENTRY_OUTPUT_SCHEMA = {
@@ -114,6 +126,7 @@ export const READ_ZIP_ENTRY_OUTPUT_SCHEMA = {
                 skipped: { type: 'string', enum: ['encrypted', 'stream-only-codec', 'unsupported-method'], description: 'Why the payload was not verified; absent when it was.' },
             },
         },
+        access: { type: 'string', enum: ['range'], description: "Present when the archive was read by byte ranges (access 'range', or a zipPath above the in-memory cap)." },
         ...DIAGNOSTICS_OUTPUT_PROPERTIES,
     },
 } as const;
@@ -136,19 +149,27 @@ function locate(entries: readonly ZipEntry[], reader: { getEntry(name: string): 
     return { entry, index: entries.lastIndexOf(entry) };
 }
 
-export async function readZipEntry(rawInput: unknown): Promise<ReadZipEntryResult> {
+export async function readZipEntry(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<ReadZipEntryResult> {
     const input = parseInput(InputSchema, rawInput);
-    const { bytes } = await loadArchive(input);
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
-    const reader = guard('Failed to open archive', () => openZip(bytes, { ...(limits !== undefined ? { limits } : {}), ...sink.options }));
-    const entries: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);
+    const reader = await openArchive(input, input.access, { ...(limits !== undefined ? { limits } : {}), ...sink.options });
+    try {
+        const result = await readOpened(input, reader, sink);
+        return reader.access === 'range' ? { ...result, access: 'range' } : result;
+    } finally {
+        await reader.close();
+    }
+}
+
+async function readOpened(input: z.infer<typeof InputSchema>, reader: ArchiveHandle, sink: DiagnosticSink): Promise<ReadZipEntryResult> {
+    const entries: ZipEntry[] = guard('Failed to read the central directory', () => reader.entries());
     const { entry, index } = locate(entries, reader, input);
-    const view = viewFromEntry(entry, index);
+    const view = viewFromEntry(entry, index, { includeExtendedTimestamps: input.includeExtendedTimestamps, includeUnixIds: input.includeUnixIds });
     const label = entry.name;
 
     if (input.mode === 'verify') {
-        const verification = guard(`Failed to verify entry "${label}"`, () => reader.verifyEntry(entry), label);
+        const verification = await guardAsync(`Failed to verify entry "${label}"`, () => reader.verifyEntry(entry), label);
         return { entry: view, mode: 'verify', sizeBytes: entry.uncompressedSize, crcVerified: verification.crcMatch, verification, ...sink.report() };
     }
 
@@ -156,7 +177,7 @@ export async function readZipEntry(rawInput: unknown): Promise<ReadZipEntryResul
         if (entry.compressedSize > MAX_ENTRY_INLINE_BYTES) {
             throw new ToolError('ENTRY_TOO_LARGE', `Entry "${label}" compressed payload is ${entry.compressedSize} bytes, above the ${MAX_ENTRY_INLINE_BYTES}-byte inline cap — raw payloads above the cap are not retrievable inline; for the DECOMPRESSED content use mode:'data' with a range, or extract_zip with outputMode:'file'.`, { entryName: label, sizeBytes: entry.compressedSize, cap: MAX_ENTRY_INLINE_BYTES, remedy: 'range' });
         }
-        const raw = guard(`Failed to read raw entry "${label}"`, () => reader.readEntryRaw(entry), label);
+        const raw = await guardAsync(`Failed to read raw entry "${label}"`, () => reader.readEntryRaw(entry), label);
         return { entry: view, mode: 'raw', sizeBytes: raw.byteLength, crcVerified: false, encoding: 'base64', dataBase64: encodeBase64(raw), ...sink.report() };
     }
 
@@ -196,7 +217,7 @@ export async function readZipEntry(rawInput: unknown): Promise<ReadZipEntryResul
         if (entry.uncompressedSize > MAX_ENTRY_INLINE_BYTES) {
             throw new ToolError('ENTRY_TOO_LARGE', `Entry "${label}" is ${entry.uncompressedSize} bytes, above the ${MAX_ENTRY_INLINE_BYTES}-byte inline cap — pass a range, or use extract_zip with outputMode:'file'.`, { entryName: label, sizeBytes: entry.uncompressedSize, cap: MAX_ENTRY_INLINE_BYTES, remedy: 'range' });
         }
-        data = guard(`Failed to read entry "${label}"`, () => reader.readEntry(entry, { verifyCrc: input.verifyCrc }), label);
+        data = await guardAsync(`Failed to read entry "${label}"`, () => reader.readEntry(entry, { verifyCrc: input.verifyCrc }), label);
         crcVerified = input.verifyCrc;
     }
 

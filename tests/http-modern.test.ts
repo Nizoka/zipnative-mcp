@@ -290,6 +290,6 @@ describe('HTTP transport — MCP 2026-07-28 hardening (header/body agreement, fr
             .map((l) => JSON.parse(l.slice(5).trim()) as { id?: number; result?: unknown });
         const ids = frames.map((f) => f.id).sort();
         expect(ids).toEqual([10, 11]);
-        expect((frames.find((f) => f.id === 11)?.result as { tools: unknown[] }).tools.length).toBe(13);
+        expect((frames.find((f) => f.id === 11)?.result as { tools: unknown[] }).tools.length).toBe(15);
     });
 });

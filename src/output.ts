@@ -8,7 +8,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { encodeBase64 } from './base64.js';
-import { MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES } from './caps.js';
+import { getCeilings, MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_ENV } from './caps.js';
 import { ToolError } from './errors.js';
 import {
     discardPartial,
@@ -61,8 +61,9 @@ export async function emitArchive(
         if (options.outputPath === undefined) {
             throw new ToolError('MISSING_OUTPUT_PATH', "outputPath is required when outputMode='file'.");
         }
-        if (bytes.byteLength > MAX_FILE_OUTPUT_BYTES) {
-            throw new ToolError('OUTPUT_TOO_LARGE', `Output (${bytes.byteLength} bytes) exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap — split the content across several archives or lower the request.`, { sizeBytes: bytes.byteLength, cap: MAX_FILE_OUTPUT_BYTES });
+        const fileCap = getCeilings().maxFileOutputBytes;
+        if (bytes.byteLength > fileCap) {
+            throw new ToolError('OUTPUT_TOO_LARGE', `Output (${bytes.byteLength} bytes) exceeds the ${fileCap}-byte file cap (${MAX_FILE_OUTPUT_ENV}) — split the content across several archives or lower the request.`, { sizeBytes: bytes.byteLength, cap: fileCap, env: MAX_FILE_OUTPUT_ENV });
         }
         const resolved = resolveOutputFile(options.outputPath, options.extensions ?? ZIP_CONTAINER_EXTENSIONS);
         await writeExclusive(resolved, bytes, relativeLabel(resolved));
@@ -95,13 +96,14 @@ export async function emitArchiveStream(
     const stream = await openExclusiveWriteStream(resolved, label);
     // Hash while streaming so `includeSha256` costs no second pass and no buffering.
     const hasher = options.hash === 'sha256' ? (await import('node:crypto')).createHash('sha256') : null;
+    const fileCap = getCeilings().maxFileOutputBytes;
     let total = 0;
     try {
         for await (const chunk of chunks) {
             total += chunk.byteLength;
             hasher?.update(chunk);
-            if (total > MAX_FILE_OUTPUT_BYTES) {
-                throw new ToolError('OUTPUT_TOO_LARGE', `Output exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file cap — split the content across several archives or lower the request.`, { cap: MAX_FILE_OUTPUT_BYTES });
+            if (total > fileCap) {
+                throw new ToolError('OUTPUT_TOO_LARGE', `Output exceeds the ${fileCap}-byte file cap (${MAX_FILE_OUTPUT_ENV}) — split the content across several archives or lower the request.`, { cap: fileCap, env: MAX_FILE_OUTPUT_ENV });
             }
             if (!stream.write(chunk)) {
                 // Detach whichever listener did not fire: one pair per drain, never accumulated.
@@ -118,7 +120,14 @@ export async function emitArchiveStream(
             stream.end(() => resolveEnd());
         });
     } catch (err) {
-        stream.destroy();
+        // Close the descriptor BEFORE unlinking: on Windows an open file cannot be removed, so a
+        // destroyed-but-not-yet-closed stream would leave the partial file behind (a cancelled or failed write).
+        if (!stream.closed) {
+            await new Promise<void>((resolveClose) => {
+                stream.once('close', () => resolveClose());
+                stream.destroy();
+            });
+        }
         await discardPartial(resolved);
         throw err;
     }

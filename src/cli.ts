@@ -40,7 +40,7 @@
  */
 import { isAbsolute } from 'node:path';
 
-import { getCeilings, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, STDIO_MAX_FRAME_BYTES, WORKERS_ENV } from './caps.js';
+import { getCeilings, MAX_ENTRIES_ENV, MAX_FILE_OUTPUT_ENV, MAX_UNCOMPRESSED_ENV, STDIO_MAX_FRAME_BYTES, WORKERS_ENV } from './caps.js';
 import { createServer, ensureEngineReady } from './server.js';
 
 function log(line: string): void {
@@ -51,7 +51,7 @@ async function main(): Promise<void> {
     await ensureEngineReady();
     // Operator ceilings are read once; an invalid value throws before serving.
     const ceilings = getCeilings();
-    for (const [env, value] of [[MAX_UNCOMPRESSED_ENV, ceilings.maxUncompressedBytes], [MAX_ENTRIES_ENV, ceilings.maxEntries], [WORKERS_ENV, ceilings.maxWorkers]] as const) {
+    for (const [env, value] of [[MAX_UNCOMPRESSED_ENV, ceilings.maxUncompressedBytes], [MAX_ENTRIES_ENV, ceilings.maxEntries], [WORKERS_ENV, ceilings.maxWorkers], [MAX_FILE_OUTPUT_ENV, ceilings.maxFileOutputBytes]] as const) {
         if (process.env[env] !== undefined && process.env[env] !== '') log(`${env} = ${value}`);
     }
 
