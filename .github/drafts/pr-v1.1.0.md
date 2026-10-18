@@ -102,7 +102,7 @@ stamped: 57 confirmed, 7 downgraded, 2 rejected, 7 duplicates — 0 blocker, 7 m
 blocker / major / minor finding is fixed on this branch with a lock test named after it (`tests/audit-v1.1.0.test.ts`,
 `tests/sandbox.test.ts` A-013, `tests/cli-stdio.test.ts` A-020, `tests/tools/workflows.test.ts` A-004 / A-009 / A-010)
 or a documentation fix; A-005 and A-008 are repository settings (steps 3 and 4 below); three engine root causes are
-drafted for zipnative (kept local and git-ignored: `.github/drafts/upstream-zipnative-{verifyzip-signal,eager-local-headers,diagnostic-doc-path}.md`).
+drafted for zipnative (kept local and git-ignored: `.github/drafts/upstream-zipnative-{eager-local-headers,verify-async,diagnostic-doc-path}.md`).
 A final independent review (fresh reviewer, the artefact, the fix commits, the blind spots) followed: its findings are
 closed on the branch — a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame now run in the publish gate and
 weekly (`ZIPNATIVE_MCP_SLOW_TESTS`), a `__proto__` key is tested over a real stdio frame (the SDK strips a root-level
