@@ -10,6 +10,13 @@ src/tools/ @Nizoka
 # Public API and package contract
 src/index.ts @Nizoka
 package.json @Nizoka
+server.json @Nizoka
+tests/_fixtures/ @Nizoka
+docs/assets/ecosystem.json @Nizoka
+
+# Frozen example inputs and foreign-tool archives: never regenerated in place
+# (tests/fixtures/PROVENANCE.md)
+tests/fixtures/ @Nizoka
 
 # Corpus generator + vendored veraZIP validator (raw ZIP bytes live here)
 scripts/ @Nizoka
@@ -19,5 +26,13 @@ docs/data/ @Nizoka
 
 # CI/CD and release automation
 .github/workflows/ @Nizoka
+.github/rulesets/ @Nizoka
+.github/codeql/ @Nizoka
+.githooks/ @Nizoka
 release-notes/ @Nizoka
 CHANGELOG.md @Nizoka
+
+# Agent layer: permissions, the fail-closed guard hook, generated rules, skills
+.claude/ @Nizoka
+.github/ai-governance.json @Nizoka
+.github/AGENT_RULES.md @Nizoka
