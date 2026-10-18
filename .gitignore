@@ -19,14 +19,15 @@ test-output/
 *.tsbuildinfo
 
 # AI-governance issue drafts are local work-in-progress; never commit ad-hoc
-# tool output. Curated release artifacts (pr-*.md / issue-*.md) and the
-# staging-area README stay tracked.
+# tool output. Curated release artifacts of THIS repository (pr-*.md / issue-*.md)
+# and the staging-area README stay tracked; a draft meant for another repository
+# (upstream-*.md, e.g. an engine issue for zipnative) stays local until a human
+# files it there.
 .github/drafts/*
 !.github/drafts/README.md
 !.github/drafts/TEMPLATE.md
 !.github/drafts/pr-*.md
 !.github/drafts/issue-*.md
-!.github/drafts/TEMPLATE.md
 
 # npm
 *.tgz
