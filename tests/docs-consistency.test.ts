@@ -6,7 +6,7 @@
  * Sources of truth:
  *   toolNames() (src/server.ts)          — the 13-tool surface, in registration order
  *   __prompts (src/server.ts)            — the 7 prompts
- *   ZIP_ERROR_CODES / ZIP_DIAGNOSTIC_CODES — the 39 frozen codes + 11 diagnostics
+ *   ZIP_ERROR_CODES / ZIP_DIAGNOSTIC_CODES — the 39 frozen codes + 12 diagnostics
  *   WRAPPER_CODES (below, = AGENTS.md §6) — the wrapper's own vocabulary
  *   ENV_VARS (below, = server.json)      — the 7 environment variables
  *
@@ -84,11 +84,11 @@ function tableRows(text: string): string[][] {
 }
 
 describe('the code-side sources of truth', () => {
-    it('exposes 13 tools, 7 prompts, 39 ZIP_* codes, 11 diagnostics and 7 environment variables', () => {
+    it('exposes 13 tools, 7 prompts, 39 ZIP_* codes, 12 diagnostics and 7 environment variables', () => {
         expect(TOOL_COUNT).toBe(13);
         expect(PROMPTS).toHaveLength(7);
         expect(ZIP_ERROR_CODES).toHaveLength(39);
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
         expect(ENV_VARS).toHaveLength(7);
         expect(new Set(ENV_VARS).size).toBe(7);
         for (const v of ENV_VARS) expect(v).toMatch(/^ZIPNATIVE_MCP_[A-Z_]+$/);
@@ -326,7 +326,7 @@ describe('every ZIPNATIVE_MCP_* token in the documents is one of the seven envir
 });
 
 describe('docs/data/errors.json ↔ the frozen vocabularies', () => {
-    it.skipIf(!has('docs/data/errors.json'))('carries exactly the 39 error codes and 11 diagnostics of the installed engine', () => {
+    it.skipIf(!has('docs/data/errors.json'))('carries exactly the 39 error codes and 12 diagnostics of the installed engine', () => {
         const data = JSON.parse(read('docs/data/errors.json')) as { errors: Array<{ code: string }>; diagnostics: Array<{ code: string }> };
         expect(data.errors.map((e) => e.code).sort()).toEqual([...ZIP_ERROR_CODES].sort());
         expect(data.diagnostics.map((d) => d.code).sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());

@@ -1,5 +1,5 @@
 /**
- * The `limits` input fragment — zipnative's eight named `ZipLimits` bounds,
+ * The `limits` input fragment — zipnative's nine named `ZipLimits` bounds,
  * exposed by name on every engine-touching tool — and the operator ceilings
  * that per-call values may never exceed.
  *
@@ -14,10 +14,11 @@ import { DEFAULT_ZIP_LIMITS, type ZipLimits } from 'zipnative';
 import { getCeilings, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, type Ceilings } from './caps.js';
 import { ToolError } from './errors.js';
 
-/** The eight `ZipLimits` keys, in engine order. */
+/** The nine `ZipLimits` keys, in engine order (`maxEntryCompressedSize` joined in zipnative 1.1.0). */
 export const LIMIT_KEYS = [
     'maxEntries',
     'maxEntryUncompressedSize',
+    'maxEntryCompressedSize',
     'maxTotalUncompressedSize',
     'maxCompressionRatio',
     'maxNameBytes',
@@ -33,10 +34,11 @@ export const LIMITS_INPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     description:
-        "Override zipnative's named security bounds for this call (CWE-400 / CWE-409 guards). Every key is optional; absent keys keep the engine defaults (maxEntries 100000, maxEntryUncompressedSize 1 GiB, maxTotalUncompressedSize 8 GiB, maxCompressionRatio 1024, maxNameBytes 4096, maxExtraFieldBytes 65535, maxCommentBytes 65535, maxCentralDirectoryBytes 256 MiB). Values above the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES) are refused with LIMIT_CEILING_EXCEEDED. Raise a bound for trusted input only.",
+        "Override zipnative's named security bounds for this call (CWE-400 / CWE-409 guards). Every key is optional; absent keys keep the engine defaults (maxEntries 100000, maxEntryUncompressedSize 1 GiB, maxEntryCompressedSize 1 GiB + 1 MiB (read by the byte-range reader only), maxTotalUncompressedSize 8 GiB, maxCompressionRatio 1024, maxNameBytes 4096, maxExtraFieldBytes 65535, maxCommentBytes 65535, maxCentralDirectoryBytes 256 MiB). Values above the operator ceilings (ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES, ZIPNATIVE_MCP_MAX_ENTRIES) are refused with LIMIT_CEILING_EXCEEDED (the uncompressed ceiling also bounds maxEntryCompressedSize). Raise a bound for trusted input only.",
     properties: {
         maxEntries: { type: 'integer', minimum: 1, description: 'Maximum central-directory entry count.' },
         maxEntryUncompressedSize: { type: 'integer', minimum: 1, description: 'Maximum decompressed size of one entry, bytes.' },
+        maxEntryCompressedSize: { type: 'integer', minimum: 1, description: 'Maximum compressed payload of one entry the byte-range reader fetches into memory (zipPath archives above the 1 GiB in-memory cap; CWE-770), bytes. The in-memory reader never consults it.' },
         maxTotalUncompressedSize: { type: 'integer', minimum: 1, description: 'Maximum total decompressed size across an extraction, bytes.' },
         maxCompressionRatio: { type: 'number', minimum: 1, description: 'Maximum declared uncompressed/compressed ratio for entries >= 1 KiB compressed (zip-bomb guard).' },
         maxNameBytes: { type: 'integer', minimum: 1, maximum: U16, description: 'Maximum entry-name length in bytes.' },
@@ -50,6 +52,7 @@ export const LIMITS_INPUT_SCHEMA = {
 export const LimitsSchema = z.strictObject({
     maxEntries: z.number().int().min(1).optional(),
     maxEntryUncompressedSize: z.number().int().min(1).optional(),
+    maxEntryCompressedSize: z.number().int().min(1).optional(),
     maxTotalUncompressedSize: z.number().int().min(1).optional(),
     maxCompressionRatio: z.number().min(1).optional(),
     maxNameBytes: z.number().int().min(1).max(U16).optional(),
@@ -61,7 +64,7 @@ export const LimitsSchema = z.strictObject({
 export type LimitsInput = z.infer<typeof LimitsSchema>;
 
 function ceilingFor(key: keyof ZipLimits, ceilings: Ceilings): { ceiling: number; env: string } | null {
-    if (key === 'maxEntryUncompressedSize' || key === 'maxTotalUncompressedSize') {
+    if (key === 'maxEntryUncompressedSize' || key === 'maxEntryCompressedSize' || key === 'maxTotalUncompressedSize') {
         return { ceiling: ceilings.maxUncompressedBytes, env: MAX_UNCOMPRESSED_ENV };
     }
     if (key === 'maxEntries') return { ceiling: ceilings.maxEntries, env: MAX_ENTRIES_ENV };

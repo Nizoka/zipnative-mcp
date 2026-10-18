@@ -58,7 +58,7 @@ describe('describe_engine', () => {
         expect(out.errorCodes).toEqual([...ZIP_ERROR_CODES]);
         expect(new Set(out.errorCodes).size).toBe(39);
         expect(out.errorCodes.every((c) => c.startsWith('ZIP_'))).toBe(true);
-        expect(out.diagnosticCodes).toHaveLength(11);
+        expect(out.diagnosticCodes).toHaveLength(12);
         expect(out.diagnosticCodes).toEqual([...ZIP_DIAGNOSTIC_CODES]);
         expect(out.unexposed.length).toBeGreaterThan(0);
         expect(out.unexposed).toBe(UNEXPOSED_EXPORTS);

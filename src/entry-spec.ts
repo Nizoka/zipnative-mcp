@@ -5,7 +5,7 @@
  * mapped onto zipnative's `AddEntryOptions`.
  */
 import { z } from 'zod';
-import type { AddEntryOptions, ZipCompressionOptions, ZipExtraField } from 'zipnative';
+import { externalAttributesFromUnixMode, type AddEntryOptions, type ZipCompressionOptions, type ZipExtraField } from 'zipnative';
 
 import { decodeBase64Field } from './base64.js';
 import { assertInputWithin, MAX_EXTRA_FIELDS, MAX_PATH_INPUT_BYTES } from './caps.js';
@@ -53,9 +53,21 @@ export function toCompression(input: z.infer<typeof CompressionSchema> | undefin
 const DOS_MIN = Date.UTC(1980, 0, 1);
 const DOS_MAX = Date.UTC(2107, 11, 31, 23, 59, 58);
 
-/** Parse an ISO-8601 instant within the DOS date range (1980-01-01 … 2107-12-31). */
+/** A date-time without `Z` / `±hh:mm`: ECMAScript parses it as LOCAL time. */
+const OFFSET_LESS_DATE_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?$/;
+
+/**
+ * Parse an ISO-8601 instant within the DOS date range (1980-01-01 … 2107-12-31).
+ *
+ * The engine writes every date with `dosTimeMode: 'utc'` (src/diagnostics.ts),
+ * so the DOS fields are the UTC wall clock of the instant. A date-time written
+ * without an offset is read as that wall clock (`2024-06-01T12:34:56` → DOS
+ * 12:34:56 on every host — what 1.0.0 wrote for it in any zone, since the
+ * local parse and the local encoding cancelled out); a `Z` or `±hh:mm`
+ * instant is converted to UTC (1.0.0 wrote it in the host's zone).
+ */
 export function parseEntryDate(raw: string, where: string): Date {
-    const ms = Date.parse(raw);
+    const ms = Date.parse(OFFSET_LESS_DATE_TIME.test(raw) ? `${raw.replace(' ', 'T')}Z` : raw);
     if (Number.isNaN(ms) || !/^\d{4}-\d{2}-\d{2}/.test(raw)) {
         throw new ToolError('VALIDATION_ERROR', `${where} must be an ISO-8601 date/time (got ${JSON.stringify(raw)}).`);
     }
@@ -78,9 +90,6 @@ export function toDefaultDate(raw: string | undefined): Date | 'now' | undefined
 }
 
 // ── Attributes ───────────────────────────────────────────────────────
-const S_IFREG = 0o100000;
-const S_IFDIR = 0o040000;
-
 /** Parse a unixMode string ('0644', '755', '0o755') into permission bits. */
 export function parseUnixMode(raw: string, where: string): number {
     const m = /^(?:0o)?([0-7]{3,4})$/.exec(raw);
@@ -88,12 +97,6 @@ export function parseUnixMode(raw: string, where: string): number {
         throw new ToolError('VALIDATION_ERROR', `${where} must be 3–4 octal digits such as '0644' or '755' (got ${JSON.stringify(raw)}).`);
     }
     return parseInt(m[1] as string, 8) & 0o7777;
-}
-
-/** External attributes for a Unix mode: (S_IFREG|mode) << 16, plus the DOS directory bit for directories. */
-export function externalAttributesFor(mode: number, isDirectory: boolean): number {
-    const type = isDirectory ? S_IFDIR : S_IFREG;
-    return (((type | mode) << 16) | (isDirectory ? 0x10 : 0)) >>> 0;
 }
 
 // ── Extra fields ─────────────────────────────────────────────────────
@@ -185,7 +188,8 @@ export function toAddEntryOptions(value: EntryPayload, where: string): AddEntryO
     const compression = toCompression(value.compression);
     const date = value.date !== undefined ? parseEntryDate(value.date, `${where}.date`) : undefined;
     const externalAttributes = value.unixMode !== undefined
-        ? externalAttributesFor(parseUnixMode(value.unixMode, `${where}.unixMode`), value.directory)
+        // The engine's own write-side mirror of getUnixMode (1.1.0): S_IFREG / S_IFDIR + the DOS directory bit.
+        ? externalAttributesFromUnixMode(parseUnixMode(value.unixMode, `${where}.unixMode`), { directory: value.directory })
         : value.externalAttributes;
     const extraFields = toExtraFields(value.extraFields, where);
     const out: AddEntryOptions = {

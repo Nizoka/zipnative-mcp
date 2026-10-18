@@ -73,7 +73,7 @@ describe('createDiagnosticSink', () => {
     it('the shared output schema lists every diagnostic code', () => {
         const description = DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics.description;
         for (const code of ZIP_DIAGNOSTIC_CODES) expect(description).toContain(code);
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
         expect(DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics.items.required).toEqual(['code', 'severity', 'message']);
         expect(DIAGNOSTICS_OUTPUT_PROPERTIES.diagnosticsTruncated.description).toContain('200');
     });

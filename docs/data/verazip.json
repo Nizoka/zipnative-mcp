@@ -5,7 +5,7 @@
     "nonConformant": 4,
     "hostileConformant": 4
   },
-  "checkIds": 22,
+  "checkIds": 23,
   "requiredNegativeChecks": [
     "WF/ENTRY-OVERLAP",
     "WF/CD-COUNT",

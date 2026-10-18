@@ -155,7 +155,7 @@ describe.each(AGENT_TRANSPORTS)('C17 autonomous scenario over %s', (transport) =
             expect(d['network']).toBe('none');
             expect((d['server'] as { toolCount: number }).toolCount).toBe(13);
             expect((d['errorCodes'] as string[]).length).toBe(39);
-            expect((d['diagnosticCodes'] as string[]).length).toBe(11);
+            expect((d['diagnosticCodes'] as string[]).length).toBe(12);
             expect((r._meta as Record<string, unknown> | undefined)?.['cached']).toBeUndefined();
         });
 

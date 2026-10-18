@@ -5,9 +5,10 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
+import { externalAttributesFromUnixMode } from 'zipnative';
 
 import {
-    COMPRESSION_INPUT_SCHEMA, CompressionSchema, ENTRY_PAYLOAD_PROPERTIES, EntryPayloadShape, externalAttributesFor, loadPayload, parseEntryDate, parseUnixMode,
+    COMPRESSION_INPUT_SCHEMA, CompressionSchema, ENTRY_PAYLOAD_PROPERTIES, EntryPayloadShape, loadPayload, parseEntryDate, parseUnixMode,
     refineEntryPayload, toAddEntryOptions, toCompression, toDefaultDate, toExtraFields,
 } from '../src/entry-spec.js';
 import { ToolError } from '../src/errors.js';
@@ -44,6 +45,15 @@ describe('entry-spec', () => {
             expect(parseEntryDate('2024-06-01T12:34:56.789+02:00', 'x').toISOString()).toBe('2024-06-01T10:34:56.789Z');
         });
 
+        it('1.1.0: an offset-less date-time is the UTC wall clock (the DOS fields 1.0.0 wrote for it in every zone)', () => {
+            expect(parseEntryDate('2024-06-01T12:34:56', 'x').toISOString()).toBe('2024-06-01T12:34:56.000Z');
+            expect(parseEntryDate('2024-06-01 12:34', 'x').toISOString()).toBe('2024-06-01T12:34:00.000Z');
+            expect(parseEntryDate('2024-06-01T12:34:56.5', 'x').toISOString()).toBe('2024-06-01T12:34:56.500Z');
+            // The DOS range is checked on that wall clock too.
+            expect(() => parseEntryDate('2107-12-31T23:59:59', 'x')).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR' }));
+            expect(parseEntryDate('1980-01-01T00:00:00', 'x').getTime()).toBe(Date.UTC(1980, 0, 1));
+        });
+
         it('parseEntryDate refuses out-of-range and malformed dates with the field name', () => {
             for (const bad of ['1979-12-31T23:59:59Z', '2107-12-31T23:59:59Z', '2200-01-01T00:00:00Z']) {
                 expect(() => parseEntryDate(bad, 'entries[2].date')).toThrow(expect.objectContaining({ code: 'VALIDATION_ERROR', message: expect.stringContaining('entries[2].date must fall within the DOS date range') }));
@@ -73,11 +83,11 @@ describe('entry-spec', () => {
             }
         });
 
-        it('externalAttributesFor sets the Unix type bits and the DOS directory bit', () => {
-            expect(externalAttributesFor(0o644, false)).toBe((0o100644 << 16) >>> 0);
-            expect(externalAttributesFor(0o755, true)).toBe(((0o40755 << 16) >>> 0) | 0x10);
-            expect(externalAttributesFor(0o7777, false)).toBe((0o107777 << 16) >>> 0);
-            expect(externalAttributesFor(0o644, false) >>> 0).toBe(externalAttributesFor(0o644, false));
+        it('the engine helper (externalAttributesFromUnixMode) yields the words 1.0.0 computed itself: Unix type bits and the DOS directory bit', () => {
+            expect(externalAttributesFromUnixMode(0o644)).toBe((0o100644 << 16) >>> 0);
+            expect(externalAttributesFromUnixMode(0o755, { directory: true })).toBe(((0o40755 << 16) >>> 0) | 0x10);
+            expect(externalAttributesFromUnixMode(0o7777)).toBe((0o107777 << 16) >>> 0);
+            expect(externalAttributesFromUnixMode(0o644) >>> 0).toBe(externalAttributesFromUnixMode(0o644));
         });
     });
 

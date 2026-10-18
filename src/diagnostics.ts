@@ -6,6 +6,13 @@
  * de-duplicated `console.warn`, which a stdio MCP server must never emit on
  * stdout. Every engine call therefore goes through a sink from this module,
  * and every tool result carries `diagnostics[]` — for ZIP they ARE the signal.
+ *
+ * The sink's `options` are also where the server pins the DOS wall-clock
+ * (1.1.0): every engine call receives `dosTimeMode: 'utc'`, so an explicit
+ * date is written as the same DOS fields on every host and a `lastModified`
+ * is read back as the same instant — up to 1.0.0 the engine used the host's
+ * time zone, so a pinned `create_zip` call produced different bytes in Paris
+ * and on a UTC runner while the response cache treated them as one.
  */
 import type { ZipCommonOptions, ZipDiagnostic } from 'zipnative';
 
@@ -20,8 +27,8 @@ export interface DiagnosticRow {
 }
 
 export interface DiagnosticSink {
-    /** Pass as `onDiagnostic` (and `strict`) to the engine. */
-    readonly options: Pick<ZipCommonOptions, 'onDiagnostic' | 'strict'>;
+    /** Pass to the engine: `onDiagnostic`, `strict` and the pinned `dosTimeMode: 'utc'`. */
+    readonly options: Pick<ZipCommonOptions, 'onDiagnostic' | 'strict' | 'dosTimeMode'>;
     /** De-duplicated rows (by code + entryName), capped at {@link MAX_DIAGNOSTICS}. */
     readonly diagnostics: DiagnosticRow[];
     /** Count per code over EVERY diagnostic received (not capped). */
@@ -63,7 +70,7 @@ export function createDiagnosticSink(strict = false): DiagnosticSink {
         });
     };
     return {
-        options: { onDiagnostic, ...(strict ? { strict: true } : {}) },
+        options: { onDiagnostic, dosTimeMode: 'utc', ...(strict ? { strict: true } : {}) },
         diagnostics,
         counts,
         get truncated() {
@@ -83,7 +90,7 @@ export const DIAGNOSTICS_OUTPUT_PROPERTIES = {
     diagnostics: {
         type: 'array',
         description:
-            'Non-fatal conformance concerns the engine raised while parsing or writing (de-duplicated by code + entry, at most 200). Empty for a clean archive. Codes: ZIP_PREPENDED_DATA, ZIP_MULTIPLE_EOCD, ZIP_NAME_MISMATCH, ZIP_UNICODE_PATH_CONFLICT, ZIP_INVALID_UTF8_NAME, ZIP_DUPLICATE_NAME, ZIP_EXTRA_FIELD_MALFORMED, ZIP_ZIP64_EXTRA_IGNORED, ZIP_TIMESTAMP_NOT_PINNED, ZIP_NONDETERMINISTIC_CODEC, ZIP_DEAD_BYTES_RATIO.',
+            'Non-fatal conformance concerns the engine raised while parsing or writing (de-duplicated by code + entry, at most 200). Empty for a clean archive. Codes: ZIP_PREPENDED_DATA, ZIP_MULTIPLE_EOCD, ZIP_NAME_MISMATCH, ZIP_UNICODE_PATH_CONFLICT, ZIP_INVALID_UTF8_NAME, ZIP_DUPLICATE_NAME, ZIP_EXTRA_FIELD_MALFORMED, ZIP_ZIP64_EXTRA_IGNORED, ZIP_TIMESTAMP_NOT_PINNED, ZIP_NONDETERMINISTIC_CODEC, ZIP_DEAD_BYTES_RATIO, ZIP_TIMESTAMP_CLAMPED.',
         items: {
             type: 'object',
             additionalProperties: false,

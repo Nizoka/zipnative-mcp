@@ -57,6 +57,8 @@ export const MAX_EXTRA_FIELDS = 16;
 export const MAX_ISSUE_TEXT_CHARS = 16_384;
 export const MAX_FIELDS_PATHS = 16;
 export const MAX_SCAN_ENTRIES_DEFAULT = 10_000;
+/** `inspect_zip` `determinismReport`: offender rows kept (the counts stay exact). */
+export const MAX_DETERMINISM_OFFENDERS = 200;
 /** Diagnostics kept per result after de-duplication by (code, entryName). */
 export const MAX_DIAGNOSTICS = 200;
 /** `extract_zip` file mode: resource links attached to the result (the rest stay in `entries[]`). */
@@ -159,6 +161,7 @@ export const CAPS = {
     maxModifyOperations: MAX_MODIFY_OPERATIONS,
     maxSanitizeNames: MAX_SANITIZE_NAMES,
     maxDiagnostics: MAX_DIAGNOSTICS,
+    maxDeterminismOffenders: MAX_DETERMINISM_OFFENDERS,
     maxFilterNames: MAX_FILTER_NAMES,
     maxFilterGlobs: MAX_FILTER_GLOBS,
     maxGlobLength: MAX_GLOB_LENGTH,

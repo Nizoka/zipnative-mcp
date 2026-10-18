@@ -134,6 +134,11 @@ describe('read_zip_entry', () => {
         });
 
         it('verify never throws for a CRC mismatch: ok false, crcMatch false', async () => {
+            const encrypted = await readZipEntry({ zipBase64: b64(ENCRYPTED_FLAG()), name: 'secret.txt', mode: 'verify' });
+            // zipnative 1.1.0: the reason is relayed and the local header is really cross-checked (1.0.0 fabricated false).
+            expect(encrypted.verification).toMatchObject({ ok: false, skipped: 'encrypted', localHeaderMatch: true });
+            const unknown = await readZipEntry({ zipBase64: b64(UNKNOWN_METHOD()), name: 'w.bin', mode: 'verify' });
+            expect(unknown.verification).toMatchObject({ ok: false, skipped: 'unsupported-method' });
             const out = await readZipEntry({ zipBase64: b64(CRC_OVERRIDE()), name: 'c.txt', mode: 'verify' });
             expect(out.verification).toEqual({ ok: false, crcMatch: false, sizeMatch: true, localHeaderMatch: true });
             expect(out.crcVerified).toBe(false);

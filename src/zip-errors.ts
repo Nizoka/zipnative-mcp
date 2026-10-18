@@ -18,10 +18,11 @@ import {
     ZipLimitError,
     ZipSecurityError,
     ZipUnsupportedError,
+    type ZipDiagnosticCode,
     type ZipErrorCode,
 } from 'zipnative';
 
-import { ToolError } from './errors.js';
+import { redactAbsolutePaths, ToolError } from './errors.js';
 
 /** Coarse class of each frozen code — surfaced as `data.errorClass` and in AGENTS.md §6. */
 export const ZIP_ERROR_CLASS = {
@@ -75,7 +76,7 @@ export const ZIP_ERROR_CLASS = {
 /** Every frozen `ZIP_*` code (39), in table order. */
 export const ZIP_ERROR_CODES: readonly ZipErrorCode[] = Object.keys(ZIP_ERROR_CLASS) as ZipErrorCode[];
 
-/** Every core diagnostic code (11) — informational, never thrown unless `strict`. */
+/** Every core diagnostic code (12) — informational, never thrown unless `strict`. */
 export const ZIP_DIAGNOSTIC_CODES = [
     'ZIP_PREPENDED_DATA',
     'ZIP_MULTIPLE_EOCD',
@@ -88,27 +89,14 @@ export const ZIP_DIAGNOSTIC_CODES = [
     'ZIP_TIMESTAMP_NOT_PINNED',
     'ZIP_NONDETERMINISTIC_CODEC',
     'ZIP_DEAD_BYTES_RATIO',
-] as const;
+    // zipnative 1.1.0: a date outside the DOS range clamped to 1980-01-01 / 2107-12-31 23:59:58.
+    'ZIP_TIMESTAMP_CLAMPED',
+] as const satisfies readonly ZipDiagnosticCode[];
 
-/**
- * node:zlib errors that reach the wrapper unwrapped. The engine's `node-zlib`
- * tier calls `inflateRawSync` directly, so a corrupt or truncated raw stream
- * on the sync path surfaces zlib's own Error (`code: Z_DATA_ERROR` /
- * `Z_BUF_ERROR`) instead of a `ZipError`. They are the same two conditions the
- * pure tier reports as `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`, so map
- * them identically — the code an agent sees must not depend on the codec tier.
- */
-const ZLIB_TO_ZIP: Readonly<Record<string, ZipErrorCode>> = {
-    Z_DATA_ERROR: 'ZIP_DEFLATE_CORRUPT',
-    Z_NEED_DICT: 'ZIP_DEFLATE_CORRUPT',
-    Z_BUF_ERROR: 'ZIP_DEFLATE_TRUNCATED',
-};
-
-function zlibCodeOf(err: unknown): ZipErrorCode | undefined {
-    if (!(err instanceof Error)) return undefined;
-    const code = (err as NodeJS.ErrnoException).code;
-    return typeof code === 'string' ? ZLIB_TO_ZIP[code] : undefined;
-}
+/** Compile-time exhaustiveness: a diagnostic a NEWER engine adds and this list lacks fails `tsc` here. */
+type MissingDiagnostic = Exclude<ZipDiagnosticCode, (typeof ZIP_DIAGNOSTIC_CODES)[number]>;
+const DIAGNOSTICS_EXHAUSTIVE: MissingDiagnostic extends never ? true : MissingDiagnostic = true;
+void DIAGNOSTICS_EXHAUSTIVE;
 
 const crcHex = (crc: number): string => (crc >>> 0).toString(16).padStart(8, '0');
 
@@ -159,16 +147,9 @@ export function mapZipError(err: unknown, context: string, entryName?: string, e
             ...(extra ?? {}),
         });
     }
-    const zlibCode = zlibCodeOf(err);
-    if (zlibCode !== undefined) {
-        return new ToolError(zlibCode, `${context}: ${(err as Error).message}`, {
-            errorClass: ZIP_ERROR_CLASS[zlibCode],
-            engineError: 'ZlibError',
-            ...(entryName !== undefined ? { entryName } : {}),
-            ...(extra ?? {}),
-        });
-    }
-    const message = err instanceof Error ? err.message : String(err);
+    // zipnative 1.1.0 normalises a corrupt deflate stream to ZIP_DEFLATE_CORRUPT / _TRUNCATED on every
+    // inflate tier (node:zlib, DecompressionStream, pure TS): the zlib table 1.0.0 kept here is gone.
+    const message = redactAbsolutePaths(err instanceof Error ? err.message : String(err));
     return new ToolError('ENGINE_ERROR', `${context}: ${message}`, { errorClass: 'internal', ...(extra ?? {}) });
 }
 

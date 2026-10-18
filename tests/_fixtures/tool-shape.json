@@ -30,7 +30,7 @@
     },
     "check": {
      "type": "array",
-     "maxItems": 15,
+     "maxItems": 18,
      "items": {
       "type": "string",
       "enum": [
@@ -48,9 +48,20 @@
        "no-duplicates",
        "no-diagnostics",
        "store-only",
-       "deflate-only"
+       "deflate-only",
+       "canonical-form",
+       "canonical-extras",
+       "canonical-version-made-by"
       ]
      }
+    },
+    "determinismReport": {
+     "type": "boolean",
+     "default": false
+    },
+    "canonicalDate": {
+     "type": "string",
+     "pattern": "^\\d{4}-\\d{2}-\\d{2}"
     },
     "assert": {
      "type": "object",
@@ -102,6 +113,10 @@
        "minimum": 1
       },
       "maxEntryUncompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "maxEntryCompressedSize": {
        "type": "integer",
        "minimum": 1
       },
@@ -290,6 +305,66 @@
       }
      }
     },
+    "determinismReport": {
+     "type": "object",
+     "additionalProperties": false,
+     "properties": {
+      "deterministic": {
+       "type": "boolean"
+      },
+      "epochTimestamps": {
+       "type": "boolean"
+      },
+      "canonicalOrder": {
+       "type": "boolean"
+      },
+      "utf8Flags": {
+       "type": "boolean"
+      },
+      "canonicalExtras": {
+       "type": "boolean"
+      },
+      "canonicalVersionMadeBy": {
+       "type": "boolean"
+      },
+      "noDataDescriptors": {
+       "type": "boolean"
+      },
+      "pinnedDate": {
+       "type": "string"
+      },
+      "offenderCount": {
+       "type": "integer",
+       "minimum": 0
+      },
+      "offenders": {
+       "type": "array",
+       "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+         "name": {
+          "type": "string"
+         },
+         "concern": {
+          "type": "string",
+          "enum": [
+           "timestamp",
+           "order",
+           "utf8-flag",
+           "extra-field",
+           "version-made-by",
+           "data-descriptor"
+          ]
+         }
+        }
+       }
+      },
+      "offendersTruncated": {
+       "type": "boolean"
+      }
+     }
+    },
     "diagnostics": {
      "type": "array",
      "items": {
@@ -451,6 +526,10 @@
        "type": "integer",
        "minimum": 1
       },
+      "maxEntryCompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
       "maxTotalUncompressedSize": {
        "type": "integer",
        "minimum": 1
@@ -546,7 +625,8 @@
         "type": "string",
         "enum": [
          "utf-8",
-         "cp437"
+         "cp437",
+         "custom"
         ]
        },
        "isDirectory": {
@@ -825,6 +905,10 @@
        "type": "integer",
        "minimum": 1
       },
+      "maxEntryCompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
       "maxTotalUncompressedSize": {
        "type": "integer",
        "minimum": 1
@@ -892,7 +976,8 @@
        "type": "string",
        "enum": [
         "utf-8",
-        "cp437"
+        "cp437",
+        "custom"
        ]
       },
       "isDirectory": {
@@ -1098,6 +1183,14 @@
       },
       "localHeaderMatch": {
        "type": "boolean"
+      },
+      "skipped": {
+       "type": "string",
+       "enum": [
+        "encrypted",
+        "stream-only-codec",
+        "unsupported-method"
+       ]
       }
      }
     },
@@ -1197,6 +1290,10 @@
        "minimum": 1
       },
       "maxEntryUncompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "maxEntryCompressedSize": {
        "type": "integer",
        "minimum": 1
       },
@@ -1311,7 +1408,8 @@
         "type": "string",
         "enum": [
          "encrypted",
-         "stream-only-codec"
+         "stream-only-codec",
+         "unsupported-method"
         ]
        }
       }
@@ -1455,6 +1553,10 @@
        "minimum": 1
       },
       "maxEntryUncompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "maxEntryCompressedSize": {
        "type": "integer",
        "minimum": 1
       },
@@ -1726,6 +1828,10 @@
        "type": "integer",
        "minimum": 1
       },
+      "maxEntryCompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
       "maxTotalUncompressedSize": {
        "type": "integer",
        "minimum": 1
@@ -1809,7 +1915,8 @@
         "type": "string",
         "enum": [
          "utf-8",
-         "cp437"
+         "cp437",
+         "custom"
         ]
        },
        "isDirectory": {
@@ -2355,6 +2462,10 @@
        "type": "integer",
        "minimum": 1
       },
+      "maxEntryCompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
       "maxTotalUncompressedSize": {
        "type": "integer",
        "minimum": 1
@@ -2765,6 +2876,10 @@
        "minimum": 1
       },
       "maxEntryUncompressedSize": {
+       "type": "integer",
+       "minimum": 1
+      },
+      "maxEntryCompressedSize": {
        "type": "integer",
        "minimum": 1
       },

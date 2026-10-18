@@ -4,8 +4,17 @@
  * local-header checks, every diagnostic collected. The contract that makes it
  * agent-grade: the tool NEVER fails for a problem with the archive — a
  * structural refusal lands in `error` (with the frozen ZIP_* code), an
- * unverifiable entry (encrypted, stream-only codec) is `skipped` with its
- * reason. Only caller mistakes (bad limits, bad input) are `isError`.
+ * unverifiable entry carries `skipped` with its reason (zipnative 1.1.0:
+ * 'encrypted', 'stream-only-codec', 'unsupported-method'). Only caller
+ * mistakes (bad limits, bad input) are `isError`.
+ *
+ * The counts follow the engine's archive rule: an entry passes when it is ok,
+ * or when it is a design-time skip (encrypted, stream-only codec) whose local
+ * header agrees with the central directory. `skippedCount` counts those;
+ * every other entry that is not ok is FAILED — an unknown method (skipped:
+ * 'unsupported-method', as in 1.0.0 failed) and, since 1.1.0, an encrypted
+ * entry whose local header contradicts the central directory (1.0.0 trusted a
+ * fabricated localHeaderMatch).
  */
 import { z } from 'zod';
 import { verifyZip, type VerifiedEntry } from 'zipnative';
@@ -73,8 +82,8 @@ export const VERIFY_ZIP_OUTPUT_SCHEMA = {
         },
         entryCount: { type: 'integer', minimum: 0 },
         verifiedCount: { type: 'integer', minimum: 0, description: 'Entries that passed every check.' },
-        failedCount: { type: 'integer', minimum: 0, description: 'Entries with a CRC / size / local-header mismatch.' },
-        skippedCount: { type: 'integer', minimum: 0, description: 'Entries that could not be verified (encrypted, stream-only codec).' },
+        failedCount: { type: 'integer', minimum: 0, description: 'Entries that fail the archive: a CRC / size / local-header mismatch, an unknown compression method, or a design-time skip whose local header contradicts the central directory.' },
+        skippedCount: { type: 'integer', minimum: 0, description: 'Entries that could not be verified by design (encrypted, stream-only codec) and whose local header agrees with the central directory.' },
         entries: {
             type: 'array',
             items: {
@@ -86,7 +95,7 @@ export const VERIFY_ZIP_OUTPUT_SCHEMA = {
                     crcMatch: { type: 'boolean' },
                     sizeMatch: { type: 'boolean' },
                     localHeaderMatch: { type: 'boolean' },
-                    skipped: { type: 'string', enum: ['encrypted', 'stream-only-codec'] },
+                    skipped: { type: 'string', enum: ['encrypted', 'stream-only-codec', 'unsupported-method'], description: 'Why the payload was not verified (zipnative 1.1.0 adds unsupported-method, which still fails the archive).' },
                 },
             },
         },
@@ -94,6 +103,11 @@ export const VERIFY_ZIP_OUTPUT_SCHEMA = {
         diagnostics: DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics,
     },
 } as const;
+
+/** The engine's archive rule for a non-ok entry: a design-time skip passes when its local header agrees. */
+function passesAsSkipped(e: VerifiedEntry): boolean {
+    return (e.skipped === 'encrypted' || e.skipped === 'stream-only-codec') && e.localHeaderMatch;
+}
 
 export async function verifyZipTool(rawInput: unknown): Promise<VerifyZipResult> {
     const input = parseInput(InputSchema, rawInput);
@@ -105,16 +119,16 @@ export async function verifyZipTool(rawInput: unknown): Promise<VerifyZipResult>
     let failedCount = 0;
     let skippedCount = 0;
     for (const e of report.entries) {
-        if (e.skipped !== undefined) skippedCount++;
-        else if (e.ok) verifiedCount++;
+        if (e.ok) verifiedCount++;
+        else if (passesAsSkipped(e)) skippedCount++;
         else failedCount++;
     }
     const selected = input.entries === 'none'
         ? []
         : input.entries === 'failed'
-            ? report.entries.filter((e) => e.skipped === undefined && !e.ok)
+            ? report.entries.filter((e) => !e.ok && !passesAsSkipped(e))
             : input.entries === 'skipped'
-                ? report.entries.filter((e) => e.skipped !== undefined)
+                ? report.entries.filter((e) => !e.ok && passesAsSkipped(e))
                 : report.entries;
     const truncated = selected.length > input.maxEntries;
     return {

@@ -1,7 +1,8 @@
 /**
- * B-009 — the diagnostic inventory: every one of the engine's 11 diagnostic
+ * B-009 — the diagnostic inventory: every one of the engine's 12 diagnostic
  * codes is produced by a tool call through the wrapper, with the construction
- * that reaches it. The table is guarded against `ZIP_DIAGNOSTIC_CODES` so a
+ * that reaches it — or is listed in UNREACHABLE_BY_DESIGN with the reason and
+ * a test proving the wrapper refuses the input that would raise it. The table is guarded against `ZIP_DIAGNOSTIC_CODES` so a
  * new engine diagnostic (or a dropped one) fails here instead of silently
  * going unproven. Each row asserts the code, its severity and — when the
  * engine scopes it — the entry name in `structuredContent.diagnostics`.
@@ -59,7 +60,18 @@ const ROWS: readonly Row[] = [
     { code: 'ZIP_DEAD_BYTES_RATIO', tool: 'modify_zip', args: async () => ({ zipBase64: await mostlyDeadSource(), operations: [{ op: 'remove', name: 'big.bin' }] }), severity: 'info' },
 ];
 
-describe('B-009: every one of the 11 diagnostic codes is produced by a tool call', () => {
+/**
+ * Diagnostics no input can make this wrapper emit, with the reason. The row
+ * below proves the claim (the would-be input is refused first).
+ */
+const UNREACHABLE_BY_DESIGN: Readonly<Record<string, string>> = {
+    // zipnative 1.1.0 clamps a date outside the DOS range on write. Every date this server passes the
+    // engine went through parseEntryDate, which refuses 1980-01-01 … 2107-12-31 23:59:58 violations as
+    // VALIDATION_ERROR first, and dosTimeMode 'utc' makes the two ranges coincide on every host.
+    ZIP_TIMESTAMP_CLAMPED: 'dates outside the DOS range are VALIDATION_ERROR at the boundary (parseEntryDate), never clamped',
+};
+
+describe('B-009: every one of the 12 diagnostic codes is produced by a tool call or unreachable by design', () => {
     beforeAll(async () => {
         delete process.env['ZIPNATIVE_MCP_OUTPUT_DIR'];
         delete process.env['ZIPNATIVE_MCP_CACHE_DIR'];
@@ -67,8 +79,8 @@ describe('B-009: every one of the 11 diagnostic codes is produced by a tool call
     });
 
     it('the table covers ZIP_DIAGNOSTIC_CODES exactly (no missing, no extra, no duplicate)', () => {
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
-        expect([...ROWS.map((r) => r.code)].sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
+        expect([...ROWS.map((r) => r.code), ...Object.keys(UNREACHABLE_BY_DESIGN)].sort()).toEqual([...ZIP_DIAGNOSTIC_CODES].sort());
         expect(new Set(ROWS.map((r) => r.code)).size).toBe(ROWS.length);
     });
 
@@ -96,6 +108,19 @@ describe('B-009: every one of the 11 diagnostic codes is produced by a tool call
             }
         });
     }
+
+    it('ZIP_TIMESTAMP_CLAMPED is unreachable: the dates the engine would clamp are refused first, the bounds themselves are written as given', async () => {
+        for (const date of ['1979-12-31T23:59:58Z', '2107-12-31T23:59:59Z', '1975-07-15']) {
+            const r = await callToolDirect('create_zip', { entries: [{ name: 'a.txt', text: 'a', date }] });
+            expect(r.isError, date).toBe(true);
+            expect((r._meta as { error: { code: string } }).error.code, date).toBe('VALIDATION_ERROR');
+        }
+        for (const date of ['1980-01-01T00:00:00Z', '2107-12-31T23:59:58Z']) {
+            const r = await callToolDirect('create_zip', { entries: [{ name: 'a.txt', text: 'a', date }] });
+            expect(r.isError, date).not.toBe(true);
+            expect((r.structuredContent as { diagnostics: DiagnosticRow[] }).diagnostics.map((d) => d.code), date).not.toContain('ZIP_TIMESTAMP_CLAMPED');
+        }
+    });
 
     it('the summary projection keeps diagnosticCount for every producing tool', async () => {
         for (const row of ROWS.filter((x) => ['inspect_zip', 'list_zip_entries', 'read_zip_entry'].includes(x.tool))) {

@@ -10,7 +10,7 @@ import { ToolError } from '../src/errors.js';
 describe('zip-errors', () => {
     it('the frozen vocabularies have the documented sizes and classes', () => {
         expect(ZIP_ERROR_CODES).toHaveLength(39);
-        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(11);
+        expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
         expect(new Set(ZIP_ERROR_CODES).size).toBe(39);
         const classes = new Set(Object.values(ZIP_ERROR_CLASS));
         expect([...classes].sort()).toEqual(['check', 'data', 'input', 'internal', 'limit', 'not-found', 'parse', 'security', 'unsupported', 'usage']);
@@ -66,16 +66,12 @@ describe('zip-errors', () => {
         expect(method.data).toMatchObject({ feature: 'method:93' });
     });
 
-    it('maps node:zlib error codes onto the deflate codes regardless of tier', () => {
+    it('a raw zlib error is no longer remapped (zipnative 1.1.0 normalises every inflate tier itself): ENGINE_ERROR, path-redacted', () => {
         const data = Object.assign(new Error('invalid stored block lengths'), { code: 'Z_DATA_ERROR' });
         const mapped = mapZipError(data, 'Failed to inflate', 'e.bin', { operationIndex: 1 });
-        expect(mapped.code).toBe('ZIP_DEFLATE_CORRUPT');
-        expect(mapped.message).toBe('Failed to inflate: invalid stored block lengths');
-        expect(mapped.data).toEqual({ errorClass: 'parse', engineError: 'ZlibError', entryName: 'e.bin', operationIndex: 1 });
-        expect(mapZipError(Object.assign(new Error('unexpected end of file'), { code: 'Z_BUF_ERROR' }), 'F').code).toBe('ZIP_DEFLATE_TRUNCATED');
-        expect(mapZipError(Object.assign(new Error('dict'), { code: 'Z_NEED_DICT' }), 'F').code).toBe('ZIP_DEFLATE_CORRUPT');
-        expect(mapZipError(Object.assign(new Error('dict'), { code: 'Z_NEED_DICT' }), 'F').data).not.toHaveProperty('entryName');
-        expect(mapZipError(Object.assign(new Error('x'), { code: 'ENOENT' }), 'F').code).toBe('ENGINE_ERROR');
+        expect(mapped.code).toBe('ENGINE_ERROR');
+        expect(mapped.data).toEqual({ errorClass: 'internal', operationIndex: 1 });
+        expect(mapZipError(new Error("open '/srv/data/sandbox/x.zip'"), 'F').message).toBe("F: open '<path>'");
     });
 
     it('passes a ToolError through untouched', () => {

@@ -62,28 +62,35 @@ interface Diff { at: string; kind: string; hand: unknown; zod: unknown }
 
 function extractTopLevelConsts(text: string): string[] {
     const lines = text.split(/\r?\n/);
-    const out: string[] = [];
+    const local: string[] = [];
+    const exported: Array<{ readonly name: string; readonly block: string }> = [];
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
-        if (!/^const\s+[A-Za-z_{]/.test(line)) continue;
-        if (/;\s*$/.test(line)) {
-            out.push(line);
-            continue;
-        }
-        const block = [line];
-        for (let j = i + 1; j < lines.length; j++) {
-            const l = lines[j]!;
-            block.push(l);
-            const indent = l.length - l.trimStart().length;
-            const t = l.trim();
-            if (indent <= 4 && /;$/.test(t) && /^[)}.\]]/.test(t)) {
-                i = j;
-                break;
+        if (!/^(?:export\s+)?const\s+[A-Za-z_{]/.test(line)) continue;
+        const isExported = line.startsWith('export ');
+        const decl = line.replace(/^export\s+/, '');
+        let block = decl;
+        if (!/;\s*$/.test(decl)) {
+            const parts = [decl];
+            for (let j = i + 1; j < lines.length; j++) {
+                const l = lines[j]!;
+                parts.push(l);
+                const indent = l.length - l.trimStart().length;
+                const t = l.trim();
+                if (indent <= 4 && /;$/.test(t) && /^[)}.\]]/.test(t)) {
+                    i = j;
+                    break;
+                }
             }
+            block = parts.join('\n');
         }
-        out.push(block.join('\n'));
+        if (isExported) exported.push({ name: /^const\s+([A-Za-z0-9_]+)/.exec(decl)?.[1] ?? '', block });
+        else local.push(block);
     }
-    return out;
+    // An exported constant the Zod schema reads (INSPECT_CHECKS feeds z.enum) is declared ahead of it;
+    // the other exports (JSON schemas, output schemas) stay out of the eval program.
+    const used = exported.filter((e) => e.name !== '' && local.some((l) => new RegExp(`\\b${e.name}\\b`).test(l)));
+    return [...used.map((e) => e.block), ...local];
 }
 
 function rewriteImports(text: string): string {

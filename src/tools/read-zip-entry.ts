@@ -6,7 +6,7 @@
  * check (`mode: 'verify'`). CRC-verified by default.
  */
 import { z } from 'zod';
-import { openZip, type ZipEntry } from 'zipnative';
+import { openZip, type EntrySkipReason, type ZipEntry } from 'zipnative';
 
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
 import { encodeBase64 } from '../base64.js';
@@ -82,7 +82,7 @@ export interface ReadZipEntryResult extends DiagnosticsReport {
     readonly text?: string;
     readonly textLength?: number;
     readonly range?: { readonly offset: number; readonly length: number; readonly returned: number };
-    readonly verification?: { readonly ok: boolean; readonly crcMatch: boolean; readonly sizeMatch: boolean; readonly localHeaderMatch: boolean };
+    readonly verification?: { readonly ok: boolean; readonly crcMatch: boolean; readonly sizeMatch: boolean; readonly localHeaderMatch: boolean; readonly skipped?: EntrySkipReason };
 }
 
 export const READ_ZIP_ENTRY_OUTPUT_SCHEMA = {
@@ -106,7 +106,13 @@ export const READ_ZIP_ENTRY_OUTPUT_SCHEMA = {
         verification: {
             type: 'object',
             additionalProperties: false,
-            properties: { ok: { type: 'boolean' }, crcMatch: { type: 'boolean' }, sizeMatch: { type: 'boolean' }, localHeaderMatch: { type: 'boolean' } },
+            properties: {
+                ok: { type: 'boolean' },
+                crcMatch: { type: 'boolean' },
+                sizeMatch: { type: 'boolean' },
+                localHeaderMatch: { type: 'boolean', description: 'The local header agrees with the central directory — cross-checked for every entry, encrypted ones included (zipnative 1.1.0).' },
+                skipped: { type: 'string', enum: ['encrypted', 'stream-only-codec', 'unsupported-method'], description: 'Why the payload was not verified; absent when it was.' },
+            },
         },
         ...DIAGNOSTICS_OUTPUT_PROPERTIES,
     },

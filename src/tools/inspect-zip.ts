@@ -1,15 +1,26 @@
 /**
  * Tool: inspect_zip — archive facts, per-method statistics, a determinism
  * verdict, every diagnostic the parse emitted, and optional CI assertions.
+ *
+ * Determinism (1.1.0): the sub-checks come from zipnative's own
+ * `analyzeDeterminism()` — the definition the engine now owns, so this tool,
+ * the CLI and the engine cannot disagree. The default `determinism.deterministic`
+ * keeps the 1.0.0 formula (epoch timestamps + canonical order + UTF-8 flags),
+ * so no existing CI gate flips; the engine's stricter canonical-form verdict
+ * (Zip64-only extras, the constant version-made-by) and its offender list are
+ * opt-in (`determinismReport: true`, checks `canonical-form`,
+ * `canonical-extras`, `canonical-version-made-by`).
  * Opens the archive EAGERLY by default (every local header cross-checked,
  * overlap table built up front) so a hostile archive is refused here rather
  * than silently summarised. The report shape mirrors `zipnative inspect --json`.
  */
 import { z } from 'zod';
-import { FLAG_UTF8, METHOD_DEFLATE, METHOD_STORE, isSymlinkEntry, openZip, type ZipEntry } from 'zipnative';
+import { METHOD_DEFLATE, METHOD_STORE, analyzeDeterminism, isSymlinkEntry, openZip, type DeterminismReport, type ZipEntry } from 'zipnative';
 
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
 import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
+import { MAX_DETERMINISM_OFFENDERS } from '../caps.js';
+import { ISO_DATE_PATTERN, parseEntryDate } from '../entry-spec.js';
 import { bytesToHex, decodeComment, formatRatio, methodName, sanitizedPathOf } from '../entry.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
 import { PROJECTION_INPUT_PROPERTIES } from '../projection.js';
@@ -18,14 +29,13 @@ import { EngineOptionsShape, parseInput, ProjectionShape, STRICT_INPUT_PROPERTY 
 
 export const INSPECT_ZIP_NAME = 'inspect_zip';
 
-const DOS_EPOCH_DATE = 0x0021; // 1980-01-01
-const DOS_EPOCH_TIME = 0x0000;
-
 /** The CLI's `--check` vocabulary (simple assertions). */
 export const INSPECT_CHECKS = [
     'deterministic', 'epoch-timestamps', 'canonical-order', 'utf8-names', 'no-data-descriptor',
     'canonical-layout', 'no-zip64', 'zip64', 'no-encryption', 'no-symlinks', 'safe-names', 'no-duplicates',
     'no-diagnostics', 'store-only', 'deflate-only',
+    // zipnative 1.1.0 analyzeDeterminism(): the canonical form of the engine and its two extra rules.
+    'canonical-form', 'canonical-extras', 'canonical-version-made-by',
 ] as const;
 
 export const INSPECT_ZIP_INPUT_SCHEMA = {
@@ -41,9 +51,19 @@ export const INSPECT_ZIP_INPUT_SCHEMA = {
         },
         check: {
             type: 'array',
-            maxItems: 15,
+            maxItems: 18,
             items: { type: 'string', enum: [...INSPECT_CHECKS] },
-            description: "CI assertions evaluated over the report: deterministic, epoch-timestamps, canonical-order, utf8-names, no-data-descriptor, canonical-layout, no-zip64, zip64, no-encryption, no-symlinks, safe-names, no-duplicates, no-diagnostics, store-only, deflate-only. Result: `checks[]` + `checksPassed`.",
+            description: "CI assertions evaluated over the report: deterministic, epoch-timestamps, canonical-order, utf8-names, no-data-descriptor, canonical-layout, no-zip64, zip64, no-encryption, no-symlinks, safe-names, no-duplicates, no-diagnostics, store-only, deflate-only, and the engine's canonical form (canonical-form = zipnative's analyzeDeterminism verdict: epoch or pinned timestamps, canonical order, UTF-8 flags, Zip64-only extras, version-made-by 0x032D; canonical-extras; canonical-version-made-by). Result: `checks[]` + `checksPassed`.",
+        },
+        determinismReport: {
+            type: 'boolean',
+            default: false,
+            description: "true adds `determinismReport`: zipnative's analyzeDeterminism() verdict in full — the stricter canonical form canonicalize_zip produces (also Zip64-only extras and the constant version-made-by) and every offending entry with the rule it breaks.",
+        },
+        canonicalDate: {
+            type: 'string',
+            pattern: ISO_DATE_PATTERN,
+            description: 'The date the archive was canonicalised with (canonicalize_zip `date`, modify_zip `canonical.date`): the canonical-form verdict then expects that timestamp on every entry instead of the DOS epoch. Read as UTC, like every date this server writes.',
         },
         assert: {
             type: 'object',
@@ -68,7 +88,9 @@ const InputSchema = z
     .strictObject({
         ...ARCHIVE_INPUT_SHAPE,
         validate: z.enum(['eager', 'lazy']).default('eager'),
-        check: z.array(z.enum(INSPECT_CHECKS)).max(15).optional(),
+        check: z.array(z.enum(INSPECT_CHECKS)).max(18).optional(),
+        determinismReport: z.boolean().default(false),
+        canonicalDate: z.string().regex(new RegExp(ISO_DATE_PATTERN)).optional(),
         assert: z
             .strictObject({
                 maxEntries: z.number().int().min(0).optional(),
@@ -123,6 +145,19 @@ export interface InspectZipResult extends DiagnosticsReport {
         readonly canonicalLayout: boolean;
         readonly deterministic: boolean;
     };
+    readonly determinismReport?: {
+        readonly deterministic: boolean;
+        readonly epochTimestamps: boolean;
+        readonly canonicalOrder: boolean;
+        readonly utf8Flags: boolean;
+        readonly canonicalExtras: boolean;
+        readonly canonicalVersionMadeBy: boolean;
+        readonly noDataDescriptors: boolean;
+        readonly pinnedDate?: string;
+        readonly offenderCount: number;
+        readonly offenders: ReadonlyArray<{ readonly name: string; readonly concern: string }>;
+        readonly offendersTruncated?: true;
+    };
     readonly checks?: readonly CheckResult[];
     readonly checksPassed?: boolean;
 }
@@ -176,6 +211,32 @@ export const INSPECT_ZIP_OUTPUT_SCHEMA = {
                 deterministic: { type: 'boolean' },
             },
         },
+        determinismReport: {
+            type: 'object',
+            additionalProperties: false,
+            description: "Present with determinismReport: true — zipnative's analyzeDeterminism() report. `deterministic` here is the engine's canonical form (stricter than determinism.deterministic: also no extra field but Zip64 and version-made-by 0x032D).",
+            properties: {
+                deterministic: { type: 'boolean' },
+                epochTimestamps: { type: 'boolean', description: 'Every entry carries the DOS epoch, or the canonicalDate given.' },
+                canonicalOrder: { type: 'boolean' },
+                utf8Flags: { type: 'boolean' },
+                canonicalExtras: { type: 'boolean', description: 'No extra field other than Zip64 (0x0001) on any entry.' },
+                canonicalVersionMadeBy: { type: 'boolean', description: 'Every entry has version-made-by 0x032D.' },
+                noDataDescriptors: { type: 'boolean' },
+                pinnedDate: { type: 'string', description: 'The canonicalDate the timestamps were compared with (ISO-8601, UTC).' },
+                offenderCount: { type: 'integer', minimum: 0 },
+                offenders: {
+                    type: 'array',
+                    description: `Every broken rule, entry by entry, in central-directory order (at most ${MAX_DETERMINISM_OFFENDERS} rows).`,
+                    items: {
+                        type: 'object',
+                        additionalProperties: false,
+                        properties: { name: { type: 'string' }, concern: { type: 'string', enum: ['timestamp', 'order', 'utf8-flag', 'extra-field', 'version-made-by', 'data-descriptor'] } },
+                    },
+                },
+                offendersTruncated: { type: 'boolean' },
+            },
+        },
         ...DIAGNOSTICS_OUTPUT_PROPERTIES,
         checks: {
             type: 'array',
@@ -189,23 +250,9 @@ export const INSPECT_ZIP_OUTPUT_SCHEMA = {
     },
 } as const;
 
-function compareBytes(a: Uint8Array, b: Uint8Array): number {
-    const n = Math.min(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const d = (a[i] as number) - (b[i] as number);
-        if (d !== 0) return d;
-    }
-    return a.length - b.length;
-}
-
-function isAscii(bytes: Uint8Array): boolean {
-    for (const b of bytes) if (b > 0x7f) return false;
-    return true;
-}
-
 type Report = Omit<InspectZipResult, 'checks' | 'checksPassed'>;
 
-function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: readonly ZipEntry[]): CheckResult[] {
+function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: readonly ZipEntry[], engine: DeterminismReport): CheckResult[] {
     const results: CheckResult[] = [];
     const d = report.determinism;
     for (const c of input.check ?? []) {
@@ -227,6 +274,9 @@ function evaluate(input: z.infer<typeof InputSchema>, report: Report, entries: r
             case 'no-diagnostics': ok = report.diagnostics.length === 0; detail = `${report.diagnostics.length} diagnostics`; break;
             case 'store-only': ok = entries.every((e) => e.compressionMethod === METHOD_STORE); detail = `methods: ${report.methods.map((m) => m.name).join(',') || 'none'}`; break;
             case 'deflate-only': ok = entries.every((e) => e.compressionMethod === METHOD_DEFLATE); detail = `methods: ${report.methods.map((m) => m.name).join(',') || 'none'}`; break;
+            case 'canonical-form': ok = engine.deterministic; detail = ok ? 'the canonical form zipnative writes (analyzeDeterminism)' : `rules broken: ${[...new Set(engine.offenders.map((o) => o.concern))].join(', ')}`; break;
+            case 'canonical-extras': ok = engine.canonicalExtras; detail = ok ? 'no extra field but Zip64' : `${engine.offenders.filter((o) => o.concern === 'extra-field').length} entries carry other extra fields`; break;
+            case 'canonical-version-made-by': ok = engine.canonicalVersionMadeBy; detail = ok ? 'version-made-by 0x032D on every entry' : `${engine.offenders.filter((o) => o.concern === 'version-made-by').length} entries with another version-made-by`; break;
         }
         results.push({ check: c, ok, detail });
     }
@@ -276,10 +326,6 @@ export async function inspectZip(rawInput: unknown): Promise<InspectZipResult> {
     let unsafeNameCount = 0;
     let earliest: Date | null = null;
     let latest: Date | null = null;
-    let epochTimestamps = true;
-    let canonicalOrder = true;
-    let utf8Flags = true;
-    let prev: ZipEntry | null = null;
 
     for (const e of entries) {
         if (e.isDirectory) directoryCount++;
@@ -298,12 +344,14 @@ export async function inspectZip(rawInput: unknown): Promise<InspectZipResult> {
         if (sanitizedPathOf(e.name, e.isDirectory) === null) unsafeNameCount++;
         if (earliest === null || e.lastModified < earliest) earliest = e.lastModified;
         if (latest === null || e.lastModified > latest) latest = e.lastModified;
-        if (e.dosDate !== DOS_EPOCH_DATE || e.dosTime !== DOS_EPOCH_TIME) epochTimestamps = false;
-        if (prev !== null && compareBytes(prev.rawName, e.rawName) > 0) canonicalOrder = false;
-        if ((e.flags & FLAG_UTF8) === 0 && !isAscii(e.rawName)) utf8Flags = false;
-        prev = e;
     }
-    const noDataDescriptors = dataDescriptorCount === 0;
+    // The engine's definition (analyzeDeterminism, silent on diagnostics, same limits): the default report
+    // keeps the 1.0.0 shape and verdict, the full engine report is opt-in. The default comparison is
+    // always the DOS epoch; canonicalDate only re-targets the opt-in canonical-form verdict.
+    const engineDefault = guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, { ...(limits !== undefined ? { limits } : {}), dosTimeMode: 'utc' }));
+    const pinned = input.canonicalDate !== undefined ? parseEntryDate(input.canonicalDate, 'canonicalDate') : undefined;
+    const engine = pinned === undefined ? engineDefault : guard('Failed to analyse determinism', () => analyzeDeterminism(bytes, { ...(limits !== undefined ? { limits } : {}), date: pinned, dosTimeMode: 'utc' }));
+    const { epochTimestamps, canonicalOrder, utf8Flags, noDataDescriptors } = engineDefault;
 
     const report: Report = {
         archiveBytes: bytes.byteLength,
@@ -341,9 +389,27 @@ export async function inspectZip(rawInput: unknown): Promise<InspectZipResult> {
         ...sink.report(),
     };
 
-    if (input.check === undefined && input.assert === undefined) return report;
-    const checks = evaluate(input, report, entries);
-    return { ...report, checks, checksPassed: checks.every((c) => c.ok) };
+    const withEngine: Report = input.determinismReport
+        ? {
+            ...report,
+            determinismReport: {
+                deterministic: engine.deterministic,
+                epochTimestamps: engine.epochTimestamps,
+                canonicalOrder: engine.canonicalOrder,
+                utf8Flags: engine.utf8Flags,
+                canonicalExtras: engine.canonicalExtras,
+                canonicalVersionMadeBy: engine.canonicalVersionMadeBy,
+                noDataDescriptors: engine.noDataDescriptors,
+                ...(pinned !== undefined ? { pinnedDate: pinned.toISOString() } : {}),
+                offenderCount: engine.offenders.length,
+                offenders: engine.offenders.slice(0, MAX_DETERMINISM_OFFENDERS).map((o) => ({ name: o.name, concern: o.concern })),
+                ...(engine.offenders.length > MAX_DETERMINISM_OFFENDERS ? { offendersTruncated: true as const } : {}),
+            },
+        }
+        : report;
+    if (input.check === undefined && input.assert === undefined) return withEngine;
+    const checks = evaluate(input, withEngine, entries, engine);
+    return { ...withEngine, checks, checksPassed: checks.every((c) => c.ok) };
 }
 
 /** Summary projection (`verbosity: 'summary'`). */

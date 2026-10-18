@@ -288,6 +288,7 @@ every result's `diagnostics[]` as `{ code, severity, message, entryName? }`, de-
 | `ZIP_TIMESTAMP_NOT_PINNED` | info | `create_zip`, `modify_zip` with `defaultDate: 'now'` | `defaultDate: 'now'` makes the output non-reproducible (`summary.deterministic: false`). | Pin an ISO instant (or accept the DOS-epoch default) for deterministic bytes. |
 | `ZIP_NONDETERMINISTIC_CODEC` | info | `create_zip` with a pinned `defaultDate` on the `node-zlib` tier without `compression.deterministic: true` | Timestamps are pinned but a platform codec is in use — bytes are stable per environment, not across zlib builds. | Pass `compression: { deterministic: true }` to pin the pure-TS encoder for cross-runtime identical bytes. |
 | `ZIP_DEAD_BYTES_RATIO` | info | `modify_zip` mode `'append'` | An incremental save() left more than 50% dead bytes; removed/replaced content remains recoverable in the file. | Use mode `'compact'` for true deletion and a canonical layout. |
+| `ZIP_TIMESTAMP_CLAMPED` | info | none through this server (zipnative 1.1.0) | The engine clamps a date outside the DOS range (1980-01-01 … 2107-12-31 23:59:58). Every date this server writes is checked first, so an out-of-range date is a `VALIDATION_ERROR` instead. | Pass a date inside the DOS range. |
 
 ## 7. Contributing to this repo
 

@@ -20,6 +20,7 @@ import {
     type StreamedZipHeader,
     type ZipEntry,
     type ZipExtraField,
+    type ZipNameEncoding,
 } from 'zipnative';
 
 export interface DecodedFlags {
@@ -43,7 +44,8 @@ export interface ExtraFieldRow {
 export interface EntryView {
     readonly index: number;
     readonly name: string;
-    readonly nameEncoding: 'utf-8' | 'cp437';
+    /** `'custom'` (zipnative 1.1.0) only ever comes from a `nameDecoder`, which this server does not expose. */
+    readonly nameEncoding: ZipNameEncoding;
     readonly isDirectory: boolean;
     /** `null` from a forward scan (no central-directory attributes). */
     readonly isSymlink: boolean | null;
@@ -249,7 +251,7 @@ export const ENTRY_VIEW_SCHEMA = {
     properties: {
         index: { type: 'integer', minimum: 0, description: 'Position in the central directory (or in the forward scan).' },
         name: { type: 'string' },
-        nameEncoding: { type: 'string', enum: ['utf-8', 'cp437'] },
+        nameEncoding: { type: 'string', enum: ['utf-8', 'cp437', 'custom'] },
         isDirectory: { type: 'boolean' },
         isSymlink: { type: ['boolean', 'null'], description: 'Unix mode S_IFLNK; null from a forward scan.' },
         method: { type: 'integer', description: 'Compression method id (0 store, 8 deflate).' },

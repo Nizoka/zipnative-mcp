@@ -9,7 +9,7 @@
 // text and pin:
 //   - the upstream commit + blob hashes each port was taken from (bump them
 //     in the same PR as a re-port);
-//   - the frozen 22-id check vocabulary (`fail('<id>'` literals == CHECK_IDS);
+//   - the frozen 23-id check vocabulary (`fail('<id>'` literals == CHECK_IDS);
 //   - the anti-circularity invariant: the validator core has NO imports at
 //     all; the driver, the foreign-tool helper, the raw builder and the corpus
 //     definition never import `zipnative`, `src/` or `dist/`; the corpus
@@ -38,8 +38,10 @@ const builder = read('scripts/helpers/raw-zip-builder.mjs');
 const corpusSource = read('scripts/helpers/zip-corpus.mjs');
 const generator = read('scripts/generate-zip-corpus.mjs');
 
-const UPSTREAM_COMMIT = '4f1bc3619372e8543bccea65d2365bf0c048a10c';
-const UPSTREAM_VALIDATOR_BLOB = '5ddea000a3b6a4adfb720d673a43664972118139';
+const UPSTREAM_COMMIT = 'e6f0b3f592e15be7b45a88b08fc3178862bce2d9';
+const UPSTREAM_VALIDATOR_BLOB = '604321fa40ef1afba04eb9ce14f53e0c19efa474';
+/** The raw builder and the interop probes are unchanged upstream since 1.0.0 (same blobs at the 1.1.0 tag). */
+const UPSTREAM_BUILDER_COMMIT = '4f1bc3619372e8543bccea65d2365bf0c048a10c';
 const UPSTREAM_TOOLS_BLOB = '2fef80f17e302384a0f6a5f57f7a0f14911401f5';
 const UPSTREAM_BUILDER_BLOB = 'e4b43d9d28f7bec4b50298cb144e87e0c009a77b';
 
@@ -66,6 +68,7 @@ const EXPECTED_CHECK_IDS = [
     'WF/LFH-SIZE-MISMATCH',
     'WF/LFH-CRC-MISMATCH',
     'WF/DESCRIPTOR-MISMATCH',
+    'WF/DESCRIPTOR-WIDTH',
     'WF/ENTRY-OVERLAP',
 ];
 
@@ -86,9 +89,9 @@ describe('veraZIP vendored validator core (scripts/verazip-core.mjs)', () => {
         expect(core).toMatch(/upstream file:\s+scripts\/validate-zip\.ts/);
     });
 
-    it('emits exactly the frozen 22-id check vocabulary', () => {
+    it('emits exactly the frozen 23-id check vocabulary', () => {
         const ids = new Set(literals(core, /\bfail\('([^']+)'/g));
-        expect(EXPECTED_CHECK_IDS).toHaveLength(22);
+        expect(EXPECTED_CHECK_IDS).toHaveLength(23);
         expect([...ids].sort()).toEqual([...EXPECTED_CHECK_IDS].sort());
         expect([...CHECK_IDS].sort()).toEqual([...EXPECTED_CHECK_IDS].sort());
     });
@@ -143,7 +146,7 @@ describe('level-1 foreign tools (scripts/helpers/interop-tools.mjs)', () => {
 
 describe('raw ZIP builder (scripts/helpers/raw-zip-builder.mjs)', () => {
     it('pins the upstream commit and blob it was ported from', () => {
-        expect(builder).toMatch(new RegExp(`upstream commit:\\s+${UPSTREAM_COMMIT}`));
+        expect(builder).toMatch(new RegExp(`upstream commit:\\s+${UPSTREAM_BUILDER_COMMIT}`));
         expect(builder).toMatch(new RegExp(`upstream blob:\\s+${UPSTREAM_BUILDER_BLOB}`));
         expect(builder).toMatch(/upstream file:\s+tests\/helpers\/raw-zip-builder\.ts/);
     });
@@ -184,7 +187,7 @@ describe('corpus definition (scripts/helpers/zip-corpus.mjs) and generator', () 
     it('matches the counts docs/data/verazip.json declares', () => {
         expect(corpusCounts(corpus)).toEqual(declared.declared);
         expect(declared.declared.hostileConformant).toBeLessThanOrEqual(declared.declared.conformant);
-        expect(declared.checkIds).toBe(22);
+        expect(declared.checkIds).toBe(23);
         expect([...declared.requiredNegativeChecks].sort()).toEqual([...REQUIRED_NEGATIVE_CHECKS].sort());
     });
 
