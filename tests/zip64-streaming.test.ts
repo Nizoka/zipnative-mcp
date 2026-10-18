@@ -2,13 +2,15 @@
  * The Zip64 streaming opt-in (zipnative 1.1.0 AddEntryOptions.zip64) on
  * create_zip `stream: true` entries, and the file-output operator ceiling
  * ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES that makes an archive above 4 GiB
- * writable into the sandbox. A real 4 GiB + 1 stream is exercised by the
- * engine's own conformance workflow; here the layout is proven on a small
- * entry (APPNOTE 4.3.9.2: Zip64 extra in the local header, 24-byte
- * descriptor) through the independent veraZIP validator.
+ * writable into the sandbox. The layout is proven on a small entry (APPNOTE
+ * 4.3.9.2: Zip64 extra in the local header, 24-byte descriptor) through the
+ * independent veraZIP validator; a real 4 GiB + 1 stream is written and read
+ * back by byte ranges under ZIPNATIVE_MCP_SLOW_TESTS (the publish gate and
+ * the weekly veraZIP run set it; see the last block).
  */
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { openZip } from 'zipnative';
@@ -83,4 +85,74 @@ describe('ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES', () => {
         const d = await callToolDirect('describe_engine', { fields: ['ceilings.maxFileOutputBytes'] });
         expect(d.structuredContent).toEqual({ ceilings: { maxFileOutputBytes: 1024 * 1024 } });
     });
+});
+
+/**
+ * The real thing, opt-in (ZIPNATIVE_MCP_SLOW_TESTS=1): a 4 GiB + 1 stored
+ * stream through create_zip in file mode with the file-output ceiling raised,
+ * then the result — above the 1 GiB in-memory cap — read by byte ranges. The
+ * source is a sparse file (zeros), the output is a real 4 GiB archive on disk,
+ * so the test needs about 8 GiB free and runs for minutes; it lives under
+ * test-output/ (git-ignored) rather than the OS temp directory. The ISO
+ * validator is not run on it (the small entry above covers the layout).
+ */
+describe.skipIf(!process.env['ZIPNATIVE_MCP_SLOW_TESTS'])('create_zip stream + zip64 above 4 GiB (ZIPNATIVE_MCP_SLOW_TESTS)', () => {
+    const SIZE = 4 * 1024 * 1024 * 1024 + 1;
+    const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+    let slowDir: string | null = null;
+
+    afterEach(async () => {
+        if (slowDir !== null) await fs.rm(slowDir, { recursive: true, force: true });
+        slowDir = null;
+    });
+
+    it('writes a 4 GiB + 1 entry in the Zip64 streaming layout and reads it back by ranges', async () => {
+        await fs.mkdir(path.join(REPO_ROOT, 'test-output'), { recursive: true });
+        slowDir = await fs.mkdtemp(path.join(REPO_ROOT, 'test-output', 'slow-zip64-'));
+        process.env['ZIPNATIVE_MCP_OUTPUT_DIR'] = slowDir;
+        process.env[MAX_FILE_OUTPUT_ENV] = String(5 * 1024 * 1024 * 1024);
+        __resetCeilingsForTests();
+        // A sparse source: the file system serves zeros without writing them.
+        const source = await fs.open(path.join(slowDir, 'huge.bin'), 'w');
+        try {
+            await source.truncate(SIZE);
+        } finally {
+            await source.close();
+        }
+
+        const created = await callToolDirect('create_zip', {
+            entries: [{ name: 'huge.bin', sourcePath: 'huge.bin', stream: true, zip64: true }],
+            compression: { method: 'store' },
+            outputMode: 'file',
+            outputPath: 'out/huge.zip',
+        });
+        expect(created.isError, (created.content[0] as { text: string }).text).not.toBe(true);
+        const written = await fs.stat(path.join(slowDir, 'out', 'huge.zip'));
+        expect(written.size).toBeGreaterThan(SIZE);
+        // The source is no longer needed; the archive alone is above the 1 GiB in-memory cap.
+        await fs.rm(path.join(slowDir, 'huge.bin'));
+
+        // The engine's default read bound (maxEntryUncompressedSize 1 GiB) applies in range mode too: a reader of
+        // an entry this large raises it explicitly (within the operator ceiling, 8 GiB by default).
+        const limits = { maxEntryUncompressedSize: SIZE, maxTotalUncompressedSize: SIZE };
+        const refused = await callToolDirect('inspect_zip', { zipPath: 'out/huge.zip', verbosity: 'summary' });
+        expect((refused._meta as { error?: { code?: string } }).error?.code).toBe('ZIP_LIMIT_EXCEEDED');
+        const inspected = await callToolDirect('inspect_zip', { zipPath: 'out/huge.zip', verbosity: 'summary', limits });
+        expect(inspected.isError, (inspected.content[0] as { text: string }).text).not.toBe(true);
+        const summary = inspected.structuredContent as { access?: string; entryCount: number; isZip64: boolean; uncompressedBytes?: number };
+        expect(summary.access).toBe('range');
+        expect(summary.entryCount).toBe(1);
+        expect(summary.isZip64).toBe(true);
+        expect(summary.uncompressedBytes).toBe(SIZE);
+
+        const listed = await callToolDirect('list_zip_entries', { zipPath: 'out/huge.zip', limits, fields: ['access', 'entries.name', 'entries.uncompressedSize', 'entries.usesZip64', 'entries.method'] });
+        expect(listed.isError).not.toBe(true);
+        expect(listed.structuredContent).toEqual({ access: 'range', entries: [{ name: 'huge.bin', uncompressedSize: SIZE, usesZip64: true, method: 0 }] });
+
+        const tail = await callToolDirect('read_zip_entry', { zipPath: 'out/huge.zip', name: 'huge.bin', limits, range: { offset: SIZE - 16, length: 16 } });
+        expect(tail.isError, (tail.content[0] as { text: string }).text).not.toBe(true);
+        const data = tail.structuredContent as { access?: string; dataBase64?: string; range?: { offset: number; length: number } };
+        expect(data.access).toBe('range');
+        expect(Buffer.from(data.dataBase64 ?? '', 'base64').equals(Buffer.alloc(16))).toBe(true);
+    }, 600_000);
 });

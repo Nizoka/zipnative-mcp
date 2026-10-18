@@ -366,3 +366,31 @@ describe.skipIf(!hasDist)('A-020: a relative ZIPNATIVE_MCP_CACHE_DIR refuses to 
         expect(stderr).not.toContain('ready (stdio transport');
     });
 });
+
+describe.skipIf(!hasDist)('A-017: prototype pollution over a real stdio frame (dist/cli.js)', () => {
+    it('A-017: a root __proto__ key is stripped by the SDK envelope before the server (the call runs on the rest), a nested one is VALIDATION_ERROR, and the process keeps answering', async () => {
+        // JSON.parse makes __proto__ an OWN key, and JSON.stringify writes it back out — exactly what a host sends.
+        const poisonedRoot = JSON.parse('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sanitize_entry_paths","arguments":{"names":["a.txt"],"__proto__":{"polluted":"yes"}}}}') as Record<string, unknown>;
+        const poisonedEntry = JSON.parse('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_zip","arguments":{"entries":[{"name":"a","text":"a","__proto__":{"polluted":"yes"}}]}}}') as Record<string, unknown>;
+        expect(JSON.stringify(poisonedRoot)).toContain('"__proto__"');
+        const session = await runStdioSession(
+            [
+                { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'proto-probe', version: '0' } } },
+                { jsonrpc: '2.0', method: 'notifications/initialized' },
+                poisonedRoot,
+                poisonedEntry,
+                { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'sanitize_entry_paths', arguments: { names: ['a.txt'] } } },
+            ],
+            [1, 2, 3, 4],
+        );
+        const stripped = session.frames.find((f) => f.id === 2)?.result as { isError?: boolean; structuredContent?: { results?: Array<{ sanitized?: string }> } } | undefined;
+        expect(stripped?.isError, 'frame 2 (root key, stripped by the envelope)').not.toBe(true);
+        expect(stripped?.structuredContent?.results?.[0]?.sanitized).toBe('a.txt');
+        const refused = session.frames.find((f) => f.id === 3)?.result as { isError?: boolean; content?: Array<{ text?: string }> } | undefined;
+        expect(refused?.isError, 'frame 3 (nested key)').toBe(true);
+        expect(refused?.content?.[0]?.text, 'frame 3').toContain('[VALIDATION_ERROR]');
+        const after = session.frames.find((f) => f.id === 4)?.result as { isError?: boolean; structuredContent?: { results?: Array<{ sanitized?: string }> } } | undefined;
+        expect(after?.isError).not.toBe(true);
+        expect(after?.structuredContent?.results?.[0]?.sanitized).toBe('a.txt');
+    });
+});

@@ -30,8 +30,32 @@ export const STRICT_INPUT_PROPERTY = {
     },
 } as const;
 
+/**
+ * Refuse any object whose prototype is not the plain one (A-017). A JSON frame
+ * can only produce such an object through a `__proto__` key: the transport's
+ * envelope parsing copies keys by assignment, which turns an own `__proto__`
+ * key into the prototype of the rebuilt object and drops it from the keys the
+ * strict schemas see — the call would otherwise succeed silently instead of
+ * being refused like the same key arriving in-process. Walks nested objects
+ * and arrays; strings and other primitives are not walked.
+ */
+function assertPlainPrototypes(value: unknown, path: string, seen: Set<object>): void {
+    if (value === null || typeof value !== 'object' || seen.has(value)) return;
+    seen.add(value);
+    if (Array.isArray(value)) {
+        value.forEach((item, i) => assertPlainPrototypes(item, `${path}[${i}]`, seen));
+        return;
+    }
+    const proto = Object.getPrototypeOf(value) as object | null;
+    if (proto !== Object.prototype && proto !== null) {
+        throw new ToolError('VALIDATION_ERROR', `Invalid arguments: ${path} carries a prototype other than Object.prototype (a "__proto__" key in the request); remove the key.`);
+    }
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) assertPlainPrototypes(item, `${path}.${key}`, seen);
+}
+
 /** Parse with a schema and convert a failure into `VALIDATION_ERROR`. */
 export function parseInput<T>(schema: z.ZodType<T>, rawInput: unknown): T {
+    assertPlainPrototypes(rawInput, 'arguments', new Set());
     const parsed = schema.safeParse(rawInput ?? {});
     if (!parsed.success) {
         throw new ToolError('VALIDATION_ERROR', `Invalid arguments: ${parsed.error.message}`);

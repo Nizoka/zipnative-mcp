@@ -181,8 +181,13 @@ describe('hostile values on every top-level input', () => {
                     await attempt(tool.name, args, `${tool.name}.${prop}=${JSON.stringify(value)?.slice(0, 40)}`);
                 }
             }
-            // Unknown keys and a non-object argument are VALIDATION_ERROR, never a throw.
-            expect((await attempt(tool.name, { ...BASELINE[tool.name], __proto__: { polluted: true }, extra: 1 }, `${tool.name} extra key`)).code).toBe('VALIDATION_ERROR');
+            // Unknown keys and a non-object argument are VALIDATION_ERROR, never a throw. The own `__proto__`
+            // key is built by JSON.parse, as a JSON-RPC frame delivers it (an object literal would set the prototype).
+            const base = JSON.stringify(BASELINE[tool.name]);
+            const poisoned = JSON.parse(`${base === '{}' ? '{' : `${base.slice(0, -1)},`}"__proto__":{"polluted":true}}`) as Record<string, unknown>;
+            expect((await attempt(tool.name, poisoned, `${tool.name} own __proto__ key`)).code).toBe('VALIDATION_ERROR');
+            expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
+            expect((await attempt(tool.name, { ...BASELINE[tool.name], extra: 1 }, `${tool.name} extra key`)).code).toBe('VALIDATION_ERROR');
             for (const shape of [null, [], 'x', 42]) {
                 const outcome = await attempt(tool.name, shape, `${tool.name} arguments=${JSON.stringify(shape)}`);
                 if (!outcome.ok) expect(outcome.code).toBe('VALIDATION_ERROR');

@@ -9,10 +9,11 @@
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 
-import { callToolDirect, ensureEngineReady, toolNames } from '../src/server.js';
+import { callToolDirect, createServer, ensureEngineReady, toolNames } from '../src/server.js';
 import { selectFields } from '../src/projection.js';
 import { WRAPPER_CODE_NAMES } from '../src/wrapper-codes.js';
 import { ZIP_ERROR_CODES } from '../src/zip-errors.js';
+import { connectLegacy } from './_mcp-harness.js';
 import { b64, basicZip } from './_zip-fixtures.js';
 
 const DOCUMENTED = new Set<string>([...WRAPPER_CODE_NAMES, ...ZIP_ERROR_CODES]);
@@ -92,5 +93,40 @@ describe('prototype pollution', () => {
     it('entry names and comments that spell prototype keys are ordinary strings', async () => {
         const code = await call('create_zip', { entries: [{ name: '__proto__', text: 'x' }, { name: 'constructor/prototype', text: 'y' }], comment: '__proto__' }, 'names');
         expect(code).toBeNull();
+    });
+});
+
+describe('A-017: prototype pollution through the MCP transport', () => {
+    it('A-017: over the transport a root __proto__ key is stripped by the SDK envelope (zod record) and the call runs clean; a nested one is VALIDATION_ERROR', async () => {
+        const client = await connectLegacy(createServer());
+        try {
+            const root = JSON.parse('{"name":"sanitize_entry_paths","arguments":{"names":["a.txt"],"__proto__":{"polluted":"yes"}}}') as Record<string, unknown>;
+            const stripped = await client.request<{ isError?: boolean; structuredContent: { results: Array<{ sanitized: string }> } }>('tools/call', root);
+            expect(stripped.isError).not.toBe(true);
+            expect(stripped.structuredContent.results[0]?.sanitized).toBe('a.txt');
+            const nested = JSON.parse('{"name":"create_zip","arguments":{"entries":[{"name":"a","text":"a","__proto__":{"polluted":"yes"}}]}}') as Record<string, unknown>;
+            const refused = await client.request<{ isError?: boolean; content: Array<{ text?: string }> }>('tools/call', nested);
+            expect(refused.isError).toBe(true);
+            expect(refused.content[0]?.text).toContain('[VALIDATION_ERROR]');
+            assertUnpolluted('after the poisoned frames');
+            const ok = await client.request<{ isError?: boolean; structuredContent: { results: Array<{ sanitized: string }> } }>('tools/call', { name: 'sanitize_entry_paths', arguments: { names: ['a.txt'] } });
+            expect(ok.isError).not.toBe(true);
+            expect(ok.structuredContent.results[0]?.sanitized).toBe('a.txt');
+        } finally {
+            await client.close();
+        }
+    });
+});
+
+describe('A-017: an object whose prototype was replaced (what a __proto__ key becomes after the transport rebuilt the object)', () => {
+    it('A-017: is VALIDATION_ERROR at the root and nested, naming the key, and leaves Object.prototype alone', async () => {
+        const replaced = (own: Record<string, unknown>): Record<string, unknown> => Object.assign(Object.create({ polluted: 'yes' }) as Record<string, unknown>, own);
+        const root = await callToolDirect('sanitize_entry_paths', replaced({ names: ['a.txt'] }));
+        expect((root._meta as { error?: { code?: string; message?: string } }).error?.code).toBe('VALIDATION_ERROR');
+        expect((root._meta as { error?: { message?: string } }).error?.message).toContain('__proto__');
+        const nested = await callToolDirect('create_zip', { entries: [replaced({ name: 'a', text: 'a' })] });
+        expect((nested._meta as { error?: { code?: string; message?: string } }).error?.code).toBe('VALIDATION_ERROR');
+        expect((nested._meta as { error?: { message?: string } }).error?.message).toContain('arguments.entries[0]');
+        assertUnpolluted('replaced prototypes');
     });
 });
