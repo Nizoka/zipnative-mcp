@@ -41,5 +41,7 @@ jobs:
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high
+          # BlueOak-1.0.0 (minimatch, under eslint / typescript-eslint) and Python-2.0 (argparse, under
+          # js-yaml) are permissive licences of dev dependencies only; no runtime dependency uses them.
           allow-licenses: MIT, ISC, BSD-2-Clause, BSD-3-Clause, Apache-2.0, 0BSD, CC0-1.0, BlueOak-1.0.0, Python-2.0, Unlicense
           comment-summary-in-pr: on-failure

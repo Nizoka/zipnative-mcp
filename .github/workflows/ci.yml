@@ -20,7 +20,8 @@ name: CI
 # Docs are contracts here (tests/docs-consistency.test.ts and verify:docs
 # check the counts and names README.md, AGENTS.md, llms.txt and the guides
 # quote), so `**.md` is deliberately NOT in paths-ignore: a docs-only change
-# still runs the gate.
+# still runs the gate. The pull_request trigger has no path filter at all: its jobs are
+# required status checks, and a filtered pull request would wait forever for them.
 
 on:
   push:
@@ -33,12 +34,6 @@ on:
       - '.gitignore'
   pull_request:
     branches: [main, master]
-    paths-ignore:
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/FUNDING.yml'
-      - 'LICENSE'
-      - '.editorconfig'
-      - '.gitignore'
 
 permissions:
   contents: read
@@ -109,8 +104,9 @@ jobs:
   # status checks (.github/rulesets/main.json).
   #
   # harden-runner supports Windows runners in audit mode only, so this job
-  # can never move to `egress-policy: block`; the action does not support
-  # macOS at all, so the step is skipped there (`if: runner.os != 'macOS'`) —
+  # can never move to `egress-policy: block`; on macOS it runs in audit mode
+  # only as well, and this leg keeps the pkinative-mcp shape of skipping it
+  # (`if: runner.os != 'macOS'`, a ROADMAP item to revisit) —
   # the one documented exemption to "every job starts with harden-runner".
   os:
     runs-on: ${{ matrix.os }}

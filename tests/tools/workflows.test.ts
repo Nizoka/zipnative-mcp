@@ -167,7 +167,6 @@ describe('every workflow job', () => {
         for (const f of workflowFiles) {
             const text = readWorkflow(f);
             if (!/scripts\/gate\.ts --(?:ci|publish) --require-all/.test(text) && f !== 'verazip.yml') continue;
-            if (f === 'publish.yml') continue; // asserted below: the gate there runs with the env of the job
             expect(text, `${f}: VERAZIP_REQUIRED`).toMatch(/VERAZIP_REQUIRED:\s*'1'/);
         }
     });
@@ -211,6 +210,12 @@ describe('ci.yml', () => {
     it('does not path-ignore the docs: they are contracts', () => {
         expect(ci).not.toMatch(/- '\*\*\.md'/);
         expect(ci).not.toMatch(/- 'docs\/\*\*'/);
+    });
+
+    it('A-009: the pull_request trigger has no path filter (its jobs are required checks)', () => {
+        const pr = /^ {2}pull_request:\s*\n((?: {4}[^\n]*\n)*)/m.exec(ci)?.[1] ?? '';
+        expect(pr).toMatch(/branches:/);
+        expect(pr).not.toMatch(/paths(-ignore)?:/);
     });
 
     it('lists no gate step by hand', () => {
@@ -333,8 +338,17 @@ describe('publish.yml', () => {
         expect(granted).toEqual(['attestations: write', 'contents: write', 'id-token: write']);
     });
 
+    it('A-004: the publish gate fails closed on veraZIP (VERAZIP_REQUIRED on the gate step)', () => {
+        const gate = (jobs.get('verify') ?? []).find((s) => s.includes('scripts/gate.ts --publish --require-all')) ?? '';
+        expect(gate).toMatch(/VERAZIP_REQUIRED:\s*'1'/);
+    });
+
+    it('A-010: the pinned npm client is installed without lifecycle scripts', () => {
+        for (const m of publish.matchAll(/npm install -g[^\n]*/g)) expect(m[0]).toContain('--ignore-scripts');
+    });
+
     it('pins the npm client to one exact 11.x release, at least 11.5.1, in the jobs that pack and publish', () => {
-        const pins = [...publish.matchAll(/npm install -g npm@(\S+)/g)].map((m) => m[1] ?? '');
+        const pins = [...publish.matchAll(/npm install -g (?:--ignore-scripts )?npm@(\S+)/g)].map((m) => m[1] ?? '');
         expect(pins.length).toBe(2);
         expect(new Set(pins).size).toBe(1);
         const pin = pins[0] ?? '';

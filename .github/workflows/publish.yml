@@ -29,7 +29,8 @@ on:
 #            id-token: nothing that runs here can mint a publishing token.
 #   publish  behind the `npm-publish` environment; the only job whose token
 #            can publish to npm. It checks out .nvmrc and nothing else,
-#            installs no dependency, runs no repository script: it re-checks
+#            installs only the pinned npm client (--ignore-scripts) and no
+#            dependency, runs no repository script: it re-checks
 #            the handed-on tarball against the verify job's digests and
 #            uploads exactly it.
 #   attest   attests the same tarball and SBOM, after checking that the
@@ -130,7 +131,7 @@ jobs:
       - name: Install the pinned npm client
         run: |
           set -euo pipefail
-          npm install -g npm@11.19.1
+          npm install -g --ignore-scripts npm@11.19.1
           test "$(npm --version)" = "11.19.1"
 
       - name: Install dependencies
@@ -159,6 +160,9 @@ jobs:
       # ISO/IEC 21320-1 validation, the examples. --require-all: a step that
       # would skip fails the release instead.
       - name: Run the quality gate (publish profile)
+        env:
+          # Fail closed: no usable level-1 extractor is an INFRA failure (exit 3), never a skip.
+          VERAZIP_REQUIRED: '1'
         run: npx tsx scripts/gate.ts --publish --require-all
 
       - name: Show the package contents
@@ -255,7 +259,7 @@ jobs:
       - name: Install the pinned npm client
         run: |
           set -euo pipefail
-          npm install -g npm@11.19.1
+          npm install -g --ignore-scripts npm@11.19.1
           test "$(npm --version)" = "11.19.1"
 
       - name: Receive the tarball and the SBOM

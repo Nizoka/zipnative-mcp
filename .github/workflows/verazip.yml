@@ -71,6 +71,9 @@ on:
     branches: [main, master]
   pull_request:
     branches: [main, master]
+  # Weekly, so a runner-image change of the level-1 extractors is seen between pull requests.
+  schedule:
+    - cron: '41 4 * * 1'
   # Manual runs against any branch from the Actions UI.
   workflow_dispatch:
 
