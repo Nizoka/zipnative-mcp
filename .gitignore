@@ -4,10 +4,16 @@ coverage/
 .DS_Store
 *.log
 .env
-.env.local
-.vscode/
+.env.*
+!.env.example
+Thumbs.db
+.vscode/*
+!.vscode/settings.json
 .idea/
-.claude/
+# Claude Code: machine-local overrides and release-audit ledgers stay local.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.audit/
 out/
 test-output/
 *.tsbuildinfo
@@ -21,3 +27,6 @@ test-output/
 !.github/drafts/pr-*.md
 !.github/drafts/issue-*.md
 !.github/drafts/TEMPLATE.md
+
+# npm
+*.tgz

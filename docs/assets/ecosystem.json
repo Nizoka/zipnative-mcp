@@ -1,0 +1,135 @@
+{
+  "$comment": "Single source of every count and version quoted in the docs, the agent files and the release notes. `npx tsx scripts/verify-docs.ts` holds every document to it. `declared` holds figures no filesystem walk can derive (measured at release — the test count, the measured coverage — or an inventory of the engine checked against docs/data/ and the engine's api.json when reachable); `derived` holds figures verify-docs recomputes from the source tree (the TOOLS registry of src/server.ts, the PROMPTS table, src/wrapper-codes.ts, src/zip-errors.ts, src/limits.ts, every ZIPNATIVE_MCP_* variable under src/, examples/, tests/, the sample baseline, the veraZIP corpus of scripts/helpers/zip-corpus.mjs and scripts/verazip-core.mjs) and fails when they drift. `assertions` are the prose tokens each listed file must carry verbatim; `{count}` in a match is a number or a number word. `declared.coverage*` are the floors vitest.config.ts enforces; `declared.coverageMeasured*` the figures measured on the release tree. `declared.tests` is the whole vitest suite, skipped tests included, as the gate's test-output/.gate/vitest.json counts it.",
+  "verifiedOn": "2026-10-18",
+  "packages": {
+    "zipnative-mcp": {
+      "version": "1.1.0",
+      "pinField": null,
+      "pin": null,
+      "repo": "https://github.com/Nizoka/zipnative-mcp",
+      "binary": "zipnative-mcp",
+      "registryName": "io.github.Nizoka/zipnative-mcp"
+    },
+    "zipnative": {
+      "version": "1.1.0",
+      "pinField": "dependencies",
+      "pin": "^1.1.0",
+      "repo": "https://github.com/Nizoka/zipnative"
+    }
+  },
+  "declared": {
+    "tests": 1399,
+    "coverageStatements": 94,
+    "coverageBranches": 90,
+    "coverageFunctions": 95,
+    "coverageLines": 94,
+    "coverageMeasured": 98.12,
+    "coverageMeasuredBranches": 94.8,
+    "coverageMeasuredFunctions": 98.71,
+    "coverageMeasuredLines": 98.72,
+    "engineExports": 106,
+    "dependencies": 3,
+    "nodeMajor": 22,
+    "mcpRevision": "2026-07-28",
+    "legacyRevisions": ["2024-10-07", "2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"],
+    "sdk": {
+      "name": "@modelcontextprotocol/server",
+      "pin": "^2.3.1",
+      "installed": "2.3.1"
+    },
+    "zod": {
+      "pin": "^4.6.5"
+    },
+    "toolApiVersion": "1.1.0"
+  },
+  "derived": {
+    "tools": 15,
+    "toolGroups": {
+      "Read and inspect": ["inspect_zip", "list_zip_entries", "read_zip_entry", "verify_zip"],
+      "Extract and forensics": ["extract_zip", "scan_zip_forward", "sanitize_entry_paths"],
+      "Write and modify": ["create_zip", "modify_zip", "canonicalize_zip", "merge_zip"],
+      "Primitives": ["compute_crc32", "inflate_raw"],
+      "Meta": ["describe_engine", "draft_governance_issue"]
+    },
+    "prompts": 7,
+    "errorCodes": 21,
+    "wrapperCodes": 17,
+    "zipErrorCodes": 39,
+    "zipDiagnosticCodes": 12,
+    "limits": 9,
+    "envVars": 8,
+    "examples": 38,
+    "testFiles": 74,
+    "samples": 41,
+    "corpusEntries": 43,
+    "corpusConformant": 39,
+    "corpusNonConformant": 4,
+    "corpusHostileConformant": 4,
+    "checkIds": 23
+  },
+  "assertions": [
+    {
+      "id": "tool-count",
+      "canonical": "{derived.tools} tools",
+      "match": "(?<![#.\\d-])(?<!\\b(?:on|across|among|within|for)\\s)(?<!\\b(?:on|across|among|within|for)\\sthe\\s)(?<!\\()\\b(\\d+)\\s+tools\\b",
+      "expectFrom": "derived.tools",
+      "requireIn": ["README.md", "AGENTS.md", "CLAUDE.md", "llms.txt", "CITATION.cff", "docs/AGENT_CONTRACT.md", "docs/KNOWLEDGE_BASE.md"]
+    },
+    {
+      "id": "tool-heading-count",
+      "canonical": "## Tools ({derived.tools})",
+      "match": "\\bTools \\((\\d+)\\)",
+      "expectFrom": "derived.tools",
+      "requireIn": ["llms.txt"]
+    },
+    {
+      "id": "prompt-count",
+      "canonical": "{derived.prompts} prompts",
+      "match": "(?<![#.\\d-])\\b{count}\\s+(?:MCP\\s+)?prompts\\b",
+      "expectFrom": "derived.prompts",
+      "requireIn": ["README.md", "AGENTS.md"]
+    },
+    {
+      "id": "wrapper-code-count",
+      "canonical": "{derived.wrapperCodes} wrapper codes",
+      "match": "(?<![#.\\d-])\\b{count}\\s+wrapper(?:\\s+error)?\\s+codes\\b",
+      "expectFrom": "derived.wrapperCodes",
+      "requireIn": []
+    },
+    {
+      "id": "zip-error-count",
+      "canonical": "{derived.zipErrorCodes} frozen `ZIP_*` codes",
+      "match": "(?<![#.\\d-])\\b(\\d+)(?:\\s+frozen\\s+(?:`?ZIP_\\*`?\\s+)?(?:engine\\s+|error\\s+)?codes\\b|\\s+`?ZIP_\\*`?\\s+(?:engine\\s+|error\\s+)?codes\\b|\\s+error\\s+codes\\b)",
+      "expectFrom": "derived.zipErrorCodes",
+      "requireIn": []
+    },
+    {
+      "id": "diagnostic-count",
+      "canonical": "{derived.zipDiagnosticCodes} diagnostic codes",
+      "match": "(?<![#.\\d-])\\b{count}\\s+(?:core\\s+|engine\\s+|`?ZIP_\\*`?\\s+)?diagnostic(?:s|\\s+codes)\\b(?!\\s+per\\b)",
+      "expectFrom": "derived.zipDiagnosticCodes",
+      "requireIn": []
+    },
+    {
+      "id": "limit-count",
+      "canonical": "{derived.limits} `ZipLimits` keys",
+      "match": "(?<![#.\\d-])\\b{count}\\s+(?:named\\s+)?`?ZipLimits`?(?:\\s+(?:keys|bounds|limits))?\\b",
+      "expectFrom": "derived.limits",
+      "requireIn": []
+    },
+    {
+      "id": "env-var-count",
+      "canonical": "{derived.envVars} environment variables",
+      "match": "(?<![#.\\d-])\\b{count}\\s+(?:operator\\s+)?(?:environment|operator)\\s+variables\\b",
+      "expectFrom": "derived.envVars",
+      "requireIn": []
+    },
+    {
+      "id": "engine-export-count",
+      "canonical": "{declared.engineExports} exports",
+      "match": "(?<![#.\\d-])\\b(\\d+)(?:-export\\b|\\s+(?:frozen\\s+)?exports\\b)",
+      "expectFrom": "declared.engineExports",
+      "requireIn": []
+    }
+  ]
+}
