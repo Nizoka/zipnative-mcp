@@ -3,7 +3,7 @@
  * add / replace / remove / rename entries and set the comment, then either
  * `save()` (append-only: original bytes verbatim, no recompression, the
  * SAME buffer back when nothing changed) or `saveCompact()` (a rewrite
- * without the dead bytes, entries in their current order, still no
+ * without the dead bytes, entries sorted by raw name bytes, still no
  * recompression, removed data truly gone). With `canonical` (zipnative 1.1.0,
  * compact only) the rewrite also normalises every entry into the canonical
  * deterministic form — `saveCompact({ canonical })`, the same rules as
@@ -94,7 +94,7 @@ export const MODIFY_ZIP_INPUT_SCHEMA = {
             type: 'string',
             enum: ['append', 'compact'],
             default: 'append',
-            description: "'append' (default): save() — original bytes verbatim + appended entries + new central directory; removed/replaced payloads REMAIN in the file (data remanence). 'compact': saveCompact() — a rewrite without recompression, entries in their current order, removed data truly gone, SFX prefix dropped (add `canonical` for the canonical deterministic form).",
+            description: "'append' (default): save() — original bytes verbatim + appended entries + new central directory; removed/replaced payloads REMAIN in the file (data remanence). 'compact': saveCompact() — a rewrite without recompression, entries sorted by raw name bytes, removed data truly gone, SFX prefix dropped (add `canonical` for the canonical deterministic form).",
         },
         canonical: {
             type: 'object',

@@ -37,16 +37,18 @@ server never re-implements a byte of ZIP parsing that could reintroduce them.
 | Threat | Defence | CWE | Where an agent sees it |
 |---|---|---|---|
 | Zip-slip path traversal (`../`, absolute paths, drive letters, backslashes, UNC, NUL, NTFS alternate data streams) and Windows reserved device names (`CON`, `NUL`, `COM1`…) | `rejectTraversal: true` by default in `extract_zip`; the engine's `sanitizeEntryPath()` is the only path ever joined onto `outputDir`, and is exported as `sanitize_entry_paths` for external sinks | CWE-22 / CWE-67 | `ZIP_PATH_TRAVERSAL`; `rejectTraversal: false` **skips** such entries (listed in `skipped`), never emits them; `sanitizedPath` on every entry row |
-| Decompression bombs (high ratio, nesting, entry floods) | per-entry and total output caps, compression-ratio bound, entry-count cap, name / extra / comment / central-directory byte bounds — the eight `ZipLimits`, enforced **during** inflation, not after | CWE-400 / CWE-409 | `ZIP_LIMIT_EXCEEDED` with `data.limit` / `configured` / `observed`; raised per call through `limits`, bounded by the operator ceilings |
+| Decompression bombs (high ratio, nesting, entry floods) | per-entry and total output caps, compression-ratio bound, entry-count cap, name / extra / comment / central-directory byte bounds — the nine `ZipLimits`, enforced **during** inflation, not after | CWE-400 / CWE-409 | `ZIP_LIMIT_EXCEEDED` with `data.limit` / `configured` / `observed`; raised per call through `limits`, bounded by the operator ceilings |
+| A huge compressed payload fetched into memory by the byte-range reader | `maxEntryCompressedSize` (default 1 GiB + 1 MiB) bounds what `openZipRange` reads for one entry; the in-memory reader never consults it | CWE-770 | `ZIP_LIMIT_EXCEEDED` (`data.limit: 'maxEntryCompressedSize'`) on `read_zip_entry` with `access: 'range'` |
 | Symlink entries redirecting extraction | `rejectSymlinks: true` by default; a symlink accepted through `rejectSymlinks: false` is written as a **regular file holding the target text**, never materialised as a link | CWE-59 | `ZIP_SYMLINK_REJECTED`; `isSymlink` on entry rows; `inspect_zip check: 'no-symlinks'` |
-| Overlapping entries (one payload claimed by many entries, smuggling), entries reaching into the central directory or past EOF | always-on region-boundary checks over central-directory ranges — up front under `validate: 'eager'` (`inspect_zip` by default, the `extract_zip` pre-flight in both modes, `verify_zip`), at first read otherwise; **no opt-out** | CWE-405 | `ZIP_ENTRY_OVERLAP`, `ZIP_RECORD_TRUNCATED` |
+| Overlapping entries (one payload claimed by many entries, smuggling), entries reaching into the central directory or past EOF | always-on region-boundary checks over central-directory ranges — up front under `validate: 'eager'` (`inspect_zip` by default, the `extract_zip` pre-flight in both modes, `verify_zip`, and since 1.1.0 `modify_zip`, whose append path would otherwise re-emit the entries it never re-reads), at first read otherwise; **no opt-out** | CWE-405 | `ZIP_ENTRY_OVERLAP`, `ZIP_RECORD_TRUNCATED` |
 | Parser-differential smuggling (central directory disagreeing with local headers) | the central directory is authoritative; method / size / CRC divergence is fatal **when the entry is read** (the eager extent pass does not compare them), name divergence is diagnosed | CWE-436 | `ZIP_CD_LFH_MISMATCH`, `ZIP_SIZE_MISMATCH` on `read_zip_entry` / `extract_zip`; `ZIP_NAME_MISMATCH` diagnostic; `verify_zip` `localHeaderMatch` is the one-call gate |
 | Ambiguous EOCD (trailing garbage, several candidate records) | only a self-consistent EOCD closest to EOF is accepted; ambiguity is refused, never guessed | — | `ZIP_EOCD_NOT_FOUND`, `ZIP_EOCD_INCONSISTENT`; `ZIP_MULTIPLE_EOCD` / `ZIP_PREPENDED_DATA` diagnostics |
 | Zip64 field spoofing (sentinel values masking lying 64-bit fields) | Zip64 records cross-checked against every non-sentinel classic field; divergence is fatal | CWE-1288 | `ZIP_ZIP64_CONTRADICTION`; `ZIP_ZIP64_EXTRA_IGNORED` diagnostic |
 | Duplicate entry names shadowing each other during extraction | `onDuplicate: 'error'` by default | CWE-694 | `ZIP_EXTRACT_DUPLICATE_PATH`; `'first'` / `'last'` resolve deliberately; `inspect_zip check: 'no-duplicates'` |
 | Integer overflow (> 2^53 sizes / offsets) | 64-bit fields read via BigInt and rejected above `Number.MAX_SAFE_INTEGER` | CWE-190 | `ZIP_VALUE_UNREPRESENTABLE` |
 | Corrupt payloads masquerading as content | CRC-32 verified on every read by default (`verifyCrc`), declared vs measured sizes compared | — | `ZIP_CRC_MISMATCH` with `expectedCrc` / `actualCrc`, `ZIP_INFLATE_OUTPUT_OVERFLOW`, `ZIP_DECOMPRESSION_FAILED` |
-| Encrypted entries creating false confidence | no decryption in 1.x by policy (ZipCrypto is broken); encrypted entries are **detected**, never decrypted | — | `ZIP_UNSUPPORTED_ENCRYPTION`; `isEncrypted` on rows; `verify_zip` skips them; `inspect_zip check: 'no-encryption'` |
+| Encrypted entries creating false confidence | no decryption in 1.x by policy (ZipCrypto is broken); encrypted entries are **detected**, never decrypted; an encrypted entry whose local header contradicts the central directory is counted failed, not skipped | — | `ZIP_UNSUPPORTED_ENCRYPTION` (also from `merge_zip`); `isEncrypted` on rows; `verify_zip` skips them only while their local header agrees; `inspect_zip check: 'no-encryption'` |
+| Propagating a corrupt payload into a new archive | `merge_zip` verifies every entry's CRC and size before transplanting it (`verify: true` by default); `canonicalize_zip` re-checks its output with the engine's `analyzeDeterminism()` | — | `ZIP_CRC_MISMATCH` / `ZIP_SIZE_MISMATCH` with `data.sourceIndex`; `summary.verified`, `summary.canonicalForm` |
 
 Every relaxation is an explicit, named input (`rejectTraversal`, `rejectSymlinks`,
 `onDuplicate`, `limits`) — never a silent default — and every refusal carries the
@@ -58,18 +60,25 @@ remedy. The machine-readable registry is [`../data/errors.json`](../data/errors.
 | Threat | Defence | CWE |
 |---|---|---|
 | The LLM naming a file outside the sandbox (`zipPath`, `sourcePath`, `outputPath`, `outputDir`) | `src/sandbox.ts` is the single boundary: relative paths only; NUL, absolute, Windows-absolute and UNC rejected (also on POSIX); `path.relative` containment; container-extension allow-list on archive paths; `INPUT_NOT_FOUND` messages carry the relative path only | CWE-22 / CWE-73 |
-| A symlink or junction pre-planted inside the sandbox redirecting a write **or a read** outside it | writes: after every `mkdir -p`, the **real** path of the parent must still lie inside the real sandbox; reads (`zipPath`, `sourcePath`, `resources/read`): the **real** path of the file itself must lie inside it — the check is on the file, not only its parent, so a file symlink cannot slip past (`assertRealpathInside`) — `SECURITY_VIOLATION` otherwise, `INPUT_NOT_FOUND` for a dangling link, and no absolute path ever leaves in the message | CWE-59 |
-| Arbitrary file overwrite | every write opens with `wx` (`OUTPUT_EXISTS` when the target exists); a partial file is removed on failure; the input archive is never touched | CWE-73 |
-| Resource exhaustion through the JSON-RPC exchange | the `src/caps.ts` envelope: 256 MiB stdio frame / HTTP body (413), 128 MiB decoded base64 input per call, 1 GiB buffered path input, 16 MiB per inline entry, 32 MiB per inline extraction, 50 MiB per inline output, 4 GiB streamed file output (enforced while writing), bounded JSON shapes (entries, operations, names, globs, extra fields, `fields` paths), 200 diagnostics per result; `inflate_raw` requires `maxOutput` | CWE-400 |
-| The LLM raising engine limits to disable the bomb guards | per-call `limits` are capped by the **operator ceilings** `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS` (`LIMIT_CEILING_EXCEEDED` names the variable); a ceiling below an engine default tightens it silently; an invalid ceiling refuses to start | CWE-400 / CWE-409 |
-| Prototype pollution / unexpected keys | `additionalProperties: false` on every JSON Schema object; Zod `.strictObject` at every nesting level (unknown keys → `VALIDATION_ERROR`, never stripped) | CWE-1321 |
+| A symlink or junction pre-planted inside the sandbox redirecting a write **or a read** outside it | writes: after every `mkdir -p`, the **real** path of the parent must still lie inside the real sandbox; reads (`zipPath`, `sourcePath`, `merge_zip` sources, `resources/read`): the **real** path of the file itself must lie inside it — the check is on the file, not only its parent, so a file symlink cannot slip past (`assertRealpathInside`) — `SECURITY_VIOLATION` otherwise, `INPUT_NOT_FOUND` for a dangling link, and no absolute path ever leaves in the message | CWE-59 |
+| A file swapped or modified between the check and the read | every read goes through **one open handle**: the file is opened, `fstat`-ed, its real path proven inside the sandbox and bound to the handle by device and inode, then only the handle is read (buffered reads, the scanner's chunks, the byte-range reader, `resources/read`) — a swap while opening is `SECURITY_VIOLATION`, a file that grows or shrinks under the read is `IO_ERROR` | CWE-367 |
+| Arbitrary file overwrite | every write opens with `wx` (`OUTPUT_EXISTS` when the target exists); a partial file is removed on failure or cancellation (the descriptor is closed before the unlink); the input archive is never touched | CWE-73 |
+| Resource exhaustion through the JSON-RPC exchange | the `src/caps.ts` envelope: 256 MiB stdio frame / HTTP body (413), 128 MiB decoded base64 input per call, 1 GiB buffered path input (byte ranges above it for the three random-access read tools), 1 GiB of `merge_zip` sources in all, 16 MiB per inline entry, 32 MiB per inline extraction, 50 MiB per inline output, the file-output ceiling (default 4 GiB, enforced while writing), bounded JSON shapes (entries, operations, merge sources, names, globs, extra fields, `fields` paths, governance text fields), 200 diagnostics per result, 200 determinism offenders per report; `inflate_raw` requires `maxOutput` | CWE-400 |
+| Catastrophic backtracking in caller-supplied patterns | `compileGlob` is a Thompson NFA over a token list, not a backtracking `RegExp` (a `*a*a*a` glob over a 2 000-character name took 3.5 s in 1.0.0); globs are bounded at 1 024 characters; an inverted class range is `VALIDATION_ERROR`; the governance dependency pattern does not backtrack either and the draft text fields are bounded at 16 384 characters | CWE-1333 |
+| The LLM raising engine limits to disable the bomb guards | per-call `limits` are capped by the **operator ceilings** `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES` (also bounds `maxEntryCompressedSize`), `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS` (`LIMIT_CEILING_EXCEEDED` names the variable), and every file output by `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES`; a ceiling below an engine default tightens it silently; an invalid ceiling refuses to start | CWE-400 / CWE-409 |
+| Prototype pollution / unexpected keys | `additionalProperties: false` on every JSON Schema object; Zod `.strictObject` at every nesting level (unknown keys → `VALIDATION_ERROR`, never stripped); a `fields` path naming `__proto__` / `constructor` / `prototype` is refused, and the projection walks own properties only | CWE-1321 |
 | Malformed base64 reaching the parser | `src/base64.ts` diagnoses `data:` URIs, PEM text, nested URIs, double encoding and empty payloads before the engine sees a byte | — |
-| Code injection through the engine's extension points | `registerCodec`, `setInflateImpl`, `setDeflateImpl` and `ParallelZipOptions.workerUrl` are **unexposed** — no tool argument can name a module or a worker script | CWE-94 |
+| Code injection through the engine's extension points | `registerCodec` (and with it `ZipCodec.createDecompressor`), `setInflateImpl`, `setDeflateImpl`, `ZipCommonOptions.nameDecoder` and `ParallelZipOptions.workerUrl` are **unexposed** — no tool argument can name a module, a function or a worker script | CWE-94 |
+| A forged archive through a raw writer | `ZipWriter.addRaw` (the caller vouches for CRC and sizes) is **unexposed**; `merge_zip` exposes the checked `addFromReader` only | CWE-345 |
+| A remote source for the byte-range reader | `openZipRange` is fed only by the sandbox file's own handle or by inline bytes; no tool argument names a URL | CWE-918 |
 | DNS rebinding against the HTTP transport | bound to `127.0.0.1`; foreign `Host` / `Origin` answered 403; the `Origin` port must equal the server port (the SDK's check is port-agnostic); `GET` / `DELETE` 405 | CWE-350 |
 | Unauthenticated local access to the HTTP transport | *only when the operator opts in:* `ZIPNATIVE_MCP_HTTP_TOKEN` (≥ 16 chars, no whitespace; a weaker value aborts startup) makes every `/mcp` request require `Authorization: Bearer <token>`, else 401 + `WWW-Authenticate` (RFC 6750 §3.1); constant-time comparison; never logged | CWE-306 |
-| Listener exhaustion on keep-alive HTTP connections | disconnect detection is attached per response, not per socket | CWE-400 |
-| Diagnostics corrupting the stdio wire | the engine's `console.warn` fallback is never reached: a diagnostic sink is installed on every engine call and the rows travel in the result | — |
-| Information leakage in errors | absolute sandbox paths, the HTTP token and errno details beyond the code never appear in `_meta.error`; the engine holds no key material | CWE-209 |
+| Slow or oversized HTTP requests; listener exhaustion on keep-alive connections | headers / request / keep-alive timeouts (30 s / 300 s / 5 s), at most 100 headers, the 256 MiB body bound applied to the SDK handler as well; disconnect detection attached per response, not per socket | CWE-400 |
+| Content sniffing or caching of responses | `X-Content-Type-Options: nosniff` and `Cache-Control: no-store` on every HTTP response | CWE-524 |
+| Runaway work after the client gave up | the request's cancellation signal reaches every engine call: the engine stops between chunks, the partial file is removed, the call is `CANCELLED` and never cached | CWE-400 |
+| Diagnostics corrupting the stdio wire | the engine's `console.warn` fallback is never reached: a diagnostic sink is installed on every engine call and the rows travel in the result; ESLint `no-console` holds `src/` to it | — |
+| Information leakage in errors | absolute sandbox paths, the HTTP token and errno details beyond the code never appear in `_meta.error`; an escaped non-`ToolError` is `ENGINE_ERROR` with absolute paths redacted from its message; the engine holds no key material | CWE-209 |
+| A misconfigured server starting anyway | an invalid ceiling, a `ZIPNATIVE_MCP_PORT` outside 1–65535, a relative `ZIPNATIVE_MCP_OUTPUT_DIR` or a weak token print one `fatal:` line and exit 1 | CWE-1188 |
 
 ## 5. Limits and ceilings — the fragment every engine tool accepts
 
@@ -77,6 +86,7 @@ remedy. The machine-readable registry is [`../data/errors.json`](../data/errors.
 "limits": {
   "maxEntries": 100000,                   // ≤ ZIPNATIVE_MCP_MAX_ENTRIES
   "maxEntryUncompressedSize": 1073741824, // ≤ ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES
+  "maxEntryCompressedSize": 1074790400,   // ≤ ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES; byte-range reader only
   "maxTotalUncompressedSize": 8589934592, // ≤ ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES
   "maxCompressionRatio": 1024,            // entries ≥ 1 KiB compressed
   "maxNameBytes": 4096,
@@ -91,13 +101,17 @@ The values above are the engine defaults (`DEFAULT_ZIP_LIMITS`, reported by
 "disable" is spelled as the ceiling. Raising a bound is always an explicit decision
 for **trusted input only**; the operator decides how far an agent may go by setting
 the ceilings in the server environment. `scan_zip_forward.maxEntries` (work bound on
-an unbounded stream) and `create_zip.parallel.workers` are ceiling-bound the same way.
+an unbounded stream) and `create_zip.parallel.workers` are ceiling-bound the same way;
+`ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES` (default 4 GiB, the 1.0.0 cap) bounds every file
+a tool writes, `OUTPUT_TOO_LARGE` naming the variable, the partial file removed.
 
 ## 6. The sandbox — reads and writes
 
 `ZIPNATIVE_MCP_OUTPUT_DIR` is the **only** directory the server touches, for reading
-(`zipPath`, `sourcePath`, `resources/read`) as much as for writing (`outputMode: 'file'`,
-`outputDir`, governance drafts). Unset, the server performs no file I/O except the
+(`zipPath`, `sourcePath`, `merge_zip` sources, `resources/read`) as much as for writing
+(`outputMode: 'file'`, `outputDir`, governance drafts). It must be an absolute path —
+a relative value refuses to start. Every read goes through one open handle bound to
+the file it checked (§4). Unset, the server performs no file I/O except the
 opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR` and works on base64 only — the
 recommended posture when the host does not need files.
 
@@ -150,14 +164,18 @@ top of conformance, and why the conformance gate records those archives as
 
 ## 10. What the server never does
 
-No network egress of any kind (no telemetry, no GitHub, no URL from any source), no
-`eval`, no dynamic import of caller-named modules,
+No network egress of any kind (no telemetry, no GitHub, no URL from any source, no
+remote byte-range source), no `eval`, no dynamic import of caller-named modules,
 no filesystem access outside the sandbox except the opt-in response cache under `ZIPNATIVE_MCP_CACHE_DIR`,
 no decryption, no overwrite, no silent fallback on a bad configuration (a
-weak token or an invalid ceiling exits 1 with one `fatal:` line). The supply chain is
-three runtime dependencies; CI runs CodeQL, OpenSSF Scorecard, `npm audit`, the
-conformance gate on Linux and Windows, and the package is published with provenance
-and an SBOM ([`SECURITY.md`](../../SECURITY.md) → *Release integrity*).
+weak token, an invalid ceiling, an invalid port or a relative sandbox path exits 1 with
+one `fatal:` line). The supply chain is three runtime dependencies, installed with
+`--ignore-scripts` in every workflow; CI runs CodeQL, OpenSSF Scorecard, `npm audit`,
+dependency review, the conformance gate on Linux and Windows, with harden-runner on
+every Linux and Windows job and every action pinned by SHA; the package is published by Trusted
+Publishing with provenance and an SBOM, and the registry bytes are compared with the
+verified tarball before the attestation ([`SECURITY.md`](../../SECURITY.md) → *Release
+integrity*).
 
 ## 11. Reporting
 

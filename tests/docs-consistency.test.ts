@@ -4,14 +4,17 @@
  * drift so a doc edit (or a code edit) cannot silently desynchronise them.
  *
  * Sources of truth:
- *   toolNames() (src/server.ts)          — the 13-tool surface, in registration order
+ *   toolNames() (src/server.ts)          — the 15-tool surface, in registration order
  *   __prompts (src/server.ts)            — the 7 prompts
  *   ZIP_ERROR_CODES / ZIP_DIAGNOSTIC_CODES — the 39 frozen codes + 12 diagnostics
- *   WRAPPER_CODES (below, = AGENTS.md §6) — the wrapper's own vocabulary
- *   ENV_VARS (below, = server.json)      — the 7 environment variables
+ *   WRAPPER_CODE_NAMES (src/wrapper-codes.ts, = AGENT_CONTRACT §6) — the wrapper's own 17 codes
+ *   ENV_VARS (below, = server.json)      — the 8 environment variables
  *
- * Every document is guarded with `it.skipIf(!existsSync(file))` so the suite
- * stays green while the docs are being written and activates as they land.
+ * The consumer contract lives in docs/AGENT_CONTRACT.md since 1.1.0 (AGENTS.md
+ * is the short always-loaded brief). scripts/verify-docs.ts holds the broader
+ * count / parity rules over docs/assets/ecosystem.json; this suite keeps the
+ * structural claims the documents make about themselves. Every document is
+ * guarded with `it.skipIf(!existsSync(file))`.
  */
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -22,12 +25,13 @@ import { describe, expect, it } from 'vitest';
 import { VERSION as ZIPNATIVE_VERSION } from 'zipnative';
 
 import { HTTP_TOKEN_ENV } from '../src/auth.js';
-import { MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, WORKERS_ENV } from '../src/caps.js';
+import { MAX_ENTRIES_ENV, MAX_FILE_OUTPUT_ENV, MAX_UNCOMPRESSED_ENV, WORKERS_ENV } from '../src/caps.js';
 import { GOVERNANCE_CONTRACT_SUMMARY } from '../src/governance.js';
 import { OUTPUT_DIR_ENV } from '../src/sandbox.js';
 import { __prompts, __serverInstructions, listToolsPayload, toolNames } from '../src/server.js';
 import { UNEXPOSED_EXPORTS } from '../src/tools/describe-engine.js';
 import { ZIPNATIVE_MCP_VERSION } from '../src/version.js';
+import { WRAPPER_CODE_NAMES } from '../src/wrapper-codes.js';
 import { ZIP_DIAGNOSTIC_CODES, ZIP_ERROR_CODES } from '../src/zip-errors.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,15 +43,14 @@ const TOOLS = toolNames();
 const TOOL_COUNT = TOOLS.length;
 const PROMPTS = __prompts.map((p) => p.name);
 
-const ENV_VARS = [OUTPUT_DIR_ENV, 'ZIPNATIVE_MCP_CACHE_DIR', 'ZIPNATIVE_MCP_PORT', HTTP_TOKEN_ENV, MAX_UNCOMPRESSED_ENV, MAX_ENTRIES_ENV, WORKERS_ENV] as const;
+const ENV_VARS = [OUTPUT_DIR_ENV, 'ZIPNATIVE_MCP_CACHE_DIR', 'ZIPNATIVE_MCP_PORT', HTTP_TOKEN_ENV, MAX_UNCOMPRESSED_ENV, MAX_ENTRIES_ENV, WORKERS_ENV, MAX_FILE_OUTPUT_ENV] as const;
 
-const WRAPPER_CODES = [
-    'VALIDATION_ERROR', 'INPUT_TOO_LARGE', 'INPUT_NOT_FOUND', 'ENTRY_TOO_LARGE', 'ENTRY_NOT_UTF8', 'OUTPUT_TOO_LARGE', 'OUTPUT_EXISTS',
-    'IO_ERROR', 'SECURITY_VIOLATION', 'MISSING_OUTPUT_PATH', 'INVALID_PATH', 'INVALID_EXTENSION', 'LIMIT_CEILING_EXCEEDED', 'UNKNOWN_RESOURCE',
-    'GOVERNANCE_VIOLATION', 'ENGINE_ERROR',
-] as const;
+const WRAPPER_CODES = WRAPPER_CODE_NAMES;
 
-const AGENTS_SECTIONS = [
+/** The consumer contract (the 1.0.0 AGENTS.md body, moved in 1.1.0). */
+const CONTRACT = 'docs/AGENT_CONTRACT.md';
+
+const CONTRACT_SECTIONS = [
     `## 1. Tool catalogue (${TOOL_COUNT} tools)`,
     '## 2. Decision tree',
     '## 3. Token-frugal responses',
@@ -84,13 +87,14 @@ function tableRows(text: string): string[][] {
 }
 
 describe('the code-side sources of truth', () => {
-    it('exposes 13 tools, 7 prompts, 39 ZIP_* codes, 12 diagnostics and 7 environment variables', () => {
-        expect(TOOL_COUNT).toBe(13);
+    it('exposes 15 tools, 7 prompts, 17 wrapper codes, 39 ZIP_* codes, 12 diagnostics and 8 environment variables', () => {
+        expect(TOOL_COUNT).toBe(15);
         expect(PROMPTS).toHaveLength(7);
+        expect(WRAPPER_CODES).toHaveLength(17);
         expect(ZIP_ERROR_CODES).toHaveLength(39);
         expect(ZIP_DIAGNOSTIC_CODES).toHaveLength(12);
-        expect(ENV_VARS).toHaveLength(7);
-        expect(new Set(ENV_VARS).size).toBe(7);
+        expect(ENV_VARS).toHaveLength(8);
+        expect(new Set(ENV_VARS).size).toBe(8);
         for (const v of ENV_VARS) expect(v).toMatch(/^ZIPNATIVE_MCP_[A-Z_]+$/);
     });
 
@@ -101,31 +105,40 @@ describe('the code-side sources of truth', () => {
     });
 });
 
-describe('AGENTS.md', () => {
-    const present = has('AGENTS.md');
+describe('docs/AGENT_CONTRACT.md', () => {
+    const present = has(CONTRACT);
 
     it.skipIf(!present)('has the seven numbered sections with the tool count in the catalogue heading', () => {
-        const agents = read('AGENTS.md');
-        for (const h of AGENTS_SECTIONS) expect(agents, h).toContain(h);
+        const contract = read(CONTRACT);
+        for (const h of CONTRACT_SECTIONS) expect(contract, h).toContain(h);
     });
 
     it.skipIf(!present)('§1 lists every tool in registration order (name in backticks in column 2)', () => {
-        const rows = tableRows(section(read('AGENTS.md'), AGENTS_SECTIONS[0]));
+        const rows = tableRows(section(read(CONTRACT), CONTRACT_SECTIONS[0]));
         expect(rows.length, 'catalogue table data rows').toBe(TOOL_COUNT);
         expect(rows.map((r) => r[1])).toEqual(TOOLS.map((t) => `\`${t}\``));
     });
 
     it.skipIf(!present)('§6 documents every wrapper code, every ZIP_* code and every diagnostic code in backticks', () => {
-        const errors = section(read('AGENTS.md'), '## 6. Error reference');
+        const errors = section(read(CONTRACT), '## 6. Error reference');
         const missing = [...WRAPPER_CODES, ...ZIP_ERROR_CODES, ...ZIP_DIAGNOSTIC_CODES].filter((c) => !errors.includes(`\`${c}\``));
-        expect(missing, `codes missing from AGENTS.md §6: ${missing.join(', ')}`).toEqual([]);
+        expect(missing, `codes missing from ${CONTRACT} §6: ${missing.join(', ')}`).toEqual([]);
     });
 
-    it.skipIf(!present)('names every environment variable and every prompt', () => {
+    it.skipIf(!present)('names every environment variable, every prompt and every tool', () => {
+        const contract = read(CONTRACT);
+        for (const v of ENV_VARS) expect(contract, v).toContain(v);
+        for (const p of PROMPTS) expect(contract, p).toContain(p);
+        for (const t of TOOLS) expect(contract, t).toContain(`\`${t}\``);
+    });
+});
+
+describe('AGENTS.md', () => {
+    it.skipIf(!has('AGENTS.md'))('is the short brief: within the 120-line budget, quotes the tool count and points at the contract', () => {
         const agents = read('AGENTS.md');
-        for (const v of ENV_VARS) expect(agents, v).toContain(v);
-        for (const p of PROMPTS) expect(agents, p).toContain(p);
-        for (const t of TOOLS) expect(agents, t).toContain(`\`${t}\``);
+        expect(agents.split('\n').length).toBeLessThanOrEqual(121);
+        expect(agents).toContain(`${TOOL_COUNT} tools`);
+        expect(agents).toContain('docs/AGENT_CONTRACT.md');
     });
 });
 
@@ -160,7 +173,7 @@ describe('tool count in the package, registry and citation metadata', () => {
         expect(pkg.description).toContain(`${TOOL_COUNT} tools`);
     });
 
-    it.skipIf(!has('server.json'))('server.json description quotes the tool count and its environment variables are exactly the seven', () => {
+    it.skipIf(!has('server.json'))('server.json description quotes the tool count and its environment variables are exactly the eight', () => {
         const server = JSON.parse(read('server.json')) as { description: string; packages: Array<{ environmentVariables?: Array<{ name: string; isSecret?: boolean }> }> };
         expect(server.description).toContain(`${TOOL_COUNT} tools`);
         const names = (server.packages[0]?.environmentVariables ?? []).map((v) => v.name);
@@ -179,7 +192,7 @@ describe('tool count in the package, registry and citation metadata', () => {
 });
 
 describe('every "<N> tools" figure in the counted documents equals the live count', () => {
-    const COUNTED = ['README.md', 'AGENTS.md', 'llms.txt', 'CLAUDE.md', 'CITATION.cff', 'SECURITY.md', 'docs/AI_GUIDE.md', 'CHANGELOG.md'] as const;
+    const COUNTED = ['README.md', 'AGENTS.md', CONTRACT, 'llms.txt', 'CLAUDE.md', 'CITATION.cff', 'SECURITY.md', 'docs/AI_GUIDE.md', 'docs/KNOWLEDGE_BASE.md'] as const;
     for (const rel of COUNTED) {
         it.skipIf(!has(rel))(`${rel}`, () => {
             const text = read(rel);
@@ -189,11 +202,11 @@ describe('every "<N> tools" figure in the counted documents equals the live coun
     }
 });
 
-describe('B-014: the 77-export ledger (api.json ≡ core-exports.json ≡ KB §8) and the zipnativeVersion pins', () => {
+describe('B-014: the 106-export ledger (api.json ≡ core-exports.json ≡ KB §8) and the zipnativeVersion pins', () => {
     interface ExportRow { name: string; subpath: string }
     const CORE = 'docs/data/core-exports.json';
     const KB = 'docs/KNOWLEDGE_BASE.md';
-    const KB_SECTION = '## 8. The 77-export coverage ledger';
+    const KB_SECTION = '## 8. The 106-export coverage ledger';
     /** The engine's own api.json: a sibling checkout first, the installed package second, otherwise skipped with a note. */
     const API_JSON_CANDIDATES = [path.resolve(ROOT, '..', 'zipnative', 'docs', 'assets', 'api.json'), path.join(ROOT, 'node_modules', 'zipnative', 'docs', 'assets', 'api.json')];
     const apiJson = API_JSON_CANDIDATES.find((p) => existsSync(p));
@@ -209,13 +222,13 @@ describe('B-014: the 77-export ledger (api.json ≡ core-exports.json ≡ KB §8
         expect(core.exports).toHaveLength(core.exportCount);
     });
 
-    it.skipIf(!has(CORE) || !has(KB))('every export name of core-exports.json appears in KNOWLEDGE_BASE.md §8, and the 72 + 5 split holds', () => {
+    it.skipIf(!has(CORE) || !has(KB))('every export name of core-exports.json appears in KNOWLEDGE_BASE.md §8, and the 101 + 5 split holds', () => {
         const core = JSON.parse(read(CORE)) as { exportCount: number; exports: ExportRow[] };
         const ledger = section(read(KB), KB_SECTION);
         const missing = core.exports.filter((e) => !ledger.includes(`\`${e.name}\``)).map((e) => `${e.subpath}:${e.name}`);
         expect(missing, `exports missing from KB §8: ${missing.join(', ')}`).toEqual([]);
-        expect(core.exportCount).toBe(77);
-        expect(core.exports.filter((e) => e.subpath === '.')).toHaveLength(72);
+        expect(core.exportCount).toBe(106);
+        expect(core.exports.filter((e) => e.subpath === '.')).toHaveLength(101);
         expect(core.exports.filter((e) => e.subpath === './worker')).toHaveLength(5);
         expect(read(KB)).toContain(`${core.exportCount}-export`);
     });
@@ -245,7 +258,7 @@ describe('B-014: the 77-export ledger (api.json ≡ core-exports.json ≡ KB §8
 });
 
 describe('A-006: no document routes an SFX / self-extracting prefix to scan_zip_forward', () => {
-    const DOCS = ['README.md', 'AGENTS.md', 'llms.txt', 'docs/AI_GUIDE.md', 'CLAUDE.md'] as const;
+    const DOCS = ['README.md', 'AGENTS.md', CONTRACT, 'llms.txt', 'docs/AI_GUIDE.md', 'CLAUDE.md'] as const;
     const mentionsScan = (line: string): boolean => line.includes('scan_zip_forward');
     const mentionsSfx = (line: string): boolean => /\bSFX\b|self-extract/i.test(line);
     const saysRefused = (line: string): boolean => /refus|cannot|not (?:skip|handle|seek)|ZIP_SIGNATURE_MISMATCH/i.test(line);
@@ -289,11 +302,14 @@ describe('A-019: release notes and CHANGELOG name the same tools under Added', (
         const notes = featTools(section(read(NOTES), '## Added'));
         const changelog = featTools(section(read('CHANGELOG.md'), `## [${ZIPNATIVE_MCP_VERSION}]`));
         expect(notes).toEqual(changelog);
-        expect(notes).toEqual([...TOOLS].sort());
+        // The tools this release adds: every live tool absent from the frozen 1.0.0 catalogue (all of them for 1.0.0).
+        const frozen = new Set((JSON.parse(read('tests/_fixtures/tool-shape.v1.0.0.json')) as Array<{ name: string }>).map((t) => t.name));
+        const added = (ZIPNATIVE_MCP_VERSION as string) === '1.0.0' ? [...TOOLS] : TOOLS.filter((t) => !frozen.has(t));
+        expect(notes).toEqual(added.sort());
     });
 });
 
-describe('every ZIPNATIVE_MCP_* token in the documents is one of the seven environment variables', () => {
+describe('every ZIPNATIVE_MCP_* token in the documents is one of the eight environment variables', () => {
     // Code identifiers and the test-only switch are the only other tokens allowed to carry the prefix.
     const ALLOWED = new Set<string>([...ENV_VARS, 'ZIPNATIVE_MCP_VERSION', 'ZIPNATIVE_MCP_SLOW_TESTS']);
     const DOCS = ['README.md', 'AGENTS.md', 'llms.txt', 'CLAUDE.md', 'SECURITY.md', 'CONTRIBUTING.md', 'SUPPORT.md', 'CHANGELOG.md', 'server.json', 'package.json', '.github/AGENT_RULES.md', '.github/copilot-instructions.md', '.github/ai-governance.json'] as const;
@@ -308,7 +324,7 @@ describe('every ZIPNATIVE_MCP_* token in the documents is one of the seven envir
     };
     const files = [...DOCS.filter((f) => has(f)), ...walkMd(path.join(ROOT, 'docs')), ...walkMd(path.join(ROOT, 'release-notes')), ...walkMd(path.join(ROOT, '.github', 'workflows')), ...walkMd(path.join(ROOT, 'examples'))];
 
-    it('names exactly the seven variables (plus code identifiers) across the documents', () => {
+    it('names exactly the eight variables (plus code identifiers) across the documents', () => {
         const unknown = new Set<string>();
         for (const rel of files) {
             for (const m of read(rel).matchAll(/ZIPNATIVE_MCP_[A-Z0-9_]+/g)) if (!ALLOWED.has(m[0])) unknown.add(`${rel}: ${m[0]}`);
@@ -317,7 +333,7 @@ describe('every ZIPNATIVE_MCP_* token in the documents is one of the seven envir
         expect(files.length).toBeGreaterThan(5);
     });
 
-    it('the seven variables all appear in the README and in server.json (documented and registered)', () => {
+    it('the eight variables all appear in the README and in server.json (documented and registered)', () => {
         for (const v of ENV_VARS) {
             expect(read('README.md'), v).toContain(v);
             if (has('server.json')) expect(read('server.json'), v).toContain(v);
@@ -355,7 +371,7 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
             ...walk(path.join(ROOT, 'docs'), /\.(?:md|json)$/),
             ...walk(path.join(ROOT, '.github', 'workflows'), /\.yml$/),
             ...walk(path.join(ROOT, 'src'), /\.ts$/),
-            ...walk(path.join(ROOT, 'scripts'), /\.(?:mjs|mts)$/),
+            ...walk(path.join(ROOT, 'scripts'), /\.(?:mjs|mts|ts)$/),
         ];
         const missing = files.filter((rel) => !fence.includes(path.basename(rel)));
         expect(missing, `files absent from the README tree: ${missing.join(', ')}`).toEqual([]);
@@ -376,7 +392,7 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
         const total = declared.conformant + declared.nonConformant;
         const words: Record<string, number> = { two: 2, three: 3, four: 4, five: 5, six: 6 };
         const num = (s: string): number => words[s.toLowerCase()] ?? Number(s);
-        const DOCS = ['README.md', 'CONTRIBUTING.md', 'llms.txt', 'docs/KNOWLEDGE_BASE.md', 'docs/guides/CONFORMANCE.md', 'docs/guides/LOCAL_TESTING.md', 'docs/guides/SECURITY.md', NOTES, 'CHANGELOG.md', '.github/workflows/verazip.yml', '.github/drafts/pr-v1.0.0.md'];
+        const DOCS = ['README.md', 'CONTRIBUTING.md', 'llms.txt', 'docs/KNOWLEDGE_BASE.md', 'docs/guides/CONFORMANCE.md', 'docs/guides/LOCAL_TESTING.md', 'docs/guides/SECURITY.md', NOTES, 'CHANGELOG.md', '.github/workflows/verazip.yml', `.github/drafts/pr-v${ZIPNATIVE_MCP_VERSION}.md`];
         let seen = 0;
         for (const rel of DOCS.filter(has)) {
             for (const [n, l] of lines(rel)) {
@@ -392,12 +408,12 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
         expect(seen).toBeGreaterThan(10);
     });
 
-    it.skipIf(!has('docs/data/core-exports.json') || !has('docs/KNOWLEDGE_BASE.md'))('D-004: the reach counts are 62 / 9 / 6 and every UNEXPOSED_EXPORTS entry is graded unexposed in the ledger', () => {
+    it.skipIf(!has('docs/data/core-exports.json') || !has('docs/KNOWLEDGE_BASE.md'))('D-004: the reach counts are 88 / 9 / 9 and every UNEXPOSED_EXPORTS entry is graded unexposed in the ledger', () => {
         const core = JSON.parse(read('docs/data/core-exports.json')) as { exports: Array<{ name: string; reach: string }> };
         const count = (reach: string): number => core.exports.filter((e) => e.reach === reach).length;
-        expect([count('capability'), count('type'), count('unexposed')]).toEqual([62, 9, 6]);
+        expect([count('capability'), count('type'), count('unexposed')]).toEqual([88, 9, 9]);
         expect(count('capability') + count('type') + count('unexposed')).toBe(core.exports.length);
-        const ledger = section(read('docs/KNOWLEDGE_BASE.md'), '## 8. The 77-export coverage ledger');
+        const ledger = section(read('docs/KNOWLEDGE_BASE.md'), '## 8. The 106-export coverage ledger');
         const unexposedNames = new Set(core.exports.filter((e) => e.reach === 'unexposed').map((e) => e.name));
         const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         for (const u of UNEXPOSED_EXPORTS) {
@@ -437,17 +453,17 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
         }
     });
 
-    it.skipIf(!has('README.md') || !has('AGENTS.md'))('D-016: the README and AGENTS read-only columns carry a tick exactly for the readOnlyHint tools', () => {
+    it.skipIf(!has('README.md') || !has(CONTRACT))('D-016: the README and AGENT_CONTRACT read-only columns carry a tick exactly for the readOnlyHint tools', () => {
         const readme = read('README.md');
         const readmeRows = tableRows(readme.slice(readme.indexOf('| Tool | What it does | Read-only |')));
-        const agentsRows = tableRows(section(read('AGENTS.md'), AGENTS_SECTIONS[0]));
+        const agentsRows = tableRows(section(read(CONTRACT), CONTRACT_SECTIONS[0]));
         for (const [tool, ro] of readOnly) {
             const r = readmeRows.find((row) => row[0] === `\`${tool}\``);
             const a = agentsRows.find((row) => row[1] === `\`${tool}\``);
             expect(r, `README row for ${tool}`).toBeDefined();
-            expect(a, `AGENTS row for ${tool}`).toBeDefined();
+            expect(a, `AGENT_CONTRACT row for ${tool}`).toBeDefined();
             expect((r![2] ?? '').startsWith('✓'), `README read-only tick for ${tool}`).toBe(ro);
-            expect((a![3] ?? '').startsWith('✓'), `AGENTS read-only tick for ${tool}`).toBe(ro);
+            expect((a![3] ?? '').startsWith('✓'), `AGENT_CONTRACT read-only tick for ${tool}`).toBe(ro);
         }
     });
 
@@ -464,7 +480,7 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
     });
 
     it('D-009: no document credits draft_governance_issue with a resource_link', () => {
-        for (const rel of [NOTES, 'README.md', 'AGENTS.md', 'docs/API_STABILITY.md', 'CHANGELOG.md'].filter(has)) {
+        for (const rel of [NOTES, 'README.md', 'AGENTS.md', CONTRACT, 'docs/API_STABILITY.md', 'CHANGELOG.md'].filter(has)) {
             for (const [n, l] of lines(rel)) {
                 if (l.includes('resource_link') && l.includes('draft_governance_issue')) expect(l, `${rel}:${n}`).toMatch(/no resource_link|not .*resource_link|two text|text blocks|resources\/list/i);
             }
@@ -472,7 +488,7 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
     });
 
     it('D-010: a cross-runtime SHA-256 promise always carries the deterministic pin qualifier', () => {
-        for (const rel of ['README.md', 'AGENTS.md', 'llms.txt', 'docs/AI_GUIDE.md', 'docs/guides/DETERMINISM.md'].filter(has)) {
+        for (const rel of ['README.md', 'AGENTS.md', CONTRACT, 'llms.txt', 'docs/AI_GUIDE.md', 'docs/guides/DETERMINISM.md'].filter(has)) {
             for (const [n, l] of lines(rel)) {
                 if (/same SHA-256 on every runtime|identical bytes on every runtime|identical SHA-256 on every runtime/i.test(l)) expect(l, `${rel}:${n}`).toMatch(/deterministic:\s*true|deterministic: true|pin/i);
             }
@@ -480,7 +496,7 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
     });
 
     it('D-011: includeDirectories is never described as defaulting to true without the "no filter" condition', () => {
-        for (const rel of ['docs/KNOWLEDGE_BASE.md', 'docs/AI_GUIDE.md', 'README.md', 'AGENTS.md'].filter(has)) {
+        for (const rel of ['docs/KNOWLEDGE_BASE.md', 'docs/AI_GUIDE.md', 'README.md', 'AGENTS.md', CONTRACT].filter(has)) {
             for (const [n, l] of lines(rel)) {
                 if (/includeDirectories[^\n]{0,60}\btrue\b/.test(l)) expect(l, `${rel}:${n}`).toMatch(/no filter|without a filter|filter is given|filter object/i);
             }
@@ -496,7 +512,10 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
     });
 
     it.skipIf(!has('.github/copilot-instructions.md'))('D-015: the tools said to share src/filter.ts all carry a filter input', () => {
-        const withFilter = new Set(listToolsPayload().tools.filter((t) => 'filter' in ((t.inputSchema as { properties?: Record<string, unknown> }).properties ?? {})).map((t) => t.name.split('_')[0]!));
+        // A top-level `filter`, or one per item of an array input (merge_zip `sources[].filter`).
+        const carriesFilter = (props: Record<string, { items?: { properties?: Record<string, unknown> } }>): boolean =>
+            'filter' in props || Object.values(props).some((p) => p.items?.properties !== undefined && 'filter' in p.items.properties);
+        const withFilter = new Set(listToolsPayload().tools.filter((t) => carriesFilter(((t.inputSchema as { properties?: Record<string, never> }).properties ?? {}))).map((t) => t.name.split('_')[0]!));
         const line = read('.github/copilot-instructions.md').split('\n').find((l) => l.includes('src/filter.ts'));
         expect(line).toBeDefined();
         const listed = line!.split('shared by ')[1];
@@ -505,6 +524,6 @@ describe('AUDIT-D: the claims the documents make about themselves hold', () => {
     });
 
     it('D-017: the instructions are documented as a top-level field of the opening exchange, never serverInfo.instructions', () => {
-        for (const rel of ['AGENTS.md', 'docs/AI_GUIDE.md', 'docs/KNOWLEDGE_BASE.md', 'README.md', 'llms.txt'].filter(has)) expect(read(rel), rel).not.toContain('serverInfo.instructions');
+        for (const rel of ['AGENTS.md', CONTRACT, 'docs/AI_GUIDE.md', 'docs/KNOWLEDGE_BASE.md', 'README.md', 'llms.txt'].filter(has)) expect(read(rel), rel).not.toContain('serverInfo.instructions');
     });
 });

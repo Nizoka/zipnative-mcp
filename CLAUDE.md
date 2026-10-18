@@ -1,99 +1,62 @@
-# CLAUDE.md
+@AGENTS.md
 
-Guidance for Claude Code (and other Claude-based agents) working in this repository.
-For the runtime tool catalogue and end-user recipes, read [`AGENTS.md`](AGENTS.md);
-for the conformance gate, [`docs/guides/CONFORMANCE.md`](docs/guides/CONFORMANCE.md). This
-file is about *contributing to* the codebase, not *using* the server.
+# Claude Code addendum
 
-## What this is
+Everything in AGENTS.md applies (15 tools, the gate, the conventions). This file adds what is specific to Claude Code sessions here.
+Current release: **1.1.0** (on zipnative 1.1.0).
 
-`zipnative-mcp` is a thin, faithful **Model Context Protocol** server wrapping the
-zero-dependency [`zipnative`](https://github.com/Nizoka/zipnative) ZIP engine.
-TypeScript (strict, ESM-only), Node ≥ 22, `@modelcontextprotocol/server` (MCP SDK v2,
-protocol 2026-07-28 with automatic 2025-era fallback). **13 tools**, 7 MCP prompts +
-resources. Three runtime dependencies (zipnative, the MCP SDK, zod). No network code
-path exists. Current release: **1.0.0** (on zipnative 1.0.0).
+## Token discipline
+
+- Run tests through `npx tsx scripts/gate.ts --fast` or `npx vitest run <file>`; never paste a full test run into context.
+- Never Read `dist/`, `coverage/`, `test-output/`, `package-lock.json`, `node_modules/`, `tests/_fixtures/tool-shape*.json` or
+  `tests/_fixtures/samples.sha256.json` (`.claude/settings.json` denies them) — ask the built server (`tools/list`, `describe_engine`) instead.
+- Read README.md, docs/KNOWLEDGE_BASE.md and docs/AGENT_CONTRACT.md by section (`grep -n "^## "` first); CHANGELOG.md: the top entry only.
+- `.github/instructions/*.md` are the per-area rules (generated into `.claude/rules/`): open the ONE matching the area you touch.
 
 ## Commands
 
-```bash
-npm run build          # tsc -p tsconfig.build.json  (emits dist/)
-npm run typecheck:all  # tsc --noEmit  (covers src + tests)
-npm run lint           # eslint src --max-warnings 0
-npm test               # vitest run
-npm run test:coverage  # vitest run --coverage  (enforces thresholds)
-npm run examples:check # runs examples/*.json live through the tools/call handler
-npm run verify:issue   # governance draft checker (scripts/verify-issue.mjs)
-npm run corpus:zip     # writes the veraZIP corpus through the real tools (test-output/zip/)
-npm run validate:zip   # BLOCKING: build + corpus + ISO/IEC 21320-1 validation of every archive the server writes
-node scripts/tool-shape.mjs --write   # ONLY after a deliberate tools/list schema change — refreshes tests/_fixtures/tool-shape.json (catalogue parity gate)
-```
-
-**Quality gate (run before every commit/PR):**
-
-```bash
-npm run typecheck:all && npm run lint && npm run test && npm run test:coverage && npm run build && npm run validate:zip
-```
-
-Coverage thresholds (global, in `vitest.config.ts`): statements 94 · branches 90 ·
-functions 95 · lines 94. New code must keep the aggregate above these; never lower them.
+`npm run build` (tsc → dist/) · `npm run typecheck:all` (src, tests, scripts) · `npm run lint` (`--max-warnings 0`) · `npm test` ·
+`npm run test:coverage` (94 / 90 / 95 / 94) · `npm run examples:check` · `npm run validate:zip` (build + corpus + ISO/IEC 21320-1, blocking) ·
+`npm run verify:docs` (28 rules over `docs/assets/ecosystem.json`) · `npm run verify:issue` · `npm run agents:rules` · `npm run gate[:fast]`.
 
 ## Architecture map
 
-- `src/cli.ts` — entry point (stdio via `serveStdio` by default with the frame cap raised to 256 MiB; Streamable HTTP via `createMcpHandler` when `ZIPNATIVE_MCP_PORT` is set; both with the SDK's legacy fallback). Reads the three operator ceilings once at boot — an invalid value refuses to start.
-- `src/http.ts` — Node `http` ↔ Web `Request`/`Response` bridge, the 256 MiB body cap (413) and the Host/Origin loopback guard for the HTTP transport. `src/auth.ts` — opt-in bearer token (`ZIPNATIVE_MCP_HTTP_TOKEN`, ≥ 16 chars, constant-time compare).
-- `src/server.ts` — the `TOOLS` registry (with `kind`, MCP `annotations`, ≤ 2 `_meta.examples`), request handlers on the low-level `Server` (not `McpServer.registerTool`; the read tools' output schemas are projectable — every property optional — so `structuredContent` always validates), `dispatchOutput` (kind → content builder: archives arrive once as an embedded `resource` block, file mode as a `resource_link`), `callToolDirect` (transport-agnostic `tools/call`, used by tests and the corpus generator), `listToolsPayload`, `toolNames`, `SERVER_INSTRUCTIONS`, `SERVER_CACHE_HINTS`, the 7 `PROMPTS`, the `resources` capability, the cache gate (`isCacheable`).
-- `src/tools/<name>.ts` — one file per tool: `<NAME>_NAME`, a hand-written JSON Schema `<NAME>_INPUT_SCHEMA` `as const`, a **parallel Zod schema** (kept in lock-step), an optional `<NAME>_OUTPUT_SCHEMA` (+ `<NAME>_SUMMARY_PROPERTIES` and a `…Summary()` projection for the read tools), the handler and its result type. Registration order: `inspect_zip`, `list_zip_entries`, `read_zip_entry`, `verify_zip`, `extract_zip`, `scan_zip_forward`, `sanitize_entry_paths`, `create_zip`, `modify_zip`, `compute_crc32`, `inflate_raw`, `describe_engine`, `draft_governance_issue`. `src/tools/_shared.ts` — `parseInput` (→ `VALIDATION_ERROR`), `ProjectionShape`, `EngineOptionsShape`, `STRICT_INPUT_PROPERTY`, `sha256Hex`.
-- Shared modules: `src/caps.ts` (every byte / count cap as a constant — including the `resources/list` / `resources/read` bounds and the cache TTL / size, which `resources.ts` and `cache.ts` import from here — + the operator ceilings `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES` / `ZIPNATIVE_MCP_MAX_ENTRIES` / `ZIPNATIVE_MCP_WORKERS`, `readCeilings` / `getCeilings`, `CAPS` for `describe_engine` — every numeric export must be a `CAPS` key; `MAX_CREATE_ENTRIES` is 100 000 so Zip64 output stays reachable through `create_zip`), `src/limits.ts` (the eight `ZipLimits` keys as `LIMITS_INPUT_SCHEMA` / `LimitsSchema`, `resolveCallLimits` → `LIMIT_CEILING_EXCEEDED`), `src/sandbox.ts` (the single filesystem boundary `ZIPNATIVE_MCP_OUTPUT_DIR`: `ZIP_CONTAINER_EXTENSIONS`, `resolveOutputFile` / `resolveOutputDir` / `resolveInputFile`, `assertRealpathInside(target, what)` — applied to the parent of every write AND to the file itself on every read (`zipPath`, `sourcePath`, `resources/read`), so a planted symlink / junction is `SECURITY_VIOLATION` on both sides —, exclusive `wx` writes, `mapWriteError`), `src/archive-input.ts` (`zipBase64` XOR `zipPath`, `loadArchive`, `openArchiveSource` for the forward scanner, `isPathInput`), `src/base64.ts` (boundary decoding with agent-facing diagnostics — use it for every base64 input), `src/zip-errors.ts` (the ONLY place that reads `err.code`: `mapZipError` / `guard` / `guardAsync`, `ZIP_ERROR_CLASS` typed `satisfies Record<ZipErrorCode, …>`, `ZIP_ERROR_CODES` (39), `ZIP_DIAGNOSTIC_CODES` (11), zlib → ZIP mapping), `src/diagnostics.ts` (`createDiagnosticSink` — every engine call goes through it so nothing reaches stdout; `diagnostics[]` de-duplicated, capped at 200), `src/entry.ts` (`EntryView`, `viewFromEntry` / `viewFromHeader`, `ENTRY_VIEW_SCHEMA` — the CLI's row shape), `src/filter.ts` (`compileGlob`, `compileEntryFilter`, `FILTER_INPUT_SCHEMA`), `src/entry-spec.ts` (create / modify payloads: compression, dates, unixMode / externalAttributes, extra fields, `loadPayload`), `src/engine.ts` (`ensureEngineReady` — `initNodeZipCodecs` once; `probeRuntime`), `src/output.ts` (`emitArchive`, `emitArchiveStream`, `writeSandboxedText`, `OUTPUT_INPUT_PROPERTIES`), `src/resources.ts` (`zipnative://output/{+path}` over every regular sandbox file, MIME by extension, 50 MiB read cap), `src/projection.ts` (token-frugal `verbosity` / `fields`), `src/cache.ts` (`ZIPNATIVE_MCP_CACHE_DIR`, SHA-256 keyed, 1 h TTL, 256 MiB LRU), `src/governance.ts` (HITL contract text + `validateIssueMarkdown`), `src/errors.ts` (`ToolError`, `SecurityError`, `GovernanceError`), `src/version.ts` (`ZIPNATIVE_MCP_VERSION`, `TOOL_API_VERSION`), `src/index.ts` (library exports).
-- `scripts/` — `verazip-core.mjs` (+ `.d.mts`): the vendored engine-independent ISO/IEC 21320-1 validator (`validateArchive`, `CHECK_IDS` (22), `REQUIRED_NEGATIVE_CHECKS` (4)); `generate-zip-corpus.mjs` (writes `test-output/zip/` + `manifest.json` through `callToolDirect` and the raw builder; the corpus itself is defined in `helpers/zip-corpus.mjs`, the crafted canaries use `helpers/raw-zip-builder.mjs`); `validate-zip.mjs` (the gate; level 1 uses `helpers/interop-tools.mjs`); `tool-shape.mjs`; `verify-issue.mjs`.
-- `tests/` — one `*.test.ts` per tool/module; shared fixtures are `_`-prefixed (`_zip-fixtures.ts` — benign archives built through the engine, hostile ones through the vendored raw builder `_fixtures/raw-zip-builder.ts`; `_zip-assert.ts` — `assertValidZip` / `assertIsoConformant` / `expectCheck`; `_http-fixture.ts`; `_mcp-harness.ts`; `_agent-client.ts` — the scripted MCP client for the autonomy scenario; `_sandbox.ts`). `tests/http-modern.test.ts` and `tests/stdio-modern.test.ts` assert the MCP 2026-07-28 conformance on HTTP and stdio; `tests/protocol-revisions.test.ts` negotiates every legacy revision (2024-10-07, 2024-11-05, 2025-03-26, 2025-06-18, 2025-11-25) on both transports; `tests/autonomy.test.ts` replays the S0–S17 agent scenario on stdio / HTTP × legacy / modern against `dist/cli.js`; `tests/http-shutdown.test.ts` covers SIGTERM in HTTP mode; `tests/catalogue-parity.test.ts` compares `tools/list` with `tests/_fixtures/tool-shape.json`; `tests/schema-lockstep.test.ts` compares the Zod input schemas with the advertised JSON Schemas; `tests/_fixtures/tool-shape.v1.0.0.json` is the frozen baseline for the future superset gate (never regenerate it); `tests/docs-consistency.test.ts` checks the counts and names quoted in the docs against the code (and that every doc line naming `scan_zip_forward` next to an SFX prefix says the tool refuses it); `tests/diagnostics-inventory.test.ts` reaches every one of the 11 diagnostics; `tests/zip64.test.ts` covers the 70 000-entry reads and the 65 536-entry `create_zip`; lock tests are named after their finding id (`it('A-003: …')`); `tests/examples.test.ts` runs `examples/*.json`; `tests/fixtures/interop/*.zip` are foreign-tool archives (bsdtar, PowerShell). `.mcp.json` at the root drives the built server from Claude Code (`npm run build` first).
+- `src/cli.ts` stdio (frame cap 256 MiB) or HTTP (`ZIPNATIVE_MCP_PORT`); reads the four ceilings once. `src/http.ts` bridge, body cap, Host/Origin guard; `src/auth.ts` bearer token.
+- `src/server.ts` the `TOOLS` registry (`kind`, annotations, ≤ 2 `_meta.examples`), `dispatchOutput`, `callToolDirect`, `listToolsPayload`, `SERVER_INSTRUCTIONS`,
+  the 7 `PROMPTS`, resources, `isCacheable`, the `ENGINE_ERROR` boundary (absolute paths redacted). Low-level `Server`, not `McpServer.registerTool`.
+- `src/tools/<name>.ts` one per tool: `<NAME>_NAME`, `<NAME>_INPUT_SCHEMA` `as const`, the Zod twin, output schema (+ summary projection for read tools), handler.
+- `src/call-context.ts` cancellation signal + progress sink (`CANCELLED`); `src/canonical.ts` the canonical options of `canonicalize_zip` / `modify_zip`;
+  `src/wrapper-codes.ts` the 17 wrapper codes with meaning and remedy; `src/zip-errors.ts` the only reader of `err.code` (39 codes, 12 diagnostics).
+- `src/caps.ts` every cap (all in `CAPS`) + the ceilings; `src/limits.ts` the nine keys; `src/sandbox.ts` the one boundary (one-handle reads, `wx` writes);
+  `src/archive-input.ts` `zipBase64` XOR `zipPath`, `access` auto / memory / range; `src/filter.ts` linear-time globs; `src/entry-spec.ts`, `src/entry.ts`,
+  `src/output.ts`, `src/projection.ts`, `src/resources.ts`, `src/cache.ts`, `src/diagnostics.ts`, `src/engine.ts`, `src/governance.ts`, `src/version.ts`.
+- `scripts/gate.ts`, `scripts/verify-docs.ts` (+ `scripts/lib/`), `scripts/release-prepare.ts`, `scripts/tool-shape.ts`, `scripts/build-claude-rules.ts`,
+  the samples pair (`generate-samples.ts`, `verify-samples.ts`), the veraZIP set (`verazip-core.mjs`, `validate-zip.mjs`, `generate-zip-corpus.mjs`, `helpers/`).
+- `tests/` one suite per tool / module; `tests/tools/` the tooling suites (gate, verify-docs, release-prepare, guard, workflows);
+  `tests/zip-fuzz.test.ts` the seeded fuzz suite; `tests/catalogue-superset.test.ts` against the frozen 1.0.0 catalogue; `tests/autonomy.test.ts` on `dist/cli.js`.
 
-## Non-negotiable conventions
+## Conventions that bite
 
-1. **Zero new runtime dependencies.** Only `zipnative`, `@modelcontextprotocol/server`, `zod`. Adding one is a governance blocker (`.github/AGENT_RULES.md`).
-2. **Faithful thin wrapper.** Surface zipnative behaviour honestly; don't reimplement engine features on raw primitives, and don't over-promise (e.g. `modify_zip` mode `'append'` leaves removed content recoverable; `scan_zip_forward` is not authoritative; there is no decryption — say so). Engine security defaults stay on; every relaxation is an explicit, named input.
-3. **Strict TypeScript.** No `any` (use `unknown` + narrowing). No unused locals/params. ESM with `.js` suffixes on relative imports, explicit return types on exports, 4-space indent, single quotes, trailing commas.
-4. **Validate every input** at the boundary with Zod — every object schema is `.strictObject()` (unknown keys → `VALIDATION_ERROR`), matching `additionalProperties: false`; keep the JSON Schema and Zod schema aligned (they are hand-kept in sync; shared fragments live in `limits.ts`, `filter.ts`, `entry-spec.ts`, `projection.ts`, `output.ts`, `archive-input.ts`). No `$schema`, no `$ref` / `$defs` in input schemas. Unknown tool names are a JSON-RPC `-32602` protocol error (`[UNKNOWN_TOOL]`), not an `isError` result.
-5. **Additive & byte-identical.** Default responses for existing tools stay byte-identical across releases; new behaviour is opt-in with backward-compatible defaults. A schema or error-code change may require a `TOOL_API_VERSION` bump and always needs a reviewed `tests/_fixtures/tool-shape.json` refresh. Wording (descriptions, `_meta.examples` ≤ 2 per tool, `SERVER_INSTRUCTIONS`, prompt texts) is free to change. The archives the tools write are ISO/IEC 21320-1 conformant — a change to what gets written must keep `npm run validate:zip` green.
-6. **Security.** Never write or read outside `ZIPNATIVE_MCP_OUTPUT_DIR` (use `src/sandbox.ts` — it rejects absolute / UNC paths, traversal, NUL bytes, non-container extensions, checks the parent's real path and opens files exclusively). Never add a network path: this server has none, and no tool argument may ever name a URL or an endpoint. Never weaken an engine default silently (`rejectTraversal`, `rejectSymlinks`, `onDuplicate`, the `ZipLimits` bounds, overlap / CD-LFH / Zip64 checks) — a relaxation is a named input the caller sets. Operator ceilings are read once at boot (`src/caps.ts`; an invalid value must refuse to start, never fall back silently) and a per-call `limits.*` value can never exceed them. Never log or echo `ZIPNATIVE_MCP_HTTP_TOKEN`. Never cache path inputs, file output, wall-clock dates, `parallel` or the two non-cacheable tools. Every engine call goes through a diagnostic sink (nothing may reach stdout on the stdio transport).
-7. **No ZIP parsing of its own.** All ZIP logic lives in zipnative; the wrapper never reads a PK signature. The only sanctioned raw parsers are `scripts/verazip-core.mjs` (the engine-independent validator — it must never import zipnative) and the raw builders (`tests/_fixtures/raw-zip-builder.ts`, used only to craft hostile / negative fixtures). `src/zip-errors.ts` is the only module that reads `err.code`.
-8. **Version lock-step.** `tests/metadata.test.ts` asserts `package.json`, `server.json`, `src/version.ts` and `CITATION.cff` agree. Update all together.
+- Zod `strictObject` + the hand-written JSON Schema in lock-step; no `$schema` / `$ref` / `$defs`; base64 inputs through `src/base64.ts`.
+- No ZIP parsing in `src/`: the sanctioned raw parsers are `scripts/verazip-core.mjs` (never imports zipnative) and the raw builders of hostile fixtures.
+- Never cache path inputs, file output, wall-clock dates, `parallel`, a cancelled call, `describe_engine`, `draft_governance_issue`.
+- Lock tests are named after their finding id (`it('F-001: …')`). Windows is a first-class host: `node:path` helpers, green on win32 and linux.
 
-## Adding a tool (the pattern)
+## Adding a tool (Claude specifics)
 
-1. Create `src/tools/<name>.ts`: export `<NAME>_NAME`, `<NAME>_INPUT_SCHEMA` (`as const`, `additionalProperties: false`, composed from the shared fragments), the parallel Zod `strictObject`, optional `<NAME>_OUTPUT_SCHEMA` (+ `<NAME>_SUMMARY_PROPERTIES` and a summary projection for a read tool), and the async handler (`parseInput` → `loadArchive` / `loadPayload` → engine call under `guard` / `guardAsync` with a diagnostic sink → return a result object or `emitArchive(...)`).
-2. Register it in the `TOOLS` array in `src/server.ts` with `kind`, `annotations` and ≤ 2 `_meta.examples`. If it returns a **new result shape**, add a `ToolKind`, a `dispatchOutput` branch and a `build…Result` / summary function; if it is projectable, wrap its output schema with `projectableOutputSchema`.
-3. If the tool writes archives, add a corpus entry to `scripts/helpers/zip-corpus.mjs` (driven by `scripts/generate-zip-corpus.mjs`) so every writer path is validated by `npm run validate:zip`, and assert `assertValidZip` on every archive its tests produce.
-4. Add `tests/<name>.test.ts` (success, each error code, projection, file mode against a temporary sandbox) and an `examples/<name>.json` (placeholder-free or using the documented placeholder vocabulary; file-mode examples are documentation-only).
-5. Run `npm run build && node scripts/tool-shape.mjs --write` to refresh the catalogue-parity fixture (reviewed, deliberate).
-6. Update the docs: README tool table + `### \`<tool>\`` reference, `AGENTS.md` §1 catalogue (`## 1. Tool catalogue (N tools)`) + §2 decision tree + §6 error table, `llms.txt` (`## Tools (N)`), the `13 tools` phrase in `package.json`, `server.json`, `CITATION.cff` and this file, `SERVER_INSTRUCTIONS`.
-7. Bump `TOOL_API_VERSION` if a schema or error code changed; add the `CHANGELOG.md` `[Unreleased]` entry.
-8. Run the full quality gate including `npm run validate:zip`; `tests/docs-consistency.test.ts` and `tests/examples.test.ts` must stay green.
+Follow AGENTS.md §Architecture. Then: add the writer path to `scripts/helpers/zip-corpus.mjs`; refresh the catalogue with
+`npm run build && npx tsx scripts/tool-shape.ts --write` (reviewed; never touch `tool-shape.v1.0.0.json`); update the counts in
+`docs/assets/ecosystem.json` and run `npx tsx scripts/verify-docs.ts` until it is clean; add the `CHANGELOG.md` `[Unreleased]` line.
 
-## Release process
+## Release
 
-- Decide SemVer level first (new tool / new optional field ⇒ **minor**; a byte change in what `create_zip` writes with `compression.deterministic: true` is the engine's semver-major contract — never absorb one silently).
-- `release-notes/vX.Y.Z.md` is **mandatory** and mirrored into `CHANGELOG.md` (no emojis in release notes).
-- Bump the four version references in lock-step; bump `TOOL_API_VERSION` only when a schema or error code changes.
-- The veraZIP gate (`npm run validate:zip`) is blocking on Linux and Windows and runs again before publish.
-- Publishing is automated via GitHub Actions **Trusted Publishing (OIDC)** on a published GitHub Release — no `NPM_TOKEN`, `--provenance`, CycloneDX SBOM attached.
+`npx tsx scripts/release-prepare.ts --version X.Y.Z` moves every version reference (package.json, src/version.ts, server.json, CITATION.cff,
+the ecosystem manifest, the "Verified on" stamps, the `Current release` prose) and scaffolds the release note and the PR draft. Then
+`npx tsx scripts/gate.ts --publish --require-all`, and stop: the maintainer pushes, tags and publishes. `publish.yml` runs four jobs —
+verify (gate, one `npm pack`, SBOM) → publish (npm Trusted Publishing, OIDC, no `NPM_TOKEN`) → attest → registry (MCP registry).
 
-## Human-in-the-loop governance
+## Hooks and HITL
 
-This server is a **draftsman, never an autonomous submitter**. It has no GitHub write
-path and no network code path at all — no telemetry, no URL from any argument, no
-operator-configurable endpoint. To propose an upstream change, use the
-`draft_governance_issue` tool (or `npm run verify:issue`) to produce a local,
-policy-checked draft — a human reviews and submits it under their own identity. Engine
-root causes (parser, writer, limits, codecs) belong in `Nizoka/zipnative`; wrapper
-behaviour (schemas, sandbox, transport) in `Nizoka/zipnative-mcp`. See
-[`.github/AGENT_RULES.md`](.github/AGENT_RULES.md) and the `governance_contract` /
-`draft_issue_workflow` prompts.
-
-## Working style (token-aware)
-
-Gather context in parallel, then act. Make targeted edits — don't reprint whole
-files. Let the diff speak: no change-summary essays, no new top-level docs unless
-asked. Reuse the scoped rules in `.github/instructions/*.md` rather than re-deriving
-conventions. Windows is a first-class dev host: use `node:path` helpers, never
-hard-code separators, and keep every test green on win32 and linux.
+`.claude/hooks/guard.mjs` (PreToolUse on Bash **and** PowerShell) denies `npm publish`, writing `gh` commands and any `git push`, even
+inside a quoted string — write such text with Edit. The server is a draftsman: no GitHub write path and no network path; issue drafts
+come from `draft_governance_issue` / `npm run verify:issue` and a human submits them. No `Co-Authored-By` trailers.

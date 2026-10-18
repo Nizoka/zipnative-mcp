@@ -68,13 +68,16 @@ the `docs/data` files name their upstream file and version:
 
 | File | Upstream | Licence |
 | --- | --- | --- |
-| `scripts/verazip-core.mjs`, `scripts/validate-zip.mjs` | zipnative `scripts/validate-zip.ts` (via zipnative-cli `scripts/validate-zip.mjs`) | MIT (Nizoka) |
+| `scripts/verazip-core.mjs`, `scripts/validate-zip.mjs` | zipnative `scripts/validate-zip.ts` at the zipnative 1.1.0 commit (via zipnative-cli 1.0.0 `scripts/validate-zip.mjs`) | MIT (Nizoka) |
 | `scripts/helpers/interop-tools.mjs` | zipnative `tests/helpers/interop-tools.ts` (via zipnative-cli) | MIT (Nizoka) |
 | `scripts/helpers/raw-zip-builder.mjs`, `tests/_fixtures/raw-zip-builder.ts` | zipnative `tests/helpers/raw-zip-builder.ts` | MIT (Nizoka) |
-| `src/entry.ts`, `src/filter.ts`, `src/zip-errors.ts` (adapted) | zipnative-cli `src/utils/{entryfmt,glob,ziperr}.ts` | MIT (Nizoka) |
-| `docs/data/errors.json`, `docs/data/core-exports.json` | zipnative-cli `docs/data/` | MIT (Nizoka) |
+| `src/entry.ts`, `src/zip-errors.ts` (adapted) | zipnative-cli `src/utils/{entryfmt,ziperr}.ts` | MIT (Nizoka) |
+| `src/filter.ts` (the glob syntax; the matcher is a linear-time NFA written here in 1.1.0) | zipnative-cli `src/utils/glob.ts` | MIT (Nizoka) |
+| `docs/data/errors.json` | zipnative `docs/data/errors.json` (1.1.0) | MIT (Nizoka) |
+| `docs/data/core-exports.json` | derived from zipnative `docs/assets/api.json` (1.1.0) | MIT (Nizoka) |
+| `scripts/gate.ts`, `scripts/verify-docs.ts`, `scripts/release-prepare.ts`, `scripts/tool-shape.ts`, the sample scripts, `tests/_fuzz.ts`, `src/sandbox.ts` one-handle reads (adapted) | pkinative-mcp 1.0.0 | MIT (Nizoka) |
 
-zipnative and zipnative-cli: Copyright (c) 2026 Nizoka, MIT License.
+zipnative, zipnative-cli and pkinative-mcp: Copyright (c) 2026 Nizoka, MIT License.
 
 ## Specifications (references, not code)
 

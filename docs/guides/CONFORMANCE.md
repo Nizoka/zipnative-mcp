@@ -39,24 +39,28 @@ by clause against the standard's closed constraint list, veraPDF-style: each fai
 is tagged with the check id that rejects it.
 
 **Independent by construction.** The core is **vendored** from the engine
-(`zipnative/scripts/validate-zip.ts`, commit `4f1bc36`, via the 1:1 `.mjs` port in
-zipnative-cli; both upstream hashes are recorded in the file header and pinned by
-`tests/verazip-vendor.test.ts`). It raw-parses the bytes with its own EOCD /
-central-directory / local-header reader and never imports `zipnative`, `src/` or
-`dist/` — a validator that shared the engine's parser would attest the engine with
-the engine. When upstream's `validate-zip.ts` changes, re-port the parser body 1:1
-(types erased) and bump both hashes in the same PR.
+(`zipnative/scripts/validate-zip.ts` at commit `e6f0b3f`, the zipnative 1.1.0 release,
+via the 1:1 `.mjs` port in zipnative-cli; the upstream commit and blob hashes are
+recorded in the file header and pinned by `tests/verazip-vendor.test.ts`). It
+raw-parses the bytes with its own EOCD / central-directory / local-header reader and
+has no imports at all — never `zipnative`, `src/` or `dist/`: a validator that shared
+the engine's parser would attest the engine with the engine. When upstream's
+`validate-zip.ts` changes, re-port the parser body 1:1 (types erased) and bump both
+hashes in the same PR. The 1.1.0 re-port carries the one parser change since 1.0.0:
+the width of a data descriptor's size fields is keyed on the **local** header's Zip64
+extra (APPNOTE 4.3.9.2) instead of the central record — the layout of the engine's
+Zip64 streaming opt-in — and is checked as `WF/DESCRIPTOR-WIDTH`.
 
-Two families of checks (22 ids, `CHECK_IDS`):
+Two families of checks (23 ids, `CHECK_IDS`):
 
 1. **APPNOTE well-formedness** — the cross-checks lenient extractors skip:
    `WF/EOCD-NOT-FOUND`, `WF/ZIP64-LOCATOR`, `WF/ZIP64-EOCD`, `WF/CD-OFFSET`,
    `WF/CD-COUNT`, `WF/CD-SIZE`, `WF/LFH-SIGNATURE`, `WF/LFH-METHOD-MISMATCH`,
    `WF/LFH-NAME-MISMATCH`, `WF/LFH-SIZE-MISMATCH`, `WF/LFH-CRC-MISMATCH`,
-   `WF/DESCRIPTOR-MISMATCH`, `WF/ENTRY-OVERLAP` — central directory ↔ local header
-   agreement (method, name, sizes, CRC), exact offsets, entry counts, overlapping
-   entries, data-descriptor validation against the authoritative central-directory
-   values.
+   `WF/DESCRIPTOR-MISMATCH`, `WF/DESCRIPTOR-WIDTH`, `WF/ENTRY-OVERLAP` — central
+   directory ↔ local header agreement (method, name, sizes, CRC), exact offsets, entry
+   counts, overlapping entries, data-descriptor validation against the authoritative
+   central-directory values, and the descriptor width the local header announces.
 2. **The ISO profile** — the normative annotations ISO/IEC 21320-1 applies to
    PKWARE APPNOTE 6.3.3:
 
@@ -101,12 +105,13 @@ instead of pretending the profile catches what it does not.
 `callToolDirect`) plus the engine-independent raw builder
 (`scripts/helpers/raw-zip-builder.mjs`, vendored from zipnative — the test suite uses
 its TypeScript twin `tests/_fixtures/raw-zip-builder.ts`) to write
-38 archives to `test-output/zip/` with a `manifest.json`:
+43 archives to `test-output/zip/` with a `manifest.json` — 39 conformant (of which
+four hostile-but-conformant) and 4 negative canaries:
 
 ```jsonc
 {
   "generatedBy": "scripts/generate-zip-corpus.mjs",
-  "server": { "name": "zipnative-mcp", "version": "1.0.0", "toolApiVersion": "1.0.0", "zipnative": "1.0.0" },
+  "server": { "name": "zipnative-mcp", "version": "1.1.0", "toolApiVersion": "1.1.0", "zipnative": "1.1.0" },
   "node": "v22.x", "platform": "linux",
   "files": [{
     "file": "create-deterministic.zip", "bytes": 1234,
@@ -121,12 +126,19 @@ its TypeScript twin `tests/_fixtures/raw-zip-builder.ts`) to write
 ```
 
 The conformant entries cover every writer path the tools expose — `create_zip`
-buffered, streamed (`stream: true`), `parallel`, `compression.deterministic`, store
-and deflate, comments, `order: 'insertion'` (an EPUB-style `mimetype`-first layout),
-`extraFields`, `unixMode`, directory entries; `modify_zip` in `append` and
-`compact` mode — plus the raw-crafted files: a forced-Zip64 layout crafted by the
-raw builder (`create_zip` Zip64 auto-promotion is covered by `tests/zip64.test.ts`)
-and the hostile-but-conformant quartet.
+buffered, streamed (`stream: true`), streamed with the Zip64 streaming layout
+(`stream: true` + `zip64: true`, `streaming-zip64.zip`), `parallel`,
+`compression.deterministic`, store and deflate, comments, `order: 'insertion'` (an
+EPUB-style `mimetype`-first layout), `extraFields`, `unixMode`, directory entries,
+pinned and wall-clock dates; `modify_zip` in `append` and `compact` mode and
+`compact` with `canonical` (`incremental-compacted-canonical.zip`, asserted in canonical
+order with `summary.canonical: true`); `canonicalize_zip` over an append-mode archive
+(`canonical-from-appended.zip` — asserted idempotent, with the removed payload gone)
+and with a pinned date (`canonical-pinned-date.zip` — every entry carries the date);
+`merge_zip` of two archives (`merged-two.zip`, `summary.verified: true`) — plus the
+raw-crafted files: a forced-Zip64 layout crafted by the raw builder (`create_zip`
+Zip64 auto-promotion is covered by `tests/zip64.test.ts`) and the hostile-but-conformant
+quartet.
 **Four raw-crafted negative canaries** (`expectConformant: false`) must be rejected
 with their declared check id — `WF/ENTRY-OVERLAP`, `WF/CD-COUNT`,
 `WF/LFH-SIZE-MISMATCH`, `WF/LFH-NAME-MISMATCH` (`REQUIRED_NEGATIVE_CHECKS`), the
@@ -166,7 +178,8 @@ Per manifest file the validator reports:
 | `INFRA` | parser exception / unreadable file — not a verdict |
 | `SKIP` | a level-1 tool absent on this machine |
 
-Per-file JSON reports and a `summary.json` land in `test-output/zip/reports/`.
+A clean level-0 run over the corpus reads 39 PASS and 4 XFAIL. Per-file JSON reports
+and a `summary.json` land in `test-output/zip/reports/`.
 
 | Exit | Meaning |
 |------|---------|
@@ -199,14 +212,17 @@ node -e "import('./scripts/verazip-core.mjs').then(m => console.log(m.validateAr
 
 ## 7. Where it blocks
 
-- `.github/workflows/verazip.yml` — the same scripts with `VERAZIP_REQUIRED=1` on
-  **Linux and Windows**, on every push and pull request. The workflow carries no
-  `paths:` filter, so it can be a required check without the "Expected — Waiting for
-  status" trap; tool versions land in the job summary and the reports are uploaded
-  as artifacts.
-- `.github/workflows/publish.yml` — the gate re-runs between the GitHub Release and
-  `npm publish`: a release can never publish a server whose archives the reference
-  validator rejects.
+- `.github/workflows/verazip.yml` — one matrix job running the same scripts with
+  `VERAZIP_REQUIRED=1` on **Linux and Windows**, on every push and pull request. The
+  workflow carries no `paths:` filter, so it can be a required check without the
+  "Expected — Waiting for status" trap; tool versions land in the job summary and the
+  reports are uploaded as artifacts.
+- The quality gate (`scripts/gate.ts`) carries `corpus:zip` and `verazip` as steps of its
+  `ci` and `publish` profiles, so `npm run gate` runs them locally too.
+- `.github/workflows/publish.yml` — the verify job runs
+  `npx tsx scripts/gate.ts --publish --require-all` (veraZIP included, a skipped step
+  fails the release) before anything is packed: a release can never publish a server
+  whose archives the reference validator rejects.
 
 No dependency is added — the validator is a script and the foreign tools are
 external.

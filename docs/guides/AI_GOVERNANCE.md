@@ -93,8 +93,9 @@ The `draft_issue_workflow` MCP prompt returns exactly these steps.
 
 | Symptom | Target |
 |---|---|
-| `_meta.error.code` is `ZIP_INTERNAL` or `ZIP_API_MISUSE`; `ENGINE_ERROR` (a non-`ZipError` throw) | `zipnative` |
-| A parse refusal on an archive every foreign tool opens, a wrong `verify_zip` verdict, a non-conformant archive from `create_zip` (the veraZIP gate fails), a `deterministic: true` byte change | `zipnative` |
+| `_meta.error.code` is `ZIP_INTERNAL` or `ZIP_API_MISUSE` | `zipnative` |
+| `ENGINE_ERROR` (a non-`ZipError` throw, `data.errorClass: 'internal'`) | `zipnative` when the reproduction is a bare engine call, `zipnative-mcp` otherwise |
+| A parse refusal on an archive every foreign tool opens, a wrong `verify_zip` verdict, a non-conformant archive from `create_zip` / `canonicalize_zip` / `merge_zip` (the veraZIP gate fails), a `deterministic: true` byte change, a `canonicalize_zip` output that `analyzeDeterminism()` rejects | `zipnative` |
 | A refusal whose message names a relaxation or a limit (`ZIP_PATH_TRAVERSAL`, `ZIP_LIMIT_EXCEEDED`, …) | not a bug — the security posture working |
 | A schema / Zod mismatch, a sandbox refusal on a legitimate relative path, a projection that drops a field, a wrong `_meta.error.data` shape, a wrong `summary`, a transport problem | `zipnative-mcp` |
 
@@ -130,6 +131,11 @@ Optional inputs:
 | `outputMode` | `inline` | `file` also writes the draft `.md` into `ZIPNATIVE_MCP_OUTPUT_DIR`. |
 | `outputPath` | — | Relative `.md` path inside the sandbox (only when `outputMode: 'file'`). |
 
+Bounds: `title` 8–160 characters; `summary`, `expectedBehavior`, `actualBehavior` and
+the two `reproduction` fields at most 16 384 characters each (since 1.1.0 —
+`VALIDATION_ERROR` above; the policy scan is linear and the bound keeps a draft
+reviewable).
+
 ### What you get back
 
 - `draftMarkdown` — the full issue (summary, fenced reproduction, expected / actual,
@@ -163,8 +169,9 @@ contract-breaking issue.
 When `outputMode: 'file'` is used, the draft `.md` lands in the sandbox
 `ZIPNATIVE_MCP_OUTPUT_DIR` (and is listed under `resources/list` as
 `zipnative://output/<path>`) — the tool never writes anywhere else. Copy it to
-`.github/drafts/` (the human's review staging area, git-ignored) and re-check it with
-the same policy the tool applied:
+`.github/drafts/` (the human's review staging area — git-ignored except its README,
+the templates and the `pr-*.md` / `issue-*.md` drafts a maintainer chooses to keep)
+and re-check it with the same policy the tool applied:
 
 ```bash
 npm run verify:issue -- .github/drafts/<draft>.md
@@ -173,10 +180,13 @@ npm run verify:issue -- .github/drafts/<draft>.md
 No CI job runs this verifier over `.github/drafts/` (drafts are work in progress);
 run it locally before presenting a draft.
 
-`scripts/verify-issue.mjs` mirrors `validateIssueMarkdown()` in
-[`src/governance.ts`](../../src/governance.ts) byte-for-byte, so the CLI and the
-tool never disagree. `tests/governance.test.ts` asserts that alignment, and that the
-policy embedded in the server equals `.github/ai-governance.json`.
+`scripts/verify-issue.mjs` is the dependency-free, build-independent CLI mirror of
+`validateIssueMarkdown()` in [`src/governance.ts`](../../src/governance.ts): the same
+checks (no runtime-dependency proposal, a fenced reproduction block, the required
+fields as an advisory), with the same linear-time dependency pattern. Exit 0 on pass,
+1 on a policy violation, 2 on a usage or I/O error. `tests/governance.test.ts` asserts
+that the two apply the same policy, and that the policy embedded in the server equals
+`.github/ai-governance.json`.
 
 ---
 

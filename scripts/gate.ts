@@ -146,7 +146,8 @@ function sampleCount(): string | null {
 function corpusCount(): string | null {
     const manifest = join(REPO_ROOT, 'test-output', 'zip', 'manifest.json');
     if (!existsSync(manifest)) return null;
-    const entries = (JSON.parse(readFileSync(manifest, 'utf8')) as { entries?: Array<{ expectConformant?: boolean }> }).entries ?? [];
+    // scripts/generate-zip-corpus.mjs lists the archives under `files`.
+    const entries = (JSON.parse(readFileSync(manifest, 'utf8')) as { files?: Array<{ expectConformant?: boolean }> }).files ?? [];
     const conformant = entries.filter((e) => e.expectConformant !== false).length;
     return `${conformant} conformant, ${entries.length - conformant} canaries`;
 }

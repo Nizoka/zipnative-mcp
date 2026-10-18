@@ -1,7 +1,7 @@
 /**
  * Custom error type for tool-level failures (returned to the client as
  * `isError: true`). `code` is either one of the wrapper codes documented in
- * AGENTS.md §6 or one of zipnative's 39 frozen `ZIP_*` codes carried verbatim
+ * docs/AGENT_CONTRACT.md §6 or one of zipnative's 39 frozen `ZIP_*` codes carried verbatim
  * (see src/zip-errors.ts). `data` carries machine-readable detail (the limit
  * that fired, the entry name, the unsupported feature, …) and is surfaced as
  * `_meta.error.data` — never anything secret.

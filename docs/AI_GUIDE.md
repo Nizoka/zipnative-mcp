@@ -1,9 +1,9 @@
 # AI Agent Guide — zipnative-mcp
 
 > **Read this first if you are an AI agent (Claude, Copilot, Cursor, Continue, Zed, Windsurf, Cline, Roo Code, …) about to call zipnative-mcp.**
-> It tells you which of the 13 tools to pick and how to avoid the retry loops that ZIP archives cause.
+> It tells you which of the 15 tools to pick and how to avoid the retry loops that ZIP archives cause.
 
-The server returns the same decision tree in the `instructions` field of the opening exchange (initialize / server/discover result). The full reference lives in [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md); the stability charter in [`API_STABILITY.md`](API_STABILITY.md); the topic guides in [`guides/`](guides/) (security, determinism, incremental modification, conformance, governance, local testing). Worked invocations are in [`../examples/`](../examples).
+The server returns the same decision tree in the `instructions` field of the opening exchange (initialize / server/discover result). The full reference lives in [`KNOWLEDGE_BASE.md`](KNOWLEDGE_BASE.md); the stability charter in [`API_STABILITY.md`](API_STABILITY.md); the topic guides in [`guides/`](guides/) (security, determinism, incremental modification, large archives, conformance, governance, local testing). Worked invocations are in [`../examples/`](../examples).
 
 ---
 
@@ -13,15 +13,19 @@ The server returns the same decision tree in the `instructions` field of the ope
 |---|---|
 | Know what an archive is (sizes, counts, methods, Zip64, encryption, symlinks, duplicates, unsafe names, a determinism verdict, every diagnostic) in one call | `inspect_zip` *(opens eagerly by default — every entry's real extent is checked: overlaps, reach into the central directory or past EOF, Zip64 spoofing are refused, not summarised; a method / CRC / size divergence is `verify_zip`'s job)* |
 | Gate an archive in CI ("reproducible?", "no encryption?", "safe names?", "at most N entries?") | `inspect_zip` with `check: [...]` / `assert: {...}` → `checksPassed` |
-| The entry inventory, paged and filterable, without decompressing anything | `list_zip_entries` *(`filter` by names / prefix / globs; `offset` + `limit`, `hasMore`)* |
+| Know *why* an archive is not reproducible (every offending entry and the rule it breaks) | `inspect_zip` with `determinismReport: true` *(the engine's `analyzeDeterminism()` report; `check: ['canonical-form']` gates on it)* |
+| The entry inventory, paged and filterable, without decompressing anything | `list_zip_entries` *(`filter` by names / prefix / globs; `offset` + `limit`, `hasMore`; `includeExtendedTimestamps` / `includeUnixIds` on request)* |
 | Read one file without extracting the archive (text or bytes, a byte window, the compressed payload, or a single-entry check) | `read_zip_entry` *(`name` or `index`; `encoding: 'utf8'`; `range`; `mode: 'raw'` / `'verify'`)* |
+| Read from a sandbox archive larger than the 1 GiB in-memory cap | `inspect_zip` / `list_zip_entries` / `read_zip_entry` with `zipPath` *(`access: 'auto'` switches to byte ranges by itself; `access: 'range'` forces it — [`guides/LARGE_ARCHIVES.md`](guides/LARGE_ARCHIVES.md))* |
 | Know whether the archive is intact and safe to trust before doing anything else | `verify_zip` *(never `isError` for an archive problem — branch on `ok` and `error.code`)* |
 | Get files out — inline, or onto disk | `extract_zip` *(every guard ON; `includeData: false` = dry run that opens eagerly and refuses hostile extents before any plan; `outputMode: 'file'` + `outputDir` for the sandbox)* |
 | A truncated download, a stream cut mid-way, forensics (it cannot skip an SFX prefix — it refuses one with `ZIP_SIGNATURE_MISMATCH`) | `scan_zip_forward` *(local headers only — NOT authoritative; `tolerateTruncation: true`)* |
 | A self-extractor or any prepended prefix | `inspect_zip` *(reports `prependedData` / `ZIP_PREPENDED_DATA`; every random-access tool shifts the offsets; `modify_zip mode: 'compact'` drops the prefix)* |
 | Plan your own extraction sink (another tool writes the files) | `sanitize_entry_paths` *(no archive needed)* |
-| Build an archive from inline content or sandbox files | `create_zip` *(reproducible on one runtime by default; `compression.deterministic: true` for cross-runtime identical bytes — the only case where `summary.deterministic` is `true`; `order: 'insertion'` for EPUB / JAR; `parallel` for many large entries)* |
-| Change an existing archive without recompressing what you keep | `modify_zip` *(`add` / `replace` / `remove` / `rename` / `setComment`; `mode: 'compact'` to truly delete)* |
+| Build an archive from inline content or sandbox files | `create_zip` *(reproducible on one runtime by default; `compression.deterministic: true` for cross-runtime identical bytes — the only case where `summary.deterministic` is `true`; `order: 'insertion'` for EPUB / JAR; `parallel` for many large entries; `stream: true` + `zip64: true` for a sandbox file that may exceed 4 GiB)* |
+| Change an existing archive without recompressing what you keep | `modify_zip` *(`add` / `replace` / `remove` / `rename` / `setComment`; `mode: 'compact'` to truly delete; `canonical: {}` with `compact` for the canonical form in the same call)* |
+| Make an archive you did not build reproducible (Gradle, Maven, `zip`, Explorer, 7-Zip, an append-mode save) | `canonicalize_zip` *(the canonical deterministic form without recompression; idempotent; `summary.canonicalForm` is the engine's own re-check)* |
+| Combine several archives into one without recompressing | `merge_zip` *(1–32 `sources`, each CRC- and size-checked first; `onConflict: 'error' | 'first' | 'last'`)* |
 | A CRC-32 of some bytes, a string or a sandbox file (chained, or compared with a known value) | `compute_crc32` |
 | Decompress a raw DEFLATE stream (for example the payload from `read_zip_entry mode: 'raw'`) | `inflate_raw` *(`maxOutput` is mandatory)* |
 | What this server can do *here* (limits, ceilings, caps, sandbox, deflate tier, error codes) | `describe_engine` *(no archive needed, never cached)* |
@@ -34,6 +38,8 @@ Ambiguities resolved:
 - `read_zip_entry` vs `extract_zip` — one entry vs many; inline caps are per entry (16 MiB) and per extraction (32 MiB total). Above them, `extract_zip` in file mode or a `range` window.
 - `modify_zip mode: 'append'` vs `'compact'` — both avoid recompression; only `compact` removes superseded bytes from the file.
 - `compute_crc32` vs `read_zip_entry mode: 'verify'` — the first checksums bytes you already have; the second checks an entry inside an archive against its recorded CRC.
+- `canonicalize_zip` vs `modify_zip mode: 'compact'` + `canonical` vs `create_zip` — `create_zip` builds from content (and is the only one that compresses); `canonicalize_zip` normalises an existing archive with no edit; `modify_zip` with `mode: 'compact'` and `canonical: {}` edits first, then normalises. The canonical form is the same in the last two.
+- `merge_zip` vs `modify_zip` `add` — `merge_zip` takes entries from other archives as they are (compressed bytes, CRC, timestamps, attributes); `modify_zip` adds new content you supply.
 
 Input validation is strict: unknown top-level or nested keys are rejected with `VALIDATION_ERROR` ("Unrecognized key"), matching `additionalProperties: false`. Calling a tool name that does not exist is a JSON-RPC protocol error (`-32602`, `[UNKNOWN_TOOL] Unknown tool: <name>`), not an `isError` result.
 
@@ -45,7 +51,7 @@ Input validation is strict: unknown top-level or nested keys are rejected with `
 
 - Every archive-consuming tool takes **exactly one** of `zipBase64` / `zipPath`. `zipBase64` is the raw archive as base64 **exactly once** — a `data:…;base64,` prefix is tolerated, but PEM text, a nested `data:` URI or base64 encoded twice are refused with `VALIDATION_ERROR` and a hint. `zipPath` is a path **relative to the sandbox** (`ZIPNATIVE_MCP_OUTPUT_DIR`) ending in a container extension (`.zip`, `.jar`, `.war`, `.ear`, `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`, `.odp`, `.epub`, `.vsix`, `.nupkg`, `.whl`, `.apk`, `.ipa`, `.xpi`, `.crx`, `.kmz`); it is never usable when the sandbox is unset (`SECURITY_VIOLATION`).
 - Entry payloads for `create_zip` / `modify_zip` take exactly one of `dataBase64` / `text` / `sourcePath` (or `directory: true`). `compute_crc32` takes one of `dataBase64` / `text` / `sourcePath`; `inflate_raw` one of `dataBase64` / `sourcePath`.
-- Caps (all reported by `describe_engine.caps`): decoded `zipBase64` and the sum of inline payloads per call 128 MiB (`INPUT_TOO_LARGE`); a buffered `zipPath` / `sourcePath` 1 GiB; one inline entry 16 MiB (`ENTRY_TOO_LARGE`); inline extraction total 32 MiB and inline archive / inflate output 50 MiB (`OUTPUT_TOO_LARGE`); file output 4 GiB; `list_zip_entries` page 200 by default, 2000 at most; `create_zip` at most 100 000 entries (Zip64 auto-promotes past 65 535; the engine default `maxEntries` and the operator ceiling remain the effective bound), `modify_zip` 1000 operations, `sanitize_entry_paths` 10 000 names; `filter.names` 1000, `filter.glob` 32, `extraFields` 16 per entry, `fields` 16 paths, `scan_zip_forward` default `maxEntries` 10 000 (clamped to the ceiling), 50 resource links, `range.length` 16 MiB, `resources/list` 1000 entries / depth 8 / 50 MiB per read, cache 3600 s / 256 MiB; 200 distinct diagnostics per result (`diagnosticsTruncated`). The JSON-RPC frame itself is capped at 256 MiB on stdio and HTTP (413).
+- Caps (all reported by `describe_engine.caps`): decoded `zipBase64` and the sum of inline payloads per call 128 MiB (`INPUT_TOO_LARGE`); a buffered `zipPath` / `sourcePath` 1 GiB (above it, `inspect_zip` / `list_zip_entries` / `read_zip_entry` read by byte ranges instead of refusing); one inline entry 16 MiB (`ENTRY_TOO_LARGE`); inline extraction total 32 MiB and inline archive / inflate output 50 MiB (`OUTPUT_TOO_LARGE`); file output 4 GiB by default (the operator ceiling `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES`); `list_zip_entries` page 200 by default, 2000 at most; `create_zip` at most 100 000 entries (Zip64 auto-promotes past 65 535; the engine default `maxEntries` and the operator ceiling remain the effective bound), `modify_zip` 1000 operations, `merge_zip` 32 sources and 1 GiB of sources in all, `sanitize_entry_paths` 10 000 names; `filter.names` 1000, `filter.glob` 32 patterns of at most 1024 characters, `extraFields` 16 per entry, `fields` 16 paths, `scan_zip_forward` default `maxEntries` 10 000 (clamped to the ceiling), 50 resource links, `range.length` 16 MiB, `resources/list` 1000 entries / depth 8 / 50 MiB per read, cache 3600 s / 256 MiB, 16 384 characters per `draft_governance_issue` text field; 200 distinct diagnostics and 200 determinism offenders per result. The JSON-RPC frame itself is capped at 256 MiB on stdio and HTTP (413).
 - Above an inline cap the remedy is always the same: `outputMode: 'file'` (needs the sandbox), a `filter`, or a `range` — and the refusal names it in `_meta.error.data.remedy`. One exception to know: a **raw** payload (`read_zip_entry mode: 'raw'`) above 16 MiB is not retrievable inline at all; a `range` in `mode: 'data'` or `extract_zip` file mode gives you the *decompressed* content instead.
 
 ### `verify_zip`: `ok: false` is not `isError`
@@ -54,7 +60,7 @@ Input validation is strict: unknown top-level or nested keys are rejected with `
 
 - `error: { code: 'ZIP_*', message }` — the structure was refused (not a ZIP, truncated, overlapping entries, central/local divergence, Zip64 spoofing…). `ok` is `false`, no entries were checked.
 - `error: null`, `ok: false` — the structure opened but at least one entry failed its CRC / size / local-header check (`failedCount`, `entries: 'failed'` to see which).
-- `skipped: 'encrypted' | 'stream-only-codec'` rows are unverifiable and **do not** fail the archive.
+- `skipped: 'encrypted' | 'stream-only-codec'` rows are unverifiable by design and **do not** fail the archive — provided their local header agrees with the central directory (`skippedCount`). An encrypted entry whose local header contradicts the central directory is counted **failed**, and so is `skipped: 'unsupported-method'` (no codec for the entry's method here): the engine's archive rule, verbatim.
 
 Only caller mistakes (bad `limits`, bad input) are `isError`. `verbosity: 'summary'` with `fields: ['ok', 'error', 'failedCount', 'skippedCount']` is the smallest probe.
 
@@ -69,16 +75,17 @@ Only caller mistakes (bad `limits`, bad input) are `isError`. `verbosity: 'summa
 ### Data remanence (`modify_zip mode: 'append'`)
 
 - `mode: 'append'` (the default) is the engine's `save()`: the original bytes stay **verbatim** as a prefix, the edits are appended, a new central directory is written. Fast and byte-preserving — and every `remove`d or `replace`d payload **remains inside the file**, recoverable by anyone with a hex editor. The `ZIP_DEAD_BYTES_RATIO` diagnostic fires past 50 % dead bytes, and 7-Zip is known to read the **stale** payload of a replaced entry instead of the new one.
-- `mode: 'compact'` is `saveCompact()`: a canonical rewrite, still without recompression, removed data truly gone, an SFX prefix dropped. Use it to delete secrets, to interoperate with 7-Zip, or when dead bytes pile up.
+- `mode: 'compact'` is `saveCompact()`: a rewrite sorted by raw name bytes, still without recompression, removed data truly gone, an SFX prefix dropped. Use it to delete secrets, to interoperate with 7-Zip, or when dead bytes pile up. Add `canonical: {}` (compact only) for the full canonical form of `canonicalize_zip` after the edits (`summary.canonical: true`).
+- The input is opened **eagerly**: an archive with overlapping entries or a truncated local header is refused with its `ZIP_*` code before any operation runs.
 - Operations run in order. `add` fails on an existing name (`ZIP_ENTRY_EXISTS`), `replace` on a missing one (`ZIP_ENTRY_NOT_FOUND`), `rename` **never overwrites** — `remove` the target first. No edits and an unchanged comment return the same bytes (`summary.noOp: true`). Archives with duplicate entry names are refused (`ZIP_DUPLICATE_ENTRY_NAME`): rebuild them with `create_zip`.
 
 ### Reproducibility and the deterministic pin (`create_zip`)
 
 - Defaults are reproducible on one runtime: canonical order (raw UTF-8 name bytes), DOS-epoch timestamps (1980-01-01), UTF-8 names with the EFS flag, constant attributes, Zip64 exactly when a field overflows.
-- `defaultDate: 'now'` (or a wall-clock per-entry `date`) opts out: the `ZIP_TIMESTAMP_NOT_PINNED` diagnostic fires and `summary.deterministic` is `false`. Pin an ISO instant instead (1980-01-01 … 2107-12-31, 2-second DOS granularity).
+- `defaultDate: 'now'` (or a wall-clock per-entry `date`) opts out: the `ZIP_TIMESTAMP_NOT_PINNED` diagnostic fires and `summary.deterministic` is `false`. Pin an ISO instant instead (1980-01-01 … 2107-12-31, 2-second DOS granularity). Every date is written as its **UTC** wall clock, so a pinned call is the same bytes on every host whatever its time zone (an offset-less date-time is taken as the UTC wall clock).
 - `compression: { deterministic: true }` pins the pure-TS deflate encoder so the bytes are identical on every runtime (slower); `summary.deflateTier` reports `pure-pinned`. Without it the bytes are stable per environment only (`node-zlib`) and `summary.deterministic` stays `false` even though the *layout* is reproducible — `inspect_zip` `determinism.deterministic` reports that structural verdict separately (it requires epoch timestamps, so a pinned non-epoch date reproduces but reports `false` there). Three verdicts, three questions: `summary.deterministic` = "identical on every runtime?", `summary.sha256` = "the proof", `inspect_zip.determinism` = "canonical structure, whoever wrote it?".
 - `stream: true` entries use the data-descriptor layout: reproducible, but `inspect_zip` reports `canonicalLayout: false`. `parallel` is byte-identical to the sequential writer (per tier). Extra fields you pass are embedded verbatim — their determinism is yours.
-- Proof: `includeSha256: true` twice → equal `summary.sha256`; or `inspect_zip check: ['deterministic', 'canonical-layout']` on the result. Full contract: [`guides/DETERMINISM.md`](guides/DETERMINISM.md).
+- Proof: `includeSha256: true` twice → equal `summary.sha256`; or `inspect_zip check: ['deterministic', 'canonical-layout']` on the result. For an archive someone else built, `inspect_zip determinismReport: true` names every offending entry and `canonicalize_zip` fixes them without recompressing. Full contract: [`guides/DETERMINISM.md`](guides/DETERMINISM.md).
 
 ### Forward-scan trust (`scan_zip_forward`)
 
@@ -95,15 +102,15 @@ Only caller mistakes (bad `limits`, bad input) are `isError`. `verbosity: 'summa
 
 ### `limits` vs ceilings
 
-- `limits.*` (the engine's eight `ZipLimits` bounds: `maxEntries`, `maxEntryUncompressedSize`, `maxTotalUncompressedSize`, `maxCompressionRatio`, `maxNameBytes`, `maxExtraFieldBytes`, `maxCommentBytes`, `maxCentralDirectoryBytes`) raise or lower the engine's bounds for **this call** — for trusted input only. The engine enforces them *while* inflating, not after.
-- They can never exceed the operator ceilings: `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES` (default 8 GiB; bounds the two size limits), `ZIPNATIVE_MCP_MAX_ENTRIES` (default 100 000; also bounds `scan_zip_forward.maxEntries`, whose default of 10 000 is clamped to the ceiling — only an explicit value above it is refused), `ZIPNATIVE_MCP_WORKERS` (default 8; bounds `create_zip.parallel.workers`, whose default is the engine's `max(1, min(cores − 1, 8))`; 0 disables workers). A request above a ceiling is `LIMIT_CEILING_EXCEEDED` and `_meta.error.data.env` names the variable the operator would raise — you cannot raise it yourself. A ceiling below an engine default tightens the default silently.
+- `limits.*` (the engine's 9 `ZipLimits` bounds: `maxEntries`, `maxEntryUncompressedSize`, `maxEntryCompressedSize`, `maxTotalUncompressedSize`, `maxCompressionRatio`, `maxNameBytes`, `maxExtraFieldBytes`, `maxCommentBytes`, `maxCentralDirectoryBytes`) raise or lower the engine's bounds for **this call** — for trusted input only. The engine enforces them *while* inflating, not after. `maxEntryCompressedSize` is read by the byte-range reader only (the payload it fetches into memory for one entry); the in-memory reader never consults it.
+- They can never exceed the operator ceilings: `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES` (default 8 GiB; bounds the three size limits), `ZIPNATIVE_MCP_MAX_ENTRIES` (default 100 000; also bounds `scan_zip_forward.maxEntries`, whose default of 10 000 is clamped to the ceiling — only an explicit value above it is refused), `ZIPNATIVE_MCP_WORKERS` (default 8; bounds `create_zip.parallel.workers`, whose default is the engine's `max(1, min(cores − 1, 8))`; 0 disables workers). A request above a ceiling is `LIMIT_CEILING_EXCEEDED` and `_meta.error.data.env` names the variable the operator would raise — you cannot raise it yourself. A ceiling below an engine default tightens the default silently. The fourth ceiling, `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES` (default 4 GiB), bounds every file a tool writes (`OUTPUT_TOO_LARGE` names it).
 - `describe_engine` reports both (`defaultLimits`, `ceilings`).
 
 ### File mode and the sandbox
 
 - `outputMode: 'file'`, `outputDir`, `zipPath` and `sourcePath` only work when the host set `ZIPNATIVE_MCP_OUTPUT_DIR`. Otherwise every file input and output is `SECURITY_VIOLATION` and the tools work on base64 only.
 - Paths are **relative**, no `..`, no absolute / UNC / drive prefix, no NUL. `outputPath` must end in a container extension (`.zip` recommended; `.md` for `draft_governance_issue`; `inflate_raw` accepts `.bin`, `.dat`, `.txt`, `.json`, `.xml`, `.md`, `.csv`, `.html`, `.zip`, `.tar`, `.raw`). `sourcePath` may have any extension.
-- The **real** path of every file read (`zipPath`, `sourcePath`, `resources/read`) and of every parent written must stay inside the sandbox: a symlink or junction planted there is `SECURITY_VIOLATION` on both sides.
+- The **real** path of every file read (`zipPath`, `sourcePath`, `resources/read`) and of every parent written must stay inside the sandbox: a symlink or junction planted there is `SECURITY_VIOLATION` on both sides. A file is read through one open handle; one that grows or shrinks while it is read is `IO_ERROR` (`data.remedy: 'retry'`) — retry once it is complete.
 - The server **never overwrites** (`OUTPUT_EXISTS`) — choose another path. A file written in file mode is listed under `resources/list` as `zipnative://output/<path>` and the result carries a `resource_link`; a path you wrote can be read back by any tool through `zipPath` without re-sending the bytes.
 - `draft_governance_issue` uses `outputMode: 'inline' | 'file'` (not `'base64'`).
 
@@ -118,7 +125,7 @@ Defaults are unchanged: omit both and you get the full shape. Produced archives 
 
 ### Response cache
 
-With `ZIPNATIVE_MCP_CACHE_DIR` set, a repeated identical call (same tool, same input) may be answered from cache — the result carries `_meta.cached: true` — within a 1 h TTL. Never cached: any `zipPath` / `sourcePath` input (a path is a reference, not content), `outputMode: 'file'`, `defaultDate: 'now'`, any `parallel` request, `describe_engine`, `draft_governance_issue`. The key is namespaced by the tool API version, the package version **and** the engine version, so an upgrade never serves old bytes.
+With `ZIPNATIVE_MCP_CACHE_DIR` set, a repeated identical call (same tool, same input) may be answered from cache — the result carries `_meta.cached: true` — within a 1 h TTL. Never cached: any `zipPath` / `sourcePath` input, including one inside `entries[]`, `operations[]` or `merge_zip` `sources[]` (a path is a reference, not content), `outputMode: 'file'`, `defaultDate: 'now'`, any `parallel` request, `describe_engine`, `draft_governance_issue`, and a cancelled call. The key is namespaced by the tool API version, the package version **and** the engine version, so an upgrade never serves old bytes.
 
 ### Protocol eras
 
@@ -126,8 +133,9 @@ With `ZIPNATIVE_MCP_CACHE_DIR` set, a repeated identical call (same tool, same i
 - `tools/list` and `prompts/list` are safe to cache for 24 h (`cacheScope: 'public'`); `resources/*` results are private and must not be cached.
 - Seven MCP prompts are advertised — `governance_contract`, `draft_issue_workflow`, `secure_extraction`, `reproducible_archive`, `incremental_update`, `forensic_scan`, `verify_before_trust` — read the one matching your workflow before the first call.
 - Over HTTP (`ZIPNATIVE_MCP_PORT`), the operator may require a bearer token (`ZIPNATIVE_MCP_HTTP_TOKEN`): send `Authorization: Bearer <token>` or every `/mcp` request is answered 401. Without it HTTP mode has no authentication (loopback bind + Host / Origin guard only). stdio is unaffected.
-- Operator environment, for reference (an agent never sets these): `ZIPNATIVE_MCP_OUTPUT_DIR`, `ZIPNATIVE_MCP_CACHE_DIR`, `ZIPNATIVE_MCP_PORT`, `ZIPNATIVE_MCP_HTTP_TOKEN`, `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS`. Full table: `AGENTS.md` §4.
-- There is **no network path** in this server: no telemetry, no GitHub, no URL from any argument, ever.
+- Long calls are cancellable: `notifications/cancelled` (or closing the HTTP request) stops the engine between chunks, removes a partial output file and ends the call as `CANCELLED` (`data.remedy: 'retry'`; nothing is cached). Send a `_meta.progressToken` with `tools/call` to receive `notifications/progress` (strictly increasing, at most one per 200 ms); without it no notification is sent and the result is the same.
+- Operator environment, for reference (an agent never sets these): `ZIPNATIVE_MCP_OUTPUT_DIR`, `ZIPNATIVE_MCP_CACHE_DIR`, `ZIPNATIVE_MCP_PORT`, `ZIPNATIVE_MCP_HTTP_TOKEN`, `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS`, `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES`. Full table: `AGENTS.md` §4.
+- There is **no network path** in this server: no telemetry, no GitHub, no URL from any argument, ever — the byte-range reader takes a sandbox file only, never a remote source.
 
 ### Drafting a GitHub issue (human-in-the-loop)
 
@@ -162,7 +170,24 @@ The `secure_extraction` and `verify_before_trust` prompts return these steps.
 ### Incremental update, then compact
 
 1. `modify_zip { zipBase64, operations: [{ op: 'replace', name: 'config.json', text: '…' }, { op: 'add', name: 'CHANGES.md', text: '…' }] }` — append mode: fast, original bytes preserved, superseded payload still inside.
-2. Later, or before shipping: `modify_zip { …, operations: [{ op: 'remove', name: '.env' }], mode: 'compact' }` — the canonical rewrite; removed data truly gone. Watch `ZIP_DEAD_BYTES_RATIO` in `diagnostics` as the signal that compaction is due. Details: [`guides/INCREMENTAL.md`](guides/INCREMENTAL.md).
+2. Later, or before shipping: `modify_zip { …, operations: [{ op: 'remove', name: '.env' }], mode: 'compact' }` — the compacting rewrite (add `canonical: {}` for the canonical form); removed data truly gone. Watch `ZIP_DEAD_BYTES_RATIO` in `diagnostics` as the signal that compaction is due. Details: [`guides/INCREMENTAL.md`](guides/INCREMENTAL.md).
+
+### Make a third-party archive reproducible
+
+1. `inspect_zip { zipBase64, determinismReport: true, check: ['canonical-form'], verbosity: 'summary', fields: ['checksPassed', 'determinismReport'] }` — which entries break which rule.
+2. `canonicalize_zip { zipBase64, includeSha256: true }` (or `date: '2026-10-08T00:00:00Z'` for one release timestamp, read as UTC) — `summary.canonicalForm: true` is the engine's re-check; running it again returns the same bytes (`summary.alreadyCanonical: true`).
+3. *(optional)* `inspect_zip { zipBase64: <the result>, check: ['canonical-form'], canonicalDate: <the same date> }` in CI.
+
+### Merge archives
+
+1. `merge_zip { sources: [{ zipBase64: <a> }, { zipPath: 'incoming/b.zip', filter: { prefix: 'docs/' } }], onConflict: 'last', includeSha256: true }` — every entry CRC- and size-checked before it is copied (`verify: true`); `summary.dropped` names what a duplicate name cost.
+2. *(optional)* `canonicalize_zip` on the result for the full canonical form.
+
+### Large archive in the sandbox (above 1 GiB)
+
+1. `inspect_zip { zipPath: 'incoming/huge.zip', verbosity: 'summary' }` — `access: 'auto'` reads it by byte ranges (the result carries `access: 'range'`; `determinism` is absent there).
+2. `list_zip_entries { zipPath: 'incoming/huge.zip', filter: { glob: ['**/*.json'] } }`, then `read_zip_entry { zipPath: 'incoming/huge.zip', name: '…', encoding: 'utf8' }` — only the central directory and that entry's bytes are read.
+3. `scan_zip_forward` streams any size; `verify_zip`, `extract_zip`, `modify_zip`, `canonicalize_zip` and `merge_zip` stay buffered (1 GiB). Details: [`guides/LARGE_ARCHIVES.md`](guides/LARGE_ARCHIVES.md).
 
 ### Manifest peek (read one file without extracting)
 
@@ -202,10 +227,10 @@ The `secure_extraction` and `verify_before_trust` prompts return these steps.
 
 Every tool ships:
 
-- `_meta.apiVersion` = `'1.0.0'` — see [`API_STABILITY.md`](API_STABILITY.md).
+- `_meta.apiVersion` = `'1.1.0'` — see [`API_STABILITY.md`](API_STABILITY.md).
 - `_meta.examples` — one or two executable worked examples per tool (the rest live in [`../examples/`](../examples), executed by `tests/examples.test.ts`). Inspect the `tools/list` response to discover them.
 - `annotations` — `readOnlyHint` / `destructiveHint` / `idempotentHint` / `openWorldHint`; `openWorldHint` is `false` on every tool (no network).
-- `outputSchema` — the read tools declare a **projectable** schema (every property optional, `additionalProperties: false`, summary-only scalars declared) so `structuredContent` validates under `verbosity` / `fields` as well; `create_zip`, `modify_zip` and `inflate_raw` extend the shared `ARCHIVE_OUTPUT_SCHEMA` with their own typed `summary` (`deterministic` / `deflateTier` / `parallel` / `sha256`, `saveMode` / `noOp` / `grewByBytes`, `bytesConsumed` / `leftover` / `finished` — every key optional).
+- `outputSchema` — the read tools declare a **projectable** schema (every property optional, `additionalProperties: false`, summary-only scalars declared) so `structuredContent` validates under `verbosity` / `fields` as well; `create_zip`, `modify_zip`, `canonicalize_zip`, `merge_zip` and `inflate_raw` extend the shared `ARCHIVE_OUTPUT_SCHEMA` with their own typed `summary` (`deterministic` / `deflateTier` / `parallel` / `sha256`, `saveMode` / `noOp` / `grewByBytes` / `canonical`, `alreadyCanonical` / `canonicalForm` / `pinnedDate`, `perSource` / `dropped` / `verified`, `bytesConsumed` / `leftover` / `finished` — every key optional).
 - Every result carries `diagnostics[]` (de-duplicated by code + entry, at most 200) and `diagnosticCounts` — for ZIP they **are** the signal (an SFX prefix, a name mismatch, duplicate names, an unpinned timestamp, dead bytes after an incremental save).
 
 Error results carry `_meta.error = { code, message, data? }` next to `content[0].text` (`<tool> failed [CODE]: message`) and `isError: true`, so a structured consumer never has to parse the text.
@@ -226,29 +251,30 @@ Error results carry `_meta.error = { code, message, data? }` next to `content[0]
 
 - `code` is either one of the **wrapper codes** below or one of the engine's **39 frozen `ZIP_*` codes**, carried verbatim. Branch on the code, never on the message.
 - `message` keeps the engine's text, which **names the remedy** (the option to pass, the tool to call, or "re-obtain the archive").
-- `data` carries the machine-readable detail: `errorClass` (`parse` / `security` / `data` / `limit` / `unsupported` / `not-found` / `input` / `usage` / `check` / `internal`), `engineError` (the engine class name), `entryName`, and per class `limit` / `configured` / `observed` (`ZIP_LIMIT_EXCEEDED`), `feature` (`ZIP_UNSUPPORTED_*`), `expectedCrc` / `actualCrc` (`ZIP_CRC_MISMATCH`), `operationIndex` / `op` (`modify_zip`), `entryIndex` (`create_zip`), `writtenCount` (`extract_zip` file mode), `cap` (the inline caps), `ceiling` / `env` (`LIMIT_CEILING_EXCEEDED`), and `remedy` — an optional machine-actionable hint from a closed vocabulary: `outputMode:'file'` (`extract_zip` above an inline cap), `range` (`read_zip_entry` above 16 MiB), `filter`, `encoding:'base64'`, `data:'verify'` (`scan_zip_forward` `data: 'include'` above the caps), `list_zip_entries` (an out-of-range `index`), `resources/list` (a missing `zipPath` / `sourcePath`), `maxEntries ≤ N` (`scan_zip_forward` above the ceiling). Branch on `code`; use `remedy` to pick the retry without parsing the message.
+- `data` carries the machine-readable detail: `errorClass` (`parse` / `security` / `data` / `limit` / `unsupported` / `not-found` / `input` / `usage` / `check` / `internal`), `engineError` (the engine class name), `entryName`, and per class `limit` / `configured` / `observed` (`ZIP_LIMIT_EXCEEDED`), `feature` (`ZIP_UNSUPPORTED_*`), `expectedCrc` / `actualCrc` (`ZIP_CRC_MISMATCH`), `operationIndex` / `op` (`modify_zip`), `entryIndex` (`create_zip`), `sourceIndex` (`merge_zip`), `writtenCount` (`extract_zip` file mode), `cap` (the inline caps), `ceiling` / `env` (`LIMIT_CEILING_EXCEEDED`; `env` also on a file-output refusal), and `remedy` — an optional machine-actionable hint from a closed vocabulary: `outputMode:'file'` (`extract_zip` above an inline cap), `range` (`read_zip_entry` above 16 MiB), `encoding:'base64'`, `data:'verify'` (`scan_zip_forward` `data: 'include'` above the caps), `list_zip_entries` (an out-of-range `index`), `resources/list` (a missing `zipPath` / `sourcePath`), `maxEntries ≤ N` (`scan_zip_forward` above the ceiling), `zipPath` (an inline payload above 128 MiB), `retry` (`IO_ERROR` on a file that changed under the read, `CANCELLED`), `access:'memory'` (`inspect_zip` determinism inputs over byte ranges). Branch on `code`; use `remedy` to pick the retry without parsing the message.
 
 ### Wrapper codes
 
 | `code` | Meaning | Fix |
 |---|---|---|
-| `VALIDATION_ERROR` | Zod rejected the input: wrong type, unknown key (strict), both or neither of `zipBase64` / `zipPath`, malformed base64 (PEM, nested `data:` URI, double-encoded, empty), a `date` outside 1980–2107, an unparsable `unixMode`, extra field id `0x0001` | Re-read the field's schema (the message lists the offending path); pass the raw archive bytes as base64 exactly once. |
+| `VALIDATION_ERROR` | Zod rejected the input: wrong type, unknown key (strict), both or neither of `zipBase64` / `zipPath`, malformed base64 (PEM, nested `data:` URI, double-encoded, empty), a `date` outside 1980–2107, an unparsable `unixMode`, extra field id `0x0001`, a glob above 1024 characters or with an inverted class range (`[z-a]`), a `fields` path naming a prototype segment, `zip64` without `stream`, `canonical` outside `mode: 'compact'`, `determinismReport` / `canonicalDate` over byte ranges | Re-read the field's schema (the message lists the offending path); pass the raw archive bytes as base64 exactly once. |
 | `INPUT_TOO_LARGE` | Decoded input above 128 MiB (inline) or 1 GiB (`zipPath` / `sourcePath`) | Use the sandbox (`zipPath`, `sourcePath`, file mode — `data.remedy: 'zipPath'` on an inline payload) or split the input. |
 | `INPUT_NOT_FOUND` | `zipPath` / `sourcePath` does not exist in the sandbox or is not a regular file | List `resources/list`; fix the relative path. |
 | `ENTRY_TOO_LARGE` | One entry above the 16 MiB inline cap (`read_zip_entry` — uncompressed in `mode: 'data'`, compressed in `mode: 'raw'` —, `extract_zip`, `scan_zip_forward data: 'include'`) | Pass a `range` (`mode: 'data'`), use `outputMode: 'file'`, or `data: 'verify'` — `data.remedy` names it. A raw payload above the cap is not retrievable inline; the range and file mode give the decompressed content. |
 | `ENTRY_NOT_UTF8` | `encoding: 'utf8'` on bytes that are not valid UTF-8 | Read it with `encoding: 'base64'`. |
-| `OUTPUT_TOO_LARGE` | Inline output above 50 MiB, inline extraction above 32 MiB, file output above 4 GiB, a `resources/read` above 50 MiB | `outputMode: 'file'`, a `filter`, or a `range`. |
+| `OUTPUT_TOO_LARGE` | Inline output above 50 MiB, inline extraction above 32 MiB, file output above the file-output ceiling (4 GiB by default; `data.env` names `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES`), a `resources/read` above 50 MiB | `outputMode: 'file'`, a `filter`, or a `range`; above the file ceiling, split the content or ask the operator. |
 | `OUTPUT_EXISTS` | The target file already exists in the sandbox | The server never overwrites — choose another `outputPath` / `outputDir`. |
-| `IO_ERROR` | The filesystem refused the write (permissions, disk full, …) | The message carries the errno; check the sandbox directory. |
+| `IO_ERROR` | The filesystem refused the operation (permissions, disk full, …), or a sandbox file grew or shrank while it was being read | The message carries the errno (never an absolute path); check the sandbox directory, or retry once the file is complete (`data.remedy: 'retry'`). |
 | `SECURITY_VIOLATION` | Sandbox unset, absolute / UNC / `..` / NUL path, or a symlink / junction that would redirect a write (parent) or a read (`zipPath`, `sourcePath`, `resources/read` — the file itself) outside the sandbox | Set `ZIPNATIVE_MCP_OUTPUT_DIR`; pass a relative path without traversal; remove the link. |
 | `MISSING_OUTPUT_PATH` | `outputMode: 'file'` without `outputPath` (`outputDir` for `extract_zip`) | Pass a relative path. |
 | `INVALID_PATH` | A path input is empty or not a string | Pass a non-empty relative path. |
 | `INVALID_EXTENSION` | `zipPath` / `outputPath` does not end in an allowed extension | Container extensions for archives (`.zip` recommended), `.md` for the governance draft. |
 | `LIMIT_CEILING_EXCEEDED` | `limits.*`, an explicit `scan_zip_forward.maxEntries` (the default is clamped, never refused) or `parallel.workers` above an operator ceiling | `data.env` names the variable; an agent cannot raise it — ask the operator, or lower / omit the request (`data.remedy: 'maxEntries ≤ N'` for the scanner). |
 | `GOVERNANCE_VIOLATION` | `draft_governance_issue` draft breaks the contract (runtime dependency proposed, no reproduction, `duplicateSearchPerformed: false`) | Fix the draft and call again. |
-| `ENGINE_ERROR` | The engine threw something that is not a `ZipError` (an internal fault) | Report it with a reproduction (`draft_governance_issue`, `targetRepo: 'zipnative'`). |
+| `CANCELLED` | The request was cancelled (`notifications/cancelled`, or the HTTP client went away) before it completed; nothing was cached and a partial output file was removed | Retry the call if the result is still wanted (`data.remedy: 'retry'`). |
+| `ENGINE_ERROR` | Something that is not a `ZipError` escaped the engine or the runtime (`data.errorClass: 'internal'`; absolute paths are redacted from the message) | Report it with a reproduction (`draft_governance_issue`, `targetRepo: 'zipnative'` or `'zipnative-mcp'`). |
 | `UNKNOWN_RESOURCE` | **Protocol error** (`-32602`): `resources/read` with an unknown `zipnative://output/` URI | List URIs with `resources/list`. |
-| `[UNKNOWN_TOOL]` | **Protocol error** (`-32602`): `tools/call` with a name that does not exist | Pick a name from `tools/list` (13 tools). |
+| `[UNKNOWN_TOOL]` | **Protocol error** (`-32602`): `tools/call` with a name that does not exist | Pick a name from `tools/list` (15 tools). |
 
 ### The 39 `ZIP_*` codes, by class
 
@@ -260,7 +286,7 @@ The full table with cause and remedy per code is in `AGENTS.md` §6 and in the m
 | `security` | `ZIP_ENTRY_OVERLAP`, `ZIP_CD_LFH_MISMATCH`, `ZIP_ZIP64_CONTRADICTION` (no opt-out) · `ZIP_PATH_TRAVERSAL`, `ZIP_SYMLINK_REJECTED`, `ZIP_EXTRACT_DUPLICATE_PATH` (named relaxations) | The first three are active-attack shapes: stop. The last three name the relaxation (`rejectTraversal: false` skips, `rejectSymlinks: false` writes the target text, `onDuplicate: 'first' | 'last'`). |
 | `data` | `ZIP_CRC_MISMATCH`, `ZIP_SIZE_MISMATCH`, `ZIP_INFLATE_OUTPUT_OVERFLOW`, `ZIP_DESCRIPTOR_MISMATCH`, `ZIP_DECOMPRESSION_FAILED` | The content or its metadata lies: treat as corrupt or hostile. `verify_zip` reports these as rows instead of failing. |
 | `limit` | `ZIP_LIMIT_EXCEEDED` (`data.limit`, `configured`, `observed`), `ZIP_INPUT_TOO_LARGE` | Raise `limits.<limit>` for trusted input only (within the ceilings). |
-| `unsupported` | `ZIP_UNSUPPORTED_ENCRYPTION`, `ZIP_UNSUPPORTED_METHOD`, `ZIP_UNSUPPORTED_MULTI_DISK`, `ZIP_UNSUPPORTED_ZIP64_STREAMING`, `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`, `ZIP_UNSUPPORTED_CODEC_MODE` | Deliberate refusals; `data.feature` says which. No encryption in this engine; no codec beyond store / deflate in this server; buffer instead of `stream: true` above 4 GiB; use the whole archive instead of a forward scan. |
+| `unsupported` | `ZIP_UNSUPPORTED_ENCRYPTION`, `ZIP_UNSUPPORTED_METHOD`, `ZIP_UNSUPPORTED_MULTI_DISK`, `ZIP_UNSUPPORTED_ZIP64_STREAMING`, `ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`, `ZIP_UNSUPPORTED_CODEC_MODE` | Deliberate refusals; `data.feature` says which. No encryption in this engine (an encrypted entry cannot be merged either); no codec beyond store / deflate in this server; add `zip64: true` to a `stream: true` entry above 4 GiB; use the whole archive instead of a forward scan. |
 | `not-found` / `input` / `usage` | `ZIP_ENTRY_NOT_FOUND` · `ZIP_ENTRY_EXISTS`, `ZIP_INVALID_ENTRY_NAME`, `ZIP_DUPLICATE_ENTRY_NAME` · `ZIP_INVALID_OPTION`, `ZIP_LIMIT_INVALID` | Names are case-sensitive (`list_zip_entries`); use `replace` over an existing name; relative `/`-separated names without `..`; unique names. |
 | `check` / `internal` | `ZIP_STRICT_DIAGNOSTIC` · `ZIP_API_MISUSE`, `ZIP_INTERNAL` | `strict: true` escalated a diagnostic (drop `strict`, or fix the producer it names). The internal pair is a bug: draft an upstream issue with the archive. |
 

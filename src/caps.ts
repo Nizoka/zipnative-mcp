@@ -96,7 +96,7 @@ export const DEFAULT_WORKERS_CEILING = 8;
 export const DEFAULT_MAX_FILE_OUTPUT_CEILING = MAX_FILE_OUTPUT_BYTES;
 
 export interface Ceilings {
-    /** Upper bound for `limits.maxEntryUncompressedSize` and `limits.maxTotalUncompressedSize`. */
+    /** Upper bound for `limits.maxEntryUncompressedSize`, `limits.maxTotalUncompressedSize` and `limits.maxEntryCompressedSize`. */
     readonly maxUncompressedBytes: number;
     /** Upper bound for `limits.maxEntries`. */
     readonly maxEntries: number;

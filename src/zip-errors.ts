@@ -24,7 +24,7 @@ import {
 
 import { redactAbsolutePaths, ToolError } from './errors.js';
 
-/** Coarse class of each frozen code — surfaced as `data.errorClass` and in AGENTS.md §6. */
+/** Coarse class of each frozen code — surfaced as `data.errorClass` and in docs/AGENT_CONTRACT.md §6. */
 export const ZIP_ERROR_CLASS = {
     // ── base (7)
     ZIP_INVALID_OPTION: 'usage',

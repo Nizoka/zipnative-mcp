@@ -1,6 +1,6 @@
 /**
  * Error-code inventory: every `ToolError('CODE', …)` literal in `src/` must be
- * (a) documented in the AGENTS.md error table and (b) exercised by at least
+ * (a) documented in the docs/AGENT_CONTRACT.md error table and (b) exercised by at least
  * one test under `tests/`; and every one of the engine's 39 frozen `ZIP_*`
  * codes (passed through verbatim by `src/zip-errors.ts`) must either be named
  * by a test that reaches it or be listed in `UNREACHABLE_THROUGH_WRAPPER` with
@@ -28,11 +28,11 @@ import { guard, guardAsync, mapZipError, ZIP_ERROR_CLASS, ZIP_ERROR_CODES } from
 import { assertValidZip } from './_zip-assert.js';
 import { b64, basicZip, bytesOf, CD_MISMATCH, CORRUPT_DEFLATE, CRC_OVERRIDE, DEVICE_NAME, DUPLICATE_PATHS, ENCRYPTED_FLAG, highRatioZip, LFH_METHOD_MISMATCH, MULTI_DISK, OVERLAP, raw, SFX_PREFIXED, STORE_DESCRIPTOR, SYMLINK, TRAILING_GARBAGE, truncated, UNKNOWN_METHOD, ZIP64_CONTRADICTION, ZIP64_DROPPED, ZIP64_HUGE_COUNT, ZIP_SLIP } from './_zip-fixtures.js';
 
-/** The documented `data.remedy` vocabulary (docs/API_STABILITY.md §2, AGENTS.md §6). */
-const REMEDY_VOCABULARY = ["outputMode:'file'", 'range', 'filter', "encoding:'base64'", "data:'verify'", 'list_zip_entries', 'resources/list'] as const;
+/** The documented `data.remedy` vocabulary (docs/API_STABILITY.md §2, docs/AGENT_CONTRACT.md §6) — the fixed values src/ emits (`maxEntries ≤ N` aside). */
+const REMEDY_VOCABULARY = ["outputMode:'file'", 'range', "encoding:'base64'", "data:'verify'", 'list_zip_entries', 'resources/list', 'zipPath', "access:'memory'", 'retry'] as const;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const AGENTS = path.join(ROOT, 'AGENTS.md');
+const CONTRACT = path.join(ROOT, 'docs', 'AGENT_CONTRACT.md');
 
 function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -97,10 +97,10 @@ describe('ToolError code inventory', () => {
         }
     });
 
-    it.skipIf(!existsSync(AGENTS))('documents every code in the AGENTS.md error table', () => {
-        const agents = readFileSync(AGENTS, 'utf8');
+    it.skipIf(!existsSync(CONTRACT))('documents every code in the docs/AGENT_CONTRACT.md error table', () => {
+        const agents = readFileSync(CONTRACT, 'utf8');
         const missing = [...new Set([...codes, ...WRAPPER_CODES, ...ZIP_ERROR_CODES])].filter((c) => !agents.includes(`\`${c}\``));
-        expect(missing, `codes missing from AGENTS.md error table: ${missing.join(', ')}`).toEqual([]);
+        expect(missing, `codes missing from the docs/AGENT_CONTRACT.md error table: ${missing.join(', ')}`).toEqual([]);
     });
 
     it('exercises every wrapper code in at least one test under tests/', () => {
