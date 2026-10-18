@@ -70,8 +70,9 @@ through three complementary layers.
 ### 3.1 Structural assertion helper (in tests)
 
 [tests/_zip-assert.ts](../../tests/_zip-assert.ts) exports `assertValidZip()`, which
-checks the PK magic, an **eager** `openZip()` by the engine (every local header
-cross-checked, overlap table built), a clean `verifyZip()` report (`ok: true`,
+checks the PK magic, an **eager** `openZip()` by the engine (every entry's extent
+checked, overlap table built), a clean `verifyZip()` report (every local header
+compared with the central directory) (`ok: true`,
 `error: null`), **and** ISO/IEC 21320-1 conformance through the vendored validator
 core (`assertIsoConformant`, an independent raw parser that never imports the
 engine — so the engine is not attesting itself). Use it in any new test that
@@ -100,9 +101,10 @@ conformance included. Benign fixtures come from [tests/_zip-fixtures.ts](../../t
 `CORRUPT_DEFLATE`, `INVALID_UTF8_NAME`, `CP437_NAME`, `MULTI_DISK`, `ZIP64_FORCED`,
 `ZIP64_DROPPED`) are built in-test by the engine-independent raw builder
 ([tests/_fixtures/raw-zip-builder.ts](../../tests/_fixtures/raw-zip-builder.ts)) and are
-**never committed** — the only committed archives are the two foreign-provenance
+**never committed** — the committed archives are the two foreign-provenance
 interop fixtures under `tests/fixtures/interop/` (bsdtar, PowerShell
-`Compress-Archive`).
+`Compress-Archive`) and the four example inputs under `tests/fixtures/examples/`
+(`basic`, `rich`, `truncated` and the hostile `zip-slip`).
 
 ### 3.2 Examples-as-tests
 
@@ -175,7 +177,7 @@ newly required, no bound tightened, no annotation flipped — except the reviewe
 counts and names quoted in README, AGENTS.md, `llms.txt`, `server.json`,
 `CITATION.cff`, `CLAUDE.md` and `docs/data/*.json` to the code — the 15 tools in
 registration order, 7 prompts, the 8 environment variables, every wrapper code and every
-`ZIP_*` / diagnostic code in AGENTS.md §6, the 106-export ledger with its 88 / 9 / 9
+`ZIP_*` / diagnostic code in docs/AGENT_CONTRACT.md §6, the 106-export ledger with its 88 / 9 / 9
 reach counts (every `UNEXPOSED_EXPORTS` entry graded unexposed), the veraZIP corpus
 counts quoted in the docs against `docs/data/verazip.json` (pinned by both
 `tests/verazip-vendor.test.ts` and docs-consistency), the rule that every mention of an
@@ -297,7 +299,7 @@ winget install Python.Python.3.12
 ```
 
 **CI status:** `.github/workflows/verazip.yml` runs the same flow with
-`VERAZIP_REQUIRED=1` on **Linux and Windows** on every push and pull request and is
+`VERAZIP_REQUIRED=1` on **Linux and Windows** on every push and pull request to `main` and is
 **blocking**; the gate's `ci` and `publish` profiles carry it too, so `publish.yml`
 re-runs it before anything is packed. If you change anything the tools **write**
 (`create_zip`, `modify_zip`, `canonicalize_zip`, `merge_zip`, `inflate_raw`, entry

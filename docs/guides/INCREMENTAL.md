@@ -38,12 +38,19 @@ and an unsafe **new** name (`ZIP_INVALID_ENTRY_NAME`).
 
 **The input is validated eagerly** (since 1.1.0). `modify_zip` opens the archive with
 `validate: 'eager'`, as `inspect_zip` does by default: the overlap table is built and
-every local header is checked before any operation runs. The append path never
+every entry's extent (its local header included) is checked before any operation runs. The append path never
 re-reads the entries it keeps, so a lazily opened archive with overlapping entries —
 the smuggling shape every other reader refuses — or a truncated local header would
 otherwise be re-emitted unchecked into the output. Such an input is now refused with
 its code (`ZIP_ENTRY_OVERLAP`, `ZIP_RECORD_TRUNCATED`, …) before anything is written. The
-seeded fuzz suite found the gap; the lock test is `F-001`.
+seeded fuzz suite found the gap; the lock test is `F-001`. The eager pass checks extents,
+not contents, so in `mode: 'append'` every non-encrypted entry is also read raw before
+the save (its local header and declared sizes — nothing is decompressed): a method / CRC /
+size divergence between the central directory and a local header is `ZIP_CD_LFH_MISMATCH`
+and a declared-size bomb `ZIP_LIMIT_EXCEEDED`, as compaction and the other writers
+refuse them. Names and payloads are otherwise copied verbatim in both modes — an unsafe
+name already in the archive (`../../x`) stays in the output, where `extract_zip` still
+refuses it.
 
 ## 2. `mode: 'append'` (default) — `save()`
 
@@ -93,7 +100,9 @@ are) — followed by a new central directory.
 - Removed and replaced payloads are **truly gone**; the file holds only live data.
 - The layout is canonical again: data-descriptor bits on copied entries are cleared
   (sizes and CRC are written in the local headers), the entry order is the engine's
-  canonical order, and `inspect_zip` reports `canonicalLayout: true`. The entries keep
+  canonical order (an insertion-ordered layout — EPUB `mimetype` first, a JAR manifest
+  first — is **not** preserved: rebuild such a container with `create_zip`
+  `order: 'insertion'`), and `inspect_zip` reports `canonicalLayout: true`. The entries keep
   their own timestamps, extra fields and attributes — for the full canonical form, add
   `canonical` (below).
 - An **SFX / prepended prefix is dropped** (`ZIP_PREPENDED_DATA` on the input; none

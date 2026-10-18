@@ -14,7 +14,9 @@ sandbox archives larger than memory, the Zip64 streaming opt-in, cancellation an
 and every 1.0.0 call keeps working: the live catalogue is a checked superset of the frozen 1.0.0 one, and the default
 output of every existing tool is byte-identical for every valid input on a UTC host. Two ReDoS paths, a sandbox read race
 and an unchecked `modify_zip` append path are closed, and the repository reaches the hardening level of pkinative-mcp
-1.0.0. Full notes, with the compatibility ledger C1–C14: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
+1.0.0. An independent two-auditor release audit with an adversarial verifier (73 findings stamped: 0 blocker, 7 major,
+33 minor, 24 note; 2 rejected) is closed in this release. Full notes, with the compatibility ledger C1–C17 and the
+audit summary: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
 
 ### Security
 
@@ -26,6 +28,8 @@ and an unchecked `modify_zip` append path are closed, and the repository reaches
 - **fix(security):** the server refuses to start on an invalid `ZIPNATIVE_MCP_PORT` or a relative `ZIPNATIVE_MCP_OUTPUT_DIR`; HTTP timeouts, a header-count bound, `nosniff` and `no-store`.
 - **fix(deps):** `npm audit` clean on the full tree (vitest 4.1.11, js-yaml 4.3.2, `@cyclonedx/cyclonedx-npm` removed in favour of `npm sbom`).
 - **ci(security):** harden-runner on every job, `--ignore-scripts`, one SHA per action, least-privilege permissions, dependency review, weekly audit, CodeQL `security-extended`, committed rulesets.
+- **fix(audit):** `modify_zip` append also cross-checks every entry's local header and declared sizes (A-006); `merge_zip` refuses an entry it cannot verify (A-002); HTTP checks Host / Origin and the bearer token before reading the body (A-015); the cache namespace carries the operator ceilings and `ZIPNATIVE_MCP_CACHE_DIR` must be absolute (A-007, A-020); `resources/read` answers a malformed URI with -32602 (A-014); globs match about three times faster (A-001).
+- **ci(audit):** the publish gate fails closed on veraZIP (`VERAZIP_REQUIRED`, A-004); the npm client installs with `--ignore-scripts` (A-010); the pull-request trigger of `ci.yml` has no path filter (A-009); a weekly veraZIP run (A-023).
 
 ### Added
 
@@ -49,6 +53,7 @@ and an unchecked `modify_zip` append path are closed, and the repository reaches
 - **chore(errors):** the node:zlib table is gone; `scan_zip_forward` reports `ZIP_DEFLATE_*` where 1.0.0 reported `ZIP_DECOMPRESSION_FAILED` (C6).
 - **fix(http):** request bodies up to the documented 256 MiB (1.0.0 kept the SDK's 4 MiB default) (C10).
 - **chore(tooling):** veraZIP core re-vendored from zipnative 1.1.0 (23 check ids); corpus of 43 archives (39 conformant, 4 canaries).
+- **fix(audit):** cancellation reaches `compute_crc32` and `inflate_raw` and the start of `verify_zip` (A-003); `verify_zip` diagnostics de-duplicated and capped at 200 (B-009); `tools/list` about 12 % smaller through shorter shared descriptions (D-018); every documentation finding of the audit fixed; three upstream drafts for zipnative under `.github/drafts/`.
 
 ### Documentation
 

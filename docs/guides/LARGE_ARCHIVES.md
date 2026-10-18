@@ -53,6 +53,12 @@ compressed payload into memory before decoding it, so the ninth `ZipLimits` key 
 that payload (default 1 GiB + 1 MiB; ceiling `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`;
 `ZIP_LIMIT_EXCEEDED` above it). The in-memory reader never consults it.
 
+```jsonc
+// read_zip_entry — one entry of a large sandbox archive, no compressed payload above 64 MiB fetched
+{ "zipPath": "big.zip", "name": "data/part-0001.bin", "access": "range", "limits": { "maxEntryCompressedSize": 67108864 } }
+// → ZIP_LIMIT_EXCEEDED naming maxEntryCompressedSize when that entry's compressed size is larger
+```
+
 **Results say how they were read.** Every result produced over byte ranges carries
 `access: 'range'`; in memory the field is absent (the 1.0.0 shape).
 
@@ -173,7 +179,7 @@ From [`examples/create-zip64-stream.json`](../../examples/create-zip64-stream.js
 | `maxFileOutputBytes` | 4 GiB | the default of the file-output ceiling |
 
 **Operator ceilings** (environment, read once at boot — an invalid value refuses to
-start; `describe_engine.ceilings`):
+start; `describe_engine.ceilings`; the response-cache key includes all four):
 
 | Variable | Default | Bounds |
 |---|---|---|
@@ -192,7 +198,11 @@ Long calls — a large extraction, a streamed `create_zip`, a `merge_zip` over m
 sources, a forward scan of a big file — honour the MCP utilities for cancellation and
 progress. Every `tools/call` carries the request's cancellation signal, and, when the
 request asks for it, a progress sink; both ride the diagnostic sink into every engine
-call (zipnative 1.1.0 takes `signal` and `onProgress` on its common options).
+call that takes them (zipnative 1.1.0 takes `signal` and `onProgress` on its common
+options), and `compute_crc32` / `inflate_raw` check the signal and report progress between
+their own chunks. `verify_zip` is the exception: zipnative's `verifyZip` is synchronous and
+takes neither, so the tool checks the signal once before the verification starts and the
+verification then runs to completion (an engine limitation).
 
 **Cancellation.** A client that sends `notifications/cancelled` for the request (or an
 HTTP client that goes away) aborts the signal:
@@ -202,14 +212,15 @@ HTTP client that goes away) aborts the signal:
 ```
 
 The engine stops between chunks and releases what it held (stream locks, worker pools);
-a partial output file is removed (the descriptor is closed before the unlink, which
-Windows needs); nothing is cached. The call ends as the wrapper code `CANCELLED`
+a partial output file is removed; nothing is cached. The call ends as the wrapper code `CANCELLED`
 (`data.remedy: 'retry'`) — over MCP the SDK sends no response for a cancelled request,
 so a client sees the code only through the in-process `callToolDirect`. Cancellation is
 best-effort: work that completed before the abort reached the engine is returned as a
-result, but never cached. The engine-touching tools that hand the signal on are
-`inspect_zip`, `list_zip_entries`, `read_zip_entry`, `extract_zip`, `scan_zip_forward`,
-`create_zip`, `modify_zip`, `canonicalize_zip` and `merge_zip`.
+result, but never cached. The tools that stop on the signal are `inspect_zip`,
+`list_zip_entries`, `read_zip_entry`, `extract_zip`, `scan_zip_forward`, `create_zip`,
+`modify_zip`, `canonicalize_zip`, `merge_zip`, `compute_crc32` and `inflate_raw`;
+`sanitize_entry_paths`, `describe_engine` and `draft_governance_issue` do no work worth
+cancelling.
 
 **Progress.** Send a `progressToken` in the request's `_meta` to receive
 `notifications/progress`:

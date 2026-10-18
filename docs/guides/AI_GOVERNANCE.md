@@ -49,6 +49,12 @@ and draft a high-quality issue.
 
 ## 3. The contract (seven non-negotiable rules)
 
+The same policy is written at three levels of detail: the seven rules below, which the
+`governance_contract` prompt returns; the nine numbered rules of
+[`.github/AGENT_RULES.md`](../../.github/AGENT_RULES.md), which add *right repository*
+and *anti-goals stay out*; and the eight-item `pre_issue_checklist` of
+`.github/ai-governance.json`, the machine-readable form.
+
 1. **No new runtime dependencies** — never propose adding an external runtime npm
    package beyond the three the server already has. (Enforced: a draft that suggests
    `npm install <pkg>`, a `yarn/pnpm/bun add`, or edits `"dependencies"` is rejected
@@ -56,8 +62,9 @@ and draft a high-quality issue.
 2. **No duplicates** — search **open AND closed** issues/PRs before drafting.
    (`duplicateSearchPerformed` must be `true`.)
 3. **Local reproduction** — run a minimal repro (an MCP tool call or a Node/TS
-   snippet) first and capture the exact command + result. (Enforced: the draft must
-   contain a fenced ```` ``` ```` reproduction block.)
+   snippet) first and capture the exact command + result. (Enforced: `reproduction` is a
+   required input of the tool, and `npm run verify:issue` requires a fenced
+   ```` ``` ```` reproduction block in a hand-written draft.)
 4. **Byte-identity / schema awareness** — keep default output byte-identical
    (`compression.deterministic: true` bytes are semver-major, see
    [`API_STABILITY.md`](../API_STABILITY.md) §3) and keep every JSON Schema aligned
@@ -80,7 +87,7 @@ and draft a high-quality issue.
 3. Confirm zero new runtime dependency is required (a hard blocker otherwise).
 4. Search existing open AND closed issues/PRs for duplicates.
 5. Decide the target: engine behaviour (parsing, writing, limits, codecs) → 'zipnative';
-   wrapper behaviour (schemas, sandbox, transport, projections) → 'zipnative-mcp'.
+   wrapper behaviour (schemas, sandbox, transport) → 'zipnative-mcp'.
 6. Call draft_governance_issue with the title, summary, issueType, targetRepo, reproduction,
    expected vs actual, and affected packages.
 7. Present the returned draft markdown AND the compliance report to the user.
@@ -103,19 +110,19 @@ The `draft_issue_workflow` MCP prompt returns exactly these steps.
 
 ## 5. Using the `draft_governance_issue` tool
 
-Minimal call — drafting an engine report from a `scan_zip_forward` observation:
+Minimal call — drafting an engine report from an `inspect_zip` observation:
 
 ```jsonc
 {
-  "title": "iterateZipEntries mis-detects the descriptor of a stored entry",
+  "title": "openZip validate:'eager' does not compare local-header methods with the central directory",
   "issueType": "bug",
   "targetRepo": "zipnative",
-  "summary": "A stored entry followed by a signed data descriptor is reported as truncated by the forward reader, while openZip() on the complete archive reads it and verifies its CRC.",
+  "summary": "The eager pass checks every entry's extent, but an archive whose local header declares another compression method than its central-directory record opens without error; reading the entry raw refuses it.",
   "reproduction": {
-    "command": "scan_zip_forward { zipBase64: <archive written by create_zip with compression.method:'store' and stream:true>, data: 'verify' }",
-    "result": "isError: true, _meta.error.code = ZIP_STREAM_TRUNCATED"
+    "command": "inspect_zip { zipBase64: <archive whose local-header method differs from its central-directory method>, validate: 'eager' }, then read_zip_entry { mode: 'raw' } on that entry",
+    "result": "inspect_zip returns a report with no error; read_zip_entry fails with _meta.error.code = ZIP_CD_LFH_MISMATCH"
   },
-  "expectedBehavior": "The entry is read and its CRC verified, as verify_zip reports for the same bytes.",
+  "expectedBehavior": "validate: 'eager' refuses the archive with ZIP_CD_LFH_MISMATCH at open time, as the engine documents for eager validation.",
   "affectedPackages": ["zipnative", "zipnative-mcp"],
   "duplicateSearchPerformed": true
 }
@@ -155,9 +162,12 @@ still shows both.
 
 The draft is rejected before you can submit it if it:
 
-- proposes an external runtime dependency,
-- omits a reproduction code block, or
+- proposes an external runtime dependency, or
 - sets `duplicateSearchPerformed: false`.
+
+A call without `reproduction` never reaches the policy: the field is required, so it is
+`VALIDATION_ERROR`. The tool always fences the reproduction command, so the "no
+reproduction code block" check fires only on a hand-written draft (`npm run verify:issue`).
 
 Fix the draft and call again. This keeps the human from ever submitting a
 contract-breaking issue.

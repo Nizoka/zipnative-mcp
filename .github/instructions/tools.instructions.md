@@ -13,9 +13,10 @@ applyTo: "src/tools/**,src/entry-spec.ts,src/entry.ts,src/filter.ts,src/projecti
 - The 39 `ZIP_*` codes pass through verbatim with the engine's message (which names the remedy) and `data` (limit /
   configured / observed, entryName, feature, CRCs). Wrapper codes are the 17 of `src/wrapper-codes.ts` only (meaning +
   remedy); a new one needs a row there, a row in docs/AGENT_CONTRACT.md §6 and a test (`verify:docs` `error-parity`).
-- Diagnostics ARE the signal for ZIP: every engine call takes `sink.options` (which also carry `dosTimeMode: 'utc'`, the
-  cancellation signal and the progress sink); every result spreads `sink.report()` (`diagnostics`, `diagnosticCounts`,
-  `diagnosticsTruncated`). `strict: true` escalates the first diagnostic.
+- Diagnostics ARE the signal for ZIP: every engine call that takes `ZipCommonOptions` takes `sink.options` (which also
+  carry `dosTimeMode: 'utc'`, the cancellation signal and the progress sink); every archive tool's result spreads
+  `sink.report()` (`diagnostics`, `diagnosticCounts`, `diagnosticsTruncated`) — `verify_zip` feeds the report's
+  diagnostics through a sink for the same cap and keeps its 1.0.0 shape (no `diagnosticCounts`). `strict: true` escalates the first diagnostic.
 - Deliberately unexposed engine exports (`addRaw`, `nameDecoder`, codec injection, …) are listed with the reason in
   `UNEXPOSED_EXPORTS` (`src/tools/describe-engine.ts`); exposing one is a reviewed decision, not a refactor.
 
@@ -56,7 +57,8 @@ export async function xTool(rawInput: unknown, context: CallContext = NO_CONTEXT
   form (`canonical-form`, `determinismReport`, `canonicalize_zip`) is the stricter one. Say each where an agent reads it.
 - The wrapper never reads a PK signature (AGENTS.md, faithful thin wrapper): `scan_zip_forward` classifies `stoppedAt`
   by byte accounting over a finely sliced tail, never by scanning bytes.
-- Long loops in a handler call `throwIfCancelled(context)` between their own steps; the engine stops on the signal itself.
+- Long loops in a handler call `throwIfCancelled(context)` between their own steps (`compute_crc32` and `inflate_raw` per
+  chunk); the engine stops on the signal itself where it takes one (`verifyZip` does not).
 
 ## Determinism and reproducibility
 - Default output must stay byte-identical across releases; `compression.deterministic: true` output changing is

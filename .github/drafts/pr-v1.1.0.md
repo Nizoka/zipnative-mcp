@@ -10,7 +10,7 @@
 zipnative-mcp 1.1.0 brings the server to zipnative 1.1.0. An MCP host gets two new tools — `canonicalize_zip` (any
 archive into the engine's canonical reproducible form, without recompression) and `merge_zip` (up to 32 source
 archives into one, every entry verified, without recompression) — byte-range reads of sandbox archives larger than
-memory, the Zip64 streaming opt-in, cancellation and progress on every engine call, extended timestamps and Unix ids,
+memory, the Zip64 streaming opt-in, cancellation and progress (every tool whose work grows with its input; `verify_zip` only before it starts), extended timestamps and Unix ids,
 and identical archive bytes on every host (`dosTimeMode: 'utc'`; 1.0.0 depended on the host time zone while declaring
 those calls cacheable). Every 1.0.0 call keeps working: the live catalogue is a checked superset of the frozen 1.0.0
 one, 39 of the 41 1.0.0 samples are unchanged (the other two quote the version), and `compression.deterministic: true`
@@ -31,8 +31,8 @@ the MCP registry publication job, Zip64 streaming, the engine's 1.1.0 asks (UTC 
 the engine, the zlib table removed).
 
 Counts (`docs/assets/ecosystem.json`): 15 tools (13 → 15), 7 prompts, 17 wrapper codes (16 → 17), 8 operator variables
-(7 → 8); examples 30 → 38; samples in the baseline 41 → 54; veraZIP corpus 38 → 43 archives; tests 1612 across
-78 files.
+(7 → 8); examples 30 → 38; samples in the baseline 41 → 54; veraZIP corpus 38 → 43 archives; tests 1632 across
+79 files.
 
 ## What changed
 
@@ -83,11 +83,11 @@ What actually ran on the release branch (Windows 11, Node 22.23.2):
 | Command | Result |
 |---|---|
 | `npx tsx scripts/gate.ts --publish --require-all` | 15 steps passed, 0 skipped (typecheck:all, lint, build, dist-check, dist-probe, smoke — 15 tools, verify:tool-shape, server-json, test:generate — 54 samples, test:coverage, verify:docs, verify:samples, corpus:zip — 39 conformant, 4 canaries, verazip, examples:check) |
-| `npm run test:coverage` — tests | 1605 passed, 7 skipped, 0 failed (1612) across 78 files |
-| `npm run test:coverage` — coverage | 98.17 % statements / 95.08 % branches / 98.71 % functions / 98.72 % lines (thresholds 94 / 90 / 95 / 94) |
+| `npm run test:coverage` — tests | 1625 passed, 7 skipped, 0 failed (1632) across 79 files |
+| `npm run test:coverage` — coverage | 98.16 % statements / 94.78 % branches / 98.74 % functions / 98.8 % lines (thresholds 94 / 90 / 95 / 94) |
 | `npm run build && npm run test:generate && npm run verify:samples` | 54 tracked samples match the baseline (16 byte-exact, 38 semantic) |
 | `npm run validate:zip` | 39 PASS, 4 XFAIL, 0 FAIL, 0 XPASS, 0 INFRA (of 43); level 1 locally: Info-ZIP unzip 6.00, 39/39 (the CI images add 7z, python, jar and bsdtar) |
-| `npx tsx scripts/tool-shape.ts --check` | tools/list matches tests/_fixtures/tool-shape.json (15 tools, 134857 bytes; instructions 5744 bytes) |
+| `npx tsx scripts/tool-shape.ts --check` | tools/list matches tests/_fixtures/tool-shape.json (15 tools, 118944 bytes; instructions 5954 bytes) |
 | `npm run verify:docs` | 27 rules passed over 34 documents, 1 skipped (npm-drift, online only) |
 | `npm audit --audit-level=high` | found 0 vulnerabilities (full tree) |
 | Built server over stdio (`node dist/cli.js`) | `initialize` 2025-06-18 → `zipnative-mcp 1.1.0`, `tools/list` 15 tools, stdout carries JSON-RPC frames only (2 lines, 0 other) |
@@ -95,7 +95,16 @@ What actually ran on the release branch (Windows 11, Node 22.23.2):
 Linux and macOS are proven by the CI of this pull request (no local Linux host); the `publish.yml` dry run
 (`workflow_dispatch`, `dry-run: true`) is the maintainer's pre-tag check.
 
-Independent audit: `/release-audit release-notes/v1.1.0.md v1.0.0` — PENDING (to run before the tag).
+Independent audit (the `.claude/skills/release-audit/` process, run on the branch from `v1.0.0`; reports under the git-ignored
+`.audit/1.1.0/`): two auditors (A — security, hardening, protocol, breaking changes; B — core coverage, documentation
+truth, token economy, agent autonomy), an adversarial verifier, then a second verifier pass on the fixes. 73 findings
+stamped: 57 confirmed, 7 downgraded, 2 rejected, 7 duplicates — 0 blocker, 7 major, 33 minor, 24 note. Every confirmed
+blocker / major / minor finding is fixed on this branch with a lock test named after it (`tests/audit-v1.1.0.test.ts`,
+`tests/sandbox.test.ts` A-013, `tests/cli-stdio.test.ts` A-020, `tests/tools/workflows.test.ts` A-004 / A-009 / A-010)
+or a documentation fix; A-005 and A-008 are repository settings (steps 3 and 4 below); three engine root causes are
+drafted for zipnative (`.github/drafts/issue-zipnative-{verifyzip-signal,eager-local-headers,diagnostic-doc-path}.md`).
+The 30 v1.0.0 examples replayed against the 1.1.0 build keep their shape. `tools/list` went from 134 857 to 118 944 bytes (`tool-shape.ts --stats`)
+(shorter shared descriptions, same schema shape).
 
 ## API stability
 
@@ -116,7 +125,7 @@ Independent audit: `/release-audit release-notes/v1.1.0.md v1.0.0` — PENDING (
   `019548d7fb0d676a` is asserted under Kiritimati and Anchorage by `tests/reproducible-build.test.ts`).
 - `tests/_fixtures/samples.sha256.json`: 2 entries re-anchored at 1.1.0 (`describe-engine`, `draft-governance-issue` —
   they quote the version), 13 new, 39 unchanged — reason in the manifest's `provenance` note.
-- Every item above is declared in the Upgrade section of `release-notes/v1.1.0.md` (C1–C14).
+- Every item above is declared in the Upgrade section of `release-notes/v1.1.0.md` (C1–C17).
 
 ## Out of scope (tracked in ROADMAP.md)
 
@@ -157,10 +166,11 @@ Agents stop at this draft; everything below is done by the maintainer (`.github/
 1. Push the branch, open the pull request with this body, wait for `ci (22)`, `ci (24)`, `os (windows-latest)`, `os (macos-latest)`, `sample-regression`, `verazip (ubuntu-latest)` and `verazip (windows-latest)`, merge.
 2. Close PRs #2, #4, #11 with the reasons above, and #3, #5, #6, #7, #8, #12, #13 as integrated if they do not close themselves; dismiss code-scanning #2 (won't fix, reason above) and, at your discretion, #5 and #6.
 3. Replace the live ruleset (it targets no branch): `gh api -X PUT repos/Nizoka/zipnative-mcp/rulesets/22472183 --input .github/rulesets/main.json`, then create the tag ruleset with `gh api -X POST repos/Nizoka/zipnative-mcp/rulesets --input .github/rulesets/tags.json`.
-4. Run `publish.yml` once with `workflow_dispatch` and `dry-run: true` from `main`.
+4. Protect the `npm-publish` environment (audit A-005: today it has no protection rule and admins can bypass): Settings → Environments → npm-publish → required reviewer = the maintainer, deployment branches and tags = `v*` tags only, "Allow administrators to bypass" off. Then run `publish.yml` once with `workflow_dispatch` and `dry-run: true` from `main`.
 5. Tag `v1.1.0` on the merge commit and publish the GitHub Release (title `v1.1.0 - zipnative 1.1.0 parity, canonicalize and merge, byte-range reads, supply-chain hardening`, body = `release-notes/v1.1.0.md`).
 6. Approve the `npm-publish` environment: `publish.yml` re-runs the publish gate, publishes through npm Trusted Publishing, attests the tarball and the SBOM, attaches them to the release and publishes `server.json` to the MCP registry. Confirm with `npm view zipnative-mcp version`.
 7. Update the `zipnative-mcp` entry of `docs/assets/ecosystem.json` in the sibling repositories (zipnative, zipnative-cli).
+8. Review and file the three upstream drafts under `.github/drafts/issue-zipnative-*.md` in Nizoka/zipnative under your own identity.
 
 ## Checklist
 

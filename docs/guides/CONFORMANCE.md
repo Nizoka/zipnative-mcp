@@ -213,7 +213,7 @@ node -e "import('./scripts/verazip-core.mjs').then(m => console.log(m.validateAr
 ## 7. Where it blocks
 
 - `.github/workflows/verazip.yml` — one matrix job running the same scripts with
-  `VERAZIP_REQUIRED=1` on **Linux and Windows**, on every push and pull request. The
+  `VERAZIP_REQUIRED=1` on **Linux and Windows**, on every push and pull request to `main`. The
   workflow carries no `paths:` filter, so it can be a required check without the
   "Expected — Waiting for status" trap; tool versions land in the job summary and the
   reports are uploaded as artifacts.

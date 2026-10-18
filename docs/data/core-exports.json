@@ -15,7 +15,7 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "merge_zip.verify → addFromReader(reader, entry, { verify }) (default true: every entry CRC- and size-checked before it is copied)"
+      "via": "merge_zip.verify → addFromReader(reader, entry, { verify }) (default true: every entry CRC- and size-checked before it is copied; an entry with no registered codec is refused with ZIP_UNSUPPORTED_METHOD instead of being copied unchecked)"
     },
     {
       "name": "AnalyzeDeterminismOptions",
@@ -316,7 +316,7 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "strict and limits on every engine-touching tool (EngineOptionsShape); dosTimeMode pinned to 'utc', signal (MCP cancellation) and onProgress (notifications/progress with a progressToken) installed by the diagnostic sink on every engine call; onDiagnostic is unexposed — the server always installs its own sink so every result carries diagnostics[]; nameDecoder is unexposed (a decoder is a function)"
+      "via": "strict and limits on every engine-touching tool (EngineOptionsShape); dosTimeMode pinned to 'utc', signal (MCP cancellation) and onProgress (notifications/progress with a progressToken) installed by the diagnostic sink on every engine call that takes ZipCommonOptions (verifyZip takes only limits, so verify_zip cannot be interrupted once it starts); onDiagnostic is unexposed — the server always installs its own sink so every archive tool's result carries diagnostics[]; nameDecoder is unexposed in 1.1.0 (a decoder is a function; a label-based, closed-enum input is a later candidate)"
     },
     {
       "name": "ZipCompressionOptions",
@@ -519,7 +519,7 @@
       "kind": "type",
       "subpath": ".",
       "reach": "capability",
-      "via": "_meta.error.data.feature ('zipcrypto' | 'strong-encryption' | 'multi-disk' | 'zip64-streaming' | 'cd-less-descriptor' | 'method:<n>')"
+      "via": "_meta.error.data.feature ('zipcrypto' | 'strong-encryption' | 'aes' | 'multi-disk' | 'zip64-streaming' | 'cd-less-descriptor' | 'method:<n>')"
     },
     {
       "name": "ZipVerificationReport",

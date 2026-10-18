@@ -19,11 +19,11 @@ The `reproducible_archive` MCP prompt is the short form of this page.
 |---|---|---|---|
 | **1 — structurally deterministic, always** | Entry order, header layout, flags, attributes, timestamps and Zip64 decisions never depend on the clock, randomness, locale, time zone or environment. Two `create_zip` calls with identical inputs produce structurally identical archives everywhere. | The defaults. Do not pass `defaultDate: 'now'` or a wall-clock per-entry `date`. | `inspect_zip.determinism.deterministic: true` (epoch timestamps + canonical order + UTF-8 flags) on the result |
 | **2 — bitwise deterministic per environment, the default** | Deflate compresses through the best available tier (`node:zlib` in this server), so the bytes are stable for a given Node + zlib build, but may differ across environments. | The defaults again. | `create_zip.summary.deflateTier: 'node-zlib'`, `summary.deterministic: false`; the `ZIP_NONDETERMINISTIC_CODEC` diagnostic when an explicit date is pinned but the codec is not |
-| **3 — bitwise deterministic everywhere** | The pure-TS encoder is pinned: `SHA256(A) === SHA256(B)` for identical inputs on every runtime (Node versions, Bun, Deno, browsers). The mode for content addressing, reproducible builds, caching and signatures. Changing these bytes is semver-major, upstream and here. | `compression: { deterministic: true }` at archive level (or on every entry). Slower than zlib. | `summary.deflateTier: 'pure-pinned'`, `summary.deterministic: true` (only when every entry is pinned and no wall-clock date is used), `summary.sha256` with `includeSha256: true` |
+| **3 — bitwise deterministic everywhere** | The pure-TS encoder is pinned: `SHA256(A) === SHA256(B)` for identical inputs on every runtime (Node versions, Bun, Deno, browsers). The mode for content addressing, reproducible builds, caching and signatures. Changing these bytes is semver-major, upstream and here. | `compression: { deterministic: true }` at archive level (a per-entry pin without it compresses that entry with the pure encoder, but the summary then reports `deterministic: false` and `deflateTier: 'node-zlib'`: both read the archive-level option). Slower than zlib. | `summary.deflateTier: 'pure-pinned'`, `summary.deterministic: true` (only with the archive-level pin, no entry overriding it, and no wall-clock date), `summary.sha256` with `includeSha256: true` |
 
 `summary.deterministic` therefore answers "are these bytes reproducible *across
 runtimes*?" — the strict question — and is `true` **only** under
-`compression: { deterministic: true }` (on every entry) with no wall-clock date. A
+`compression: { deterministic: true }` at archive level (no entry overriding it) with no wall-clock date. A
 default `create_zip` call is reproducible on the runtime that made it (level 2) and
 reports `summary.deterministic: false` with `summary.deflateTier: 'node-zlib'`: that is
 the honest answer, not a defect. `inspect_zip.determinism.deterministic` answers the
@@ -80,8 +80,13 @@ clock and `lastModified` reads back as the same instant on every host. A `Z` /
 (`2024-06-01T12:34:56`) is taken as the UTC wall clock. Up to 1.0.0 the engine used the
 host's zone: a pinned `Z` date produced different bytes in Paris and on a UTC runner
 (and the response cache treated them as one call). 1.1.0 bytes equal the 1.0.0 bytes
-under `TZ=UTC` and the DOS fields 1.0.0 wrote for an offset-less date-time in every
-zone; `tests/reproducible-build.test.ts` drives the built server under
+under `TZ=UTC` — `compression.deterministic: true` bytes included: on a non-UTC host a
+pinned `Z` / offset date gives different bytes than 1.0.0 gave there — and the DOS fields
+1.0.0 wrote for an offset-less date-time in every zone. The read side moved with it: on a
+non-UTC host every archive's `lastModified` and `earliestDate` / `latestDate` differ from
+what 1.0.0 reported there by the zone offset (the DOS epoch reads
+`1980-01-01T00:00:00.000Z`, where 1.0.0 in Paris reported `1979-12-31T23:00:00.000Z`),
+and an archive another tool wrote in local time reads shifted by its producer's offset; `tests/reproducible-build.test.ts` drives the built server under
 Pacific/Kiritimati and America/Anchorage and asserts identical bytes. The
 `ZIP_TIMESTAMP_CLAMPED` diagnostic of the engine is unreachable here: a date outside
 1980–2107 is `VALIDATION_ERROR` before the engine sees it.
@@ -96,8 +101,9 @@ tripwire, and a byte change is semver-major there and here
 ([`API_STABILITY.md`](../API_STABILITY.md) §3).
 
 - Set it at archive level to pin every entry; a per-entry `compression.deterministic`
-  may override in either direction, and `summary.deterministic` is `true` only when
-  no entry is left unpinned and no wall-clock date is used — never for a call that
+  may override in either direction, and `summary.deterministic` is `true` only with
+  the archive-level pin, no entry overriding it, and no wall-clock date (pinning every
+  entry one by one still reports `false`) — never for a call that
   relies on the default tier, however reproducible its bytes are on one runtime.
 - `level` still applies (0–9, default 6) — it is part of the input, not of the
   environment.
@@ -156,11 +162,12 @@ keepComments?, keepExternalAttributes? }` (`{}` takes the defaults) applies the
 operations, drops the dead bytes and rewrites into the same canonical form —
 `saveCompact({ canonical })`, still without recompression; `summary.canonical: true`
 says so. `canonical` is refused on `mode: 'append'`, which keeps the original bytes
-verbatim by definition.
+verbatim by definition. A plain compaction (no `canonical`) sorts the entries by raw name
+bytes too, so it never preserves an insertion-ordered layout.
 
 The canonical form deliberately leaves the payloads alone: an archive whose entries
-were deflated by different tools stays that way, and an encrypted or corrupt entry
-travels unchanged. Canonicalise for reproducible *packaging*; pin the encoder
+were deflated by different tools stays that way, an encrypted or corrupt entry
+travels unchanged, and so does an unsafe name (`../../x` — `extract_zip` still refuses it). Canonicalise for reproducible *packaging*; pin the encoder
 (`create_zip` with `deterministic: true`) for reproducible *compression*.
 
 ## 6. Merged archives

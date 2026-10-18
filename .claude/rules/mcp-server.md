@@ -25,7 +25,9 @@ paths:
 - Never write to stdout except MCP protocol payloads (use stderr for logs; eslint `no-console`); every engine call goes
   through a diagnostic sink (`src/diagnostics.ts`) so the engine's `console.warn` fallback can never fire.
 - Cancellation and progress: the request's signal and, only with a `_meta.progressToken`, a progress sink reach every
-  engine call through the sink (`src/call-context.ts`); a cancelled call is `CANCELLED`, never cached, its partial file removed.
+  engine call that takes them through the sink (`src/call-context.ts`); a cancelled call is `CANCELLED` in-process (over MCP
+  the SDK sends no response), never cached, its partial file removed. `verifyZip` takes no signal: `verify_zip` checks it
+  once before the verification, which then runs to completion — never claim it is interruptible.
 
 ## Tool contract
 - Each tool module exports `<NAME>_NAME`, `<NAME>_INPUT_SCHEMA`, optional `<NAME>_OUTPUT_SCHEMA` (+ `_SUMMARY_PROPERTIES`
@@ -46,8 +48,9 @@ paths:
   `_meta.examples` (validated against `inputSchema` in tests; more examples belong in `examples/*.json`).
 - Read tools are projectable: `verbosity:'summary'` collapses to the tool's summary (`*Summary()` in the tool module) and
   `fields:[…]` keeps dot-paths; their advertised `outputSchema` is the full shape with every property optional
-  (`projectableOutputSchema`). Archive-producing tools return the bytes as an embedded `resource` block (base64) or a
-  `resource_link` (file mode) and never duplicate them in `structuredContent`.
+  (`projectableOutputSchema`). Archive-producing tools return the bytes as an embedded `resource` block (base64 — the
+  bytes in `blob` and again in the `data:` URI of `uri`, the 1.0.0 shape) or a `resource_link` (file mode) and never put
+  them in `structuredContent`.
 - `tools/list` structure is pinned by `tests/_fixtures/tool-shape.json`; any change to types, enums, defaults, constraints,
   `required`, `additionalProperties` or example count needs `npm run build && npx tsx scripts/tool-shape.ts --write` and a
   review; `tests/_fixtures/tool-shape.v1.0.0.json` is the frozen baseline the live catalogue must stay a superset of
@@ -60,7 +63,7 @@ paths:
 - `callToolDirect` serves the opt-in cache (`ZIPNATIVE_MCP_CACHE_DIR`); `isCacheable` excludes `zipPath` / `sourcePath`
   inputs (also nested in `entries`, `operations`, `sources`), `outputMode:'file'`, `defaultDate:'now'`, `parallel`,
   `describe_engine` and `draft_governance_issue`; a cancelled call is never stored. The key namespace includes the tool
-  API, package and engine versions. Add a new tool to `NON_CACHEABLE_TOOLS` when its output depends on the environment.
+  API, package and engine versions and the four operator ceilings (`cacheNamespace()`). Add a new tool to `NON_CACHEABLE_TOOLS` when its output depends on the environment.
 
 ## Safety
 - Never trust tool arguments — validate at the boundary with Zod; every path goes through `src/sandbox.ts`; every size

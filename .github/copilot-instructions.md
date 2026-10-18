@@ -48,15 +48,17 @@ ISO/IEC 21320-1 conformance validated in CI — the veraZIP gate).
 - src/archive-input.ts — `zipBase64` XOR `zipPath` (sandbox), `loadArchive`, `openArchive` (`access` auto / memory / range:
   zipnative's `openZipRange` over the sandbox file's own handle), `openArchiveSource` (bounded ByteSource), `isPathInput`.
 - src/base64.ts — base64 boundary helpers with agent-facing diagnostics (data: URI, PEM, double encoding).
-- src/cache.ts — opt-in content-addressed response cache (`ZIPNATIVE_MCP_CACHE_DIR`, SHA-256 key, 1 h TTL, LRU sweep);
-  never for paths, file output, `defaultDate:'now'`, `parallel`, describe_engine, draft_governance_issue.
+- src/cache.ts — opt-in content-addressed response cache (`ZIPNATIVE_MCP_CACHE_DIR`, absolute; SHA-256 key namespaced by the
+  versions and the four ceilings, 1 h TTL, oldest-written evicted first); never for paths, file output, `defaultDate:'now'`,
+  `parallel`, describe_engine, draft_governance_issue.
 - src/call-context.ts — the request's cancellation signal and progress sink (`CANCELLED`, `notifications/progress`).
 - src/canonical.ts — the canonical-form options (`date`, `keepComments`, `keepExternalAttributes`) shared by canonicalize_zip and modify_zip.
 - src/caps.ts — every byte/count bound on top of the engine's `ZipLimits` + the four operator ceilings
   (`ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES`, `ZIPNATIVE_MCP_MAX_ENTRIES`, `ZIPNATIVE_MCP_WORKERS`,
   `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES`; `readCeilings` / `getCeilings`); every constant is in `CAPS`.
 - src/diagnostics.ts — `createDiagnosticSink`: every engine call's `onDiagnostic`, `dosTimeMode: 'utc'`, signal and progress go
-  through a sink; every result carries `diagnostics[]` (de-duplicated, capped at 200) + `diagnosticCounts`.
+  through a sink; every archive tool's result carries `diagnostics[]` (de-duplicated, capped at 200) + `diagnosticCounts`
+  (verify_zip: the report's diagnostics through the same cap, no `diagnosticCounts` — `verifyZip` takes no sink).
 - src/engine.ts — `ensureEngineReady` (node:zlib codec tier, memoised) and `probeRuntime`.
 - src/entry.ts — the shared `EntryView` JSON row (`viewFromEntry` / `viewFromHeader`, `ENTRY_VIEW_SCHEMA`).
 - src/entry-spec.ts — the per-entry payload for create/modify (`dataBase64` | `text` | `sourcePath` | `directory`, compression,
