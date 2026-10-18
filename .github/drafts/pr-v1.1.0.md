@@ -102,7 +102,7 @@ stamped: 57 confirmed, 7 downgraded, 2 rejected, 7 duplicates — 0 blocker, 7 m
 blocker / major / minor finding is fixed on this branch with a lock test named after it (`tests/audit-v1.1.0.test.ts`,
 `tests/sandbox.test.ts` A-013, `tests/cli-stdio.test.ts` A-020, `tests/tools/workflows.test.ts` A-004 / A-009 / A-010)
 or a documentation fix; A-005 and A-008 are repository settings (steps 3 and 4 below); three engine root causes are
-drafted for zipnative (kept local and git-ignored: `.github/drafts/upstream-zipnative-{eager-local-headers,verify-async,diagnostic-doc-path}.md`).
+drafted for zipnative (kept local and git-ignored in the zipnative checkout: `.github/drafts/{advisory-eager-local-headers,issue-verify-zip-async,issue-determinism-doc-path}.md`).
 A final independent review (fresh reviewer, the artefact, the fix commits, the blind spots) followed: its findings are
 closed on the branch — a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame now run in the publish gate and
 weekly (`ZIPNATIVE_MCP_SLOW_TESTS`), a `__proto__` key is tested over a real stdio frame (the SDK strips a root-level
@@ -178,7 +178,7 @@ Agents stop at this draft; everything below is done by the maintainer (`.github/
 5. Tag `v1.1.0` on the merge commit and publish the GitHub Release (title `v1.1.0 - zipnative 1.1.0 parity, canonicalize and merge, byte-range reads, supply-chain hardening`, body = `release-notes/v1.1.0.md`).
 6. Approve the `npm-publish` environment: `publish.yml` re-runs the publish gate, publishes through npm Trusted Publishing, attests the tarball and the SBOM, attaches them to the release and publishes `server.json` to the MCP registry. Confirm with `npm view zipnative-mcp version`.
 7. Update the `zipnative-mcp` entry of `docs/assets/ecosystem.json` in the sibling repositories (zipnative, zipnative-cli).
-8. Review and file the three upstream drafts (local, git-ignored: `.github/drafts/upstream-zipnative-*.md`) in Nizoka/zipnative under your own identity.
+8. In Nizoka/zipnative, under your own identity: file `advisory-eager-local-headers.md` as a private security advisory (Security → Advisories → New draft advisory — a security weakness, never a public issue, per its SECURITY.md), and `issue-verify-zip-async.md` / `issue-determinism-doc-path.md` as public issues (the doc path can be a direct pull request). The drafts are local and git-ignored in the zipnative checkout, under `.github/drafts/`.
 
 ## Checklist
 
