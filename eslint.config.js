@@ -14,6 +14,8 @@ export default tseslint.config(
         rules: {
             '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
             '@typescript-eslint/no-explicit-any': 'error',
+            'no-shadow': 'off',
+            '@typescript-eslint/no-shadow': 'error',
             '@typescript-eslint/no-non-null-assertion': 'warn',
             '@typescript-eslint/consistent-type-imports': ['error', { prefer: 'type-imports', fixStyle: 'inline-type-imports' }],
             'eqeqeq': ['error', 'always'],
@@ -23,6 +25,8 @@ export default tseslint.config(
             'no-eval': 'error',
             'no-implied-eval': 'error',
             'no-new-func': 'error',
+            // On stdio, stdout IS the JSON-RPC channel: a stray console.log corrupts every host.
+            'no-console': ['error', { allow: ['warn', 'error'] }],
         },
     },
     {

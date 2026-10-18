@@ -95,35 +95,195 @@ export function resolveOutputDir(userPath: unknown, what = 'outputDir'): string 
     return resolveRelative(userPath, what).resolved;
 }
 
+/** Resolve a relative sandbox path (no extension rule): resource reads, directories. */
+export function resolveSandboxPath(userPath: unknown, what = 'path'): string {
+    return resolveRelative(userPath, what).resolved;
+}
+
+/** A sandbox file held open for reading: the handle, and the size of what it holds. */
+export interface OpenSandboxFile {
+    readonly handle: fs.FileHandle;
+    readonly size: number;
+}
+
 /**
- * Resolve a relative input file inside the sandbox and stat it. Throws
- * `INPUT_NOT_FOUND` when absent (message carries the relative path only) and
- * `INVALID_EXTENSION` when `extensions` is given and the name does not match.
+ * Open a resolved sandbox file for reading, race-free (ported from
+ * pkinative-mcp 1.0.0): the handle is opened first, then the size and the
+ * kind come from the handle (`fstat`), then the REAL location of the path is
+ * proven inside the real sandbox (a pre-planted junction / symlink must not
+ * redirect a read outside it — the file itself, not only its parent) and bound
+ * to the open file (same device and inode: a path swapped between the open and
+ * the check is refused). Nothing is read from the path after the check, only
+ * from the handle. Returns `'absent'` when nothing can be opened there,
+ * `'not-a-file'` for a directory or a special file (both closed); throws
+ * `SECURITY_VIOLATION`. The caller closes the handle it receives.
+ *
+ * Up to 1.0.0 every read stat-ed the path, checked its real path, then
+ * re-opened the PATH (CodeQL js/file-system-race): a file swapped in between
+ * was read unchecked.
  */
-export async function resolveInputFile(
-    userPath: unknown,
-    extensions: readonly string[] | null,
-    what = 'zipPath',
-): Promise<{ resolved: string; size: number }> {
+export async function openSandboxFile(resolved: string, what = 'path'): Promise<OpenSandboxFile | 'absent' | 'not-a-file'> {
+    let handle: fs.FileHandle;
+    try {
+        handle = await fs.open(resolved, 'r');
+    } catch {
+        return 'absent';
+    }
+    try {
+        const opened = await handle.stat({ bigint: true });
+        if (!opened.isFile()) {
+            await handle.close();
+            return 'not-a-file';
+        }
+        const real = await realpathInside(resolved, what);
+        const located = await fs.stat(real, { bigint: true });
+        if (located.dev !== opened.dev || located.ino !== opened.ino) {
+            throw new SecurityError(`Refusing ${what} '${relativeLabel(resolved)}': the file changed while it was being opened.`);
+        }
+        return { handle, size: Number(opened.size) };
+    } catch (err) {
+        await handle.close();
+        throw err;
+    }
+}
+
+function changedWhileReading(what: string, grew: boolean): ToolError {
+    return new ToolError('IO_ERROR', `${what} changed while it was being read (${grew ? 'grew' : 'shrank'}) — retry once the file is complete.`, { remedy: 'retry' });
+}
+
+/**
+ * Read exactly `size` bytes from an open handle, from its start. One probe
+ * byte past `size` detects a file that grew, a short read one that shrank:
+ * either is `IO_ERROR` (the size the caller was given no longer describes
+ * the bytes), never a silent truncation.
+ */
+export async function readExactly(handle: fs.FileHandle, size: number, what = 'path'): Promise<Uint8Array> {
+    const buffer = new Uint8Array(size + 1);
+    let total = 0;
+    while (total < buffer.byteLength) {
+        const { bytesRead } = await handle.read(buffer, total, buffer.byteLength - total, total);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+    }
+    if (total !== size) throw changedWhileReading(what, total > size);
+    return buffer.subarray(0, size);
+}
+
+/** A sandbox input held open: its size, a positional reader, a one-pass chunk stream, and an idempotent close. */
+export interface OpenedInput {
+    readonly resolved: string;
+    readonly size: number;
+    /** Read `length` bytes at `position` (short only at the end of the file). */
+    read(position: number, length: number): Promise<Uint8Array>;
+    /**
+     * Stream the whole file from the handle in `chunkSize` pieces, then probe
+     * one byte past the end: a file that grew or shrank under the read is
+     * `IO_ERROR`. Closes the handle when the stream ends, fails or is abandoned.
+     */
+    chunks(chunkSize?: number): AsyncGenerator<Uint8Array, void, undefined>;
+    close(): Promise<void>;
+}
+
+function notFound(what: string, userPath: unknown, kind: 'absent' | 'not-a-file'): ToolError {
+    return kind === 'absent'
+        ? new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' does not exist in the sandbox — list the sandbox with resources/list, or pass the bytes as base64.`, { path: String(userPath), remedy: 'resources/list' })
+        : new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' is not a regular file — name a file listed by resources/list.`, { path: String(userPath), remedy: 'resources/list' });
+}
+
+/**
+ * Open a relative input file inside the sandbox through one handle. Throws
+ * `INVALID_EXTENSION` when `extensions` is given and the name does not match,
+ * `INPUT_NOT_FOUND` when absent or not a regular file (the message carries
+ * the relative path only), `SECURITY_VIOLATION` from the sandbox checks.
+ * The caller closes the result (or drains `chunks()`, which closes it).
+ */
+export async function openInputFile(userPath: unknown, extensions: readonly string[] | null, what = 'zipPath'): Promise<OpenedInput> {
     const { resolved } = resolveRelative(userPath, what);
     if (extensions !== null && !hasAllowedExtension(resolved, extensions)) {
         throw new ToolError('INVALID_EXTENSION', `${what} must end with one of: ${extensions.join(', ')}.`);
     }
-    let stat;
+    const opened = await openSandboxFile(resolved, what);
+    if (opened === 'absent' || opened === 'not-a-file') throw notFound(what, userPath, opened);
+    const { handle, size } = opened;
+    const label = `${what} '${String(userPath)}'`;
+    let closed = false;
+    const close = async (): Promise<void> => {
+        if (closed) return;
+        closed = true;
+        await handle.close();
+    };
+    return {
+        resolved,
+        size,
+        async read(position: number, length: number): Promise<Uint8Array> {
+            const buffer = new Uint8Array(length);
+            let total = 0;
+            while (total < length) {
+                const { bytesRead } = await handle.read(buffer, total, length - total, position + total);
+                if (bytesRead === 0) break;
+                total += bytesRead;
+            }
+            return total === length ? buffer : buffer.subarray(0, total);
+        },
+        async *chunks(chunkSize = 64 * 1024): AsyncGenerator<Uint8Array, void, undefined> {
+            try {
+                let position = 0;
+                while (position < size) {
+                    const buffer = new Uint8Array(Math.min(chunkSize, size - position));
+                    const { bytesRead } = await handle.read(buffer, 0, buffer.byteLength, position);
+                    if (bytesRead === 0) throw changedWhileReading(label, false);
+                    position += bytesRead;
+                    yield bytesRead === buffer.byteLength ? buffer : buffer.subarray(0, bytesRead);
+                }
+                const probe = await handle.read(new Uint8Array(1), 0, 1, size);
+                if (probe.bytesRead !== 0) throw changedWhileReading(label, true);
+            } finally {
+                await close();
+            }
+        },
+        close,
+    };
+}
+
+/**
+ * Read a relative input file inside the sandbox through one open handle.
+ * `before` runs with the size once the file is open and proven, before any
+ * byte is read: the caller's caps and refusals go there. Errors as
+ * {@link openInputFile}, plus `IO_ERROR` when the file changed under the read.
+ */
+export async function readInputFile(
+    userPath: unknown,
+    extensions: readonly string[] | null,
+    what = 'zipPath',
+    before: (size: number) => void = () => undefined,
+): Promise<{ resolved: string; bytes: Uint8Array }> {
+    const input = await openInputFile(userPath, extensions, what);
     try {
-        stat = await fs.stat(resolved);
-    } catch {
-        throw new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' does not exist in the sandbox — list the sandbox with resources/list, or pass the bytes as base64.`, { path: String(userPath), remedy: 'resources/list' });
+        before(input.size);
+        return { resolved: input.resolved, bytes: await readExactlyFrom(input, `${what} '${String(userPath)}'`) };
+    } finally {
+        await input.close();
     }
-    if (!stat.isFile()) {
-        throw new ToolError('INPUT_NOT_FOUND', `${what} '${String(userPath)}' is not a regular file — name a file listed by resources/list.`, { path: String(userPath), remedy: 'resources/list' });
+}
+
+async function readExactlyFrom(input: OpenedInput, what: string): Promise<Uint8Array> {
+    const bytes = await input.read(0, input.size + 1);
+    if (bytes.byteLength !== input.size) throw changedWhileReading(what, bytes.byteLength > input.size);
+    return bytes;
+}
+
+/**
+ * The real path of `target`, proven inside the real sandbox. Throws
+ * `SECURITY_VIOLATION` when a symlink or junction puts it elsewhere.
+ */
+export async function realpathInside(target: string, what = 'outputPath'): Promise<string> {
+    const sandbox = requireSandbox();
+    const [realSandbox, realTarget] = await Promise.all([fs.realpath(sandbox), fs.realpath(target)]);
+    const relative = path.relative(realSandbox, realTarget);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+        throw new SecurityError(`Refusing ${what} '${relativeLabel(target)}': its real location (a symlink or junction) is outside the sandbox.`);
     }
-    // The read side gets the same defence in depth as the write side: the REAL
-    // location of the file itself (not only its parent — a file symlink would
-    // otherwise pass) must live inside the real sandbox, so a pre-planted
-    // junction / symlink can never redirect a read outside it.
-    await assertRealpathInside(resolved, what);
-    return { resolved, size: stat.size };
+    return realTarget;
 }
 
 /**
@@ -133,31 +293,26 @@ export async function resolveInputFile(
  * write). Throws `SECURITY_VIOLATION`.
  */
 export async function assertRealpathInside(target: string, what = 'outputPath'): Promise<void> {
-    const sandbox = requireSandbox();
-    const [realSandbox, realTarget] = await Promise.all([fs.realpath(sandbox), fs.realpath(target)]);
-    const relative = path.relative(realSandbox, realTarget);
-    if (relative.startsWith('..') || path.isAbsolute(relative)) {
-        throw new SecurityError(`Refusing ${what} '${relativeLabel(target)}': its real location (a symlink or junction) is outside the sandbox.`);
-    }
+    await realpathInside(target, what);
 }
 
 /** Map a Node fs error on a write to the wrapper codes (never leaks the absolute path). */
-export function mapWriteError(err: unknown, relativeLabel: string): ToolError {
+export function mapWriteError(err: unknown, label: string): ToolError {
     const code = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
     if (code === 'EEXIST') {
-        return new ToolError('OUTPUT_EXISTS', `'${relativeLabel}' already exists in the sandbox — the server never overwrites; choose another path.`, { path: relativeLabel });
+        return new ToolError('OUTPUT_EXISTS', `'${label}' already exists in the sandbox — the server never overwrites; choose another path.`, { path: label });
     }
     const message = err instanceof Error ? err.message : String(err);
-    return new ToolError('IO_ERROR', `Could not write '${relativeLabel}': ${code ?? 'error'} — ${message.replace(/'[^']*'/g, "'…'")}`, { path: relativeLabel, ...(code !== undefined ? { errno: code } : {}) });
+    return new ToolError('IO_ERROR', `Could not write '${label}': ${code ?? 'error'} — ${message.replace(/'[^']*'/g, "'…'")}`, { path: label, ...(code !== undefined ? { errno: code } : {}) });
 }
 
 /** Write bytes exclusively (`wx`), creating parent directories. */
-export async function writeExclusive(resolved: string, bytes: Uint8Array, relativeLabel: string): Promise<void> {
-    await ensureParent(resolved, relativeLabel);
+export async function writeExclusive(resolved: string, bytes: Uint8Array, label: string): Promise<void> {
+    await ensureParent(resolved, label);
     try {
         await fs.writeFile(resolved, bytes, { flag: 'wx' });
     } catch (err) {
-        throw mapWriteError(err, relativeLabel);
+        throw mapWriteError(err, label);
     }
 }
 
@@ -186,12 +341,12 @@ export async function assertAncestorInside(target: string, what = 'outputPath'):
 }
 
 /** Create the parent directory (mapping fs failures such as a file in the way) and check its real path. */
-export async function ensureParent(resolved: string, relativeLabel: string): Promise<void> {
+export async function ensureParent(resolved: string, label: string): Promise<void> {
     await assertAncestorInside(path.dirname(resolved));
     try {
         await fs.mkdir(path.dirname(resolved), { recursive: true });
     } catch (err) {
-        throw mapWriteError(err, relativeLabel);
+        throw mapWriteError(err, label);
     }
     await assertRealpathInside(path.dirname(resolved));
 }
@@ -200,12 +355,12 @@ export async function ensureParent(resolved: string, relativeLabel: string): Pro
  * Open an exclusive write stream (`wx`) after the same guards. The caller
  * owns the stream and must unlink the file on failure via {@link discardPartial}.
  */
-export async function openExclusiveWriteStream(resolved: string, relativeLabel: string): Promise<WriteStream> {
-    await ensureParent(resolved, relativeLabel);
+export async function openExclusiveWriteStream(resolved: string, label: string): Promise<WriteStream> {
+    await ensureParent(resolved, label);
     const stream = createWriteStream(resolved, { flags: 'wx' });
     await new Promise<void>((resolveOpen, reject) => {
         stream.once('open', () => resolveOpen());
-        stream.once('error', (err) => reject(mapWriteError(err, relativeLabel)));
+        stream.once('error', (err) => reject(mapWriteError(err, label)));
     });
     return stream;
 }

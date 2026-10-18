@@ -147,7 +147,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -412,7 +413,8 @@
        "maxItems": 32,
        "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 1024
        }
       },
       "includeDirectories": {
@@ -491,7 +493,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -864,7 +867,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -1238,7 +1242,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -1406,7 +1411,8 @@
        "maxItems": 32,
        "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 1024
        }
       },
       "includeDirectories": {
@@ -1494,7 +1500,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -1685,7 +1692,8 @@
        "maxItems": 32,
        "items": {
         "type": "string",
-        "minLength": 1
+        "minLength": 1,
+        "maxLength": 1024
        }
       },
       "includeDirectories": {
@@ -1760,7 +1768,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -2089,7 +2098,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -3159,7 +3169,8 @@
      "maxItems": 16,
      "items": {
       "type": "string",
-      "minLength": 1
+      "minLength": 1,
+      "pattern": "^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$"
      }
     }
    }
@@ -3368,7 +3379,8 @@
     },
     "summary": {
      "type": "string",
-     "minLength": 16
+     "minLength": 16,
+     "maxLength": 16384
     },
     "issueType": {
      "type": "string",
@@ -3396,20 +3408,24 @@
      "properties": {
       "command": {
        "type": "string",
-       "minLength": 1
+       "minLength": 1,
+       "maxLength": 16384
       },
       "result": {
        "type": "string",
-       "minLength": 1
+       "minLength": 1,
+       "maxLength": 16384
       }
      }
     },
     "expectedBehavior": {
      "type": "string",
-     "minLength": 4
+     "minLength": 4,
+     "maxLength": 16384
     },
     "actualBehavior": {
-     "type": "string"
+     "type": "string",
+     "maxLength": 16384
     },
     "affectedPackages": {
      "type": "array",

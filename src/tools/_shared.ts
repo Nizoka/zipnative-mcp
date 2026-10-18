@@ -7,11 +7,12 @@ import { z } from 'zod';
 import { MAX_FIELDS_PATHS } from '../caps.js';
 import { ToolError } from '../errors.js';
 import { LimitsSchema } from '../limits.js';
+import { FIELD_PATH_PATTERN } from '../projection.js';
 
 /** `verbosity` / `fields` (see `PROJECTION_INPUT_PROPERTIES`). */
 export const ProjectionShape = {
     verbosity: z.enum(['full', 'summary']).default('full'),
-    fields: z.array(z.string().min(1)).max(MAX_FIELDS_PATHS).optional(),
+    fields: z.array(z.string().min(1).regex(new RegExp(FIELD_PATH_PATTERN))).max(MAX_FIELDS_PATHS).optional(),
 };
 
 /** `strict` / `limits` (see `LIMITS_INPUT_SCHEMA`). */

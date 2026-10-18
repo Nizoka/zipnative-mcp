@@ -641,7 +641,8 @@ src/
 ├── projection.ts               # verbosity / fields projection for the read tools
 ├── cache.ts                    # opt-in SHA-256 response cache (ZIPNATIVE_MCP_CACHE_DIR)
 ├── governance.ts               # AI-governance / HITL contract text + draft validation
-├── errors.ts                   # ToolError, SecurityError, GovernanceError
+├── errors.ts                   # ToolError, SecurityError, GovernanceError, absolute-path redaction
+├── wrapper-codes.ts            # the wrapper's own error codes with meaning and remedy
 ├── version.ts                  # ZIPNATIVE_MCP_VERSION, TOOL_API_VERSION
 ├── index.ts                    # public library exports
 └── tools/

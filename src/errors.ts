@@ -46,3 +46,16 @@ export class GovernanceError extends ToolError {
         super('GOVERNANCE_VIOLATION', message);
     }
 }
+
+/**
+ * Replace every absolute filesystem path in a message with `<path>`: a POSIX
+ * path of two segments or more, a Windows drive path, or a UNC path. Used on
+ * messages the server did not write itself (a raw Node or runtime error), so
+ * an escaped `ENOENT, open 'C:\Users\…'` never tells the client where the
+ * server runs. URIs (`zipnative://output/…`) and relative names are kept.
+ */
+export function redactAbsolutePaths(message: string): string {
+    return message
+        .replace(/(?:\b[A-Za-z]:[\\/]|\\\\)[^\s'"`,;)]*/g, '<path>')
+        .replace(/(?<![\w:/.~-])\/(?:[^\s'"`,;)/]+\/)+[^\s'"`,;)]*/g, '<path>');
+}

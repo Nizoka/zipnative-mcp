@@ -3,7 +3,8 @@
  */
 import { describe, it, expect } from 'vitest';
 
-import { compileEntryFilter, compileGlob, FILTER_INPUT_SCHEMA, FilterSchema, isPassThrough } from '../src/filter.js';
+import { MAX_GLOB_LENGTH } from '../src/caps.js';
+import { compileEntryFilter, compileGlob, FILTER_INPUT_SCHEMA, FilterSchema, globError, GlobSyntaxError, isPassThrough } from '../src/filter.js';
 
 function matches(pattern: string, name: string): boolean {
     return compileGlob(pattern).test(name);
@@ -66,6 +67,108 @@ describe('compileGlob', () => {
         expect(matches('src\\*.js', 'src/index.js')).toBe(true);
         expect(matches('./src/*.js', 'src/index.js')).toBe(true);
         expect(matches('Src/*.js', 'src/index.js')).toBe(false);
+    });
+});
+
+/**
+ * The 1.0.0 translation to a backtracking RegExp, kept here as the reference
+ * semantics: the linear matcher must agree with it on every input where the
+ * RegExp is well-defined.
+ */
+function referenceRegex(pattern: string): RegExp {
+    let p = pattern.replace(/\\/g, '/');
+    if (p.startsWith('./')) p = p.slice(2);
+    let source = '';
+    let anyDepth = !p.includes('/');
+    if (p.endsWith('/')) {
+        p = p.slice(0, -1);
+        source = '(?:/.*)?';
+        anyDepth = false;
+    }
+    let body = '';
+    for (let i = 0; i < p.length; i++) {
+        const c = p[i] as string;
+        if (c === '*') {
+            if (p[i + 1] === '*') {
+                i++;
+                if (p[i + 1] === '/') {
+                    i++;
+                    body += '(?:.*/)?';
+                } else {
+                    body += '.*';
+                }
+            } else {
+                body += '[^/]*';
+            }
+        } else if (c === '?') {
+            body += '[^/]';
+        } else if (c === '[') {
+            const end = p.indexOf(']', i + 1);
+            if (end === -1) {
+                body += '\\[';
+            } else {
+                body += p.slice(i, end + 1);
+                i = end;
+            }
+        } else {
+            body += c.replace(/[.+^${}()|\\]/g, '\\$&');
+        }
+    }
+    return new RegExp(`^${anyDepth ? '(?:.*/)?' : ''}${body}${source}$`);
+}
+
+describe('compileGlob — linear matcher (1.1.0)', () => {
+    it('agrees with the 1.0.0 RegExp translation on 20 000 seeded pattern / name pairs', () => {
+        let seed = 0x5eed;
+        const rand = (n: number): number => {
+            seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+            return (seed >>> 8) % n;
+        };
+        const PATTERN_PARTS = ['a', 'b', '.', '/', '*', '**', '**/', '?', '[ab]', '[^a]', '[a-c]', 'x', '['];
+        const NAME_CHARS = ['a', 'b', 'c', '.', '/', 'x', '['];
+        for (let n = 0; n < 20_000; n++) {
+            let pattern = '';
+            const parts = 1 + rand(5);
+            for (let i = 0; i < parts; i++) pattern += PATTERN_PARTS[rand(PATTERN_PARTS.length)];
+            if (rand(6) === 0) pattern += '/';
+            let name = '';
+            const len = rand(9);
+            for (let i = 0; i < len; i++) name += NAME_CHARS[rand(NAME_CHARS.length)];
+            expect(compileGlob(pattern).test(name), `${pattern} vs ${name}`).toBe(referenceRegex(pattern).test(name));
+        }
+    });
+
+    it('CWE-1333: a pathological pattern over a long name finishes in linear time', () => {
+        const name = 'a'.repeat(4096);
+        for (const pattern of ['*a*a*a*a*a*a*a*b', '**a**a**a**a**b', '?*?*?*?*?*?*b']) {
+            const started = performance.now();
+            expect(compileGlob(pattern).test(name)).toBe(false);
+            expect(performance.now() - started, pattern).toBeLessThan(500);
+        }
+    });
+
+    it('classes: ranges, negation (including /), empty and match-all classes', () => {
+        expect(compileGlob('[^a]').test('/')).toBe(true);
+        expect(compileGlob('x[^a]y').test('x/y')).toBe(true);
+        expect(compileGlob('x[]y').test('xy')).toBe(false);
+        expect(compileGlob('x[^]y').test('x-y')).toBe(true);
+        expect(compileGlob('[a-]').test('-')).toBe(true);
+        expect(compileGlob('[-a]').test('-')).toBe(true);
+    });
+
+    it('an inverted class range is a GlobSyntaxError and a validation issue, never an uncaught SyntaxError', () => {
+        expect(() => compileGlob('file[z-a].txt')).toThrow(GlobSyntaxError);
+        expect(globError('file[z-a].txt')).toMatch(/invalid character class range 'z-a'/);
+        expect(globError('*.txt')).toBeNull();
+        const parsed = FilterSchema.safeParse({ glob: ['[z-a]'] });
+        expect(parsed.success).toBe(false);
+        expect(parsed.error?.issues[0]?.message).toMatch(/^invalid glob: /);
+    });
+
+    it('a pattern longer than MAX_GLOB_LENGTH is refused at the boundary', () => {
+        expect(FilterSchema.safeParse({ glob: ['a'.repeat(MAX_GLOB_LENGTH)] }).success).toBe(true);
+        expect(FilterSchema.safeParse({ glob: ['a'.repeat(MAX_GLOB_LENGTH + 1)] }).success).toBe(false);
+        expect(FILTER_INPUT_SCHEMA.properties.glob.items.maxLength).toBe(MAX_GLOB_LENGTH);
     });
 });
 

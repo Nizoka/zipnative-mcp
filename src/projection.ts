@@ -22,6 +22,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * A dot-path whose segments are never a prototype key (ported from
+ * pkinative-mcp A2-052): `__proto__`, `constructor` and `prototype` are
+ * refused at the boundary, and {@link pick} only walks OWN properties, so a
+ * projection can neither read an inherited member nor write one.
+ */
+export const FIELD_PATH_PATTERN = '^(?!(?:[^.]*\\.)*(?:__proto__|constructor|prototype)(?:\\.|$)).+$';
+
+/**
  * Normalise a caller-supplied `fields` value (array of dot-paths, or a single
  * comma-separated string) into trimmed, non-empty dot-path strings.
  */
@@ -50,7 +58,7 @@ function pick(value: unknown, segments: readonly string[]): unknown {
     }
     if (isPlainObject(value)) {
         const [head, ...rest] = segments;
-        if (head === undefined || !(head in value)) return undefined;
+        if (head === undefined || !Object.hasOwn(value, head)) return undefined;
         const picked = pick(value[head], rest);
         if (picked === undefined) return undefined;
         return { [head]: picked };
@@ -72,7 +80,8 @@ function deepMerge(a: unknown, b: unknown): unknown {
     if (isPlainObject(a) && isPlainObject(b)) {
         const out: Record<string, unknown> = { ...a };
         for (const [k, v] of Object.entries(b)) {
-            out[k] = k in out ? deepMerge(out[k], v) : v;
+            // defineProperty, never `out[k] =`: a `__proto__` key stays an own data property.
+            Object.defineProperty(out, k, { value: Object.hasOwn(out, k) ? deepMerge(out[k], v) : v, enumerable: true, writable: true, configurable: true });
         }
         return out;
     }
@@ -128,7 +137,7 @@ export const PROJECTION_INPUT_PROPERTIES = {
     fields: {
         type: 'array',
         maxItems: 16,
-        items: { type: 'string', minLength: 1 },
+        items: { type: 'string', minLength: 1, pattern: FIELD_PATH_PATTERN },
         description: "Dot-path projection applied after verbosity (e.g. ['entryCount', 'entries.name']); array segments map over elements; unmatched paths are reported in _meta.unmatchedFields.",
     },
 } as const;

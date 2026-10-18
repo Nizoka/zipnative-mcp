@@ -4,14 +4,13 @@
  * optional compression, date, comment, attributes and raw extra fields —
  * mapped onto zipnative's `AddEntryOptions`.
  */
-import { promises as fs } from 'node:fs';
 import { z } from 'zod';
 import type { AddEntryOptions, ZipCompressionOptions, ZipExtraField } from 'zipnative';
 
 import { decodeBase64Field } from './base64.js';
 import { assertInputWithin, MAX_EXTRA_FIELDS, MAX_PATH_INPUT_BYTES } from './caps.js';
 import { ToolError } from './errors.js';
-import { resolveInputFile } from './sandbox.js';
+import { readInputFile } from './sandbox.js';
 
 const U16 = 65_535;
 const U32 = 0xffff_ffff;
@@ -201,8 +200,6 @@ export function toAddEntryOptions(value: EntryPayload, where: string): AddEntryO
 
 export interface LoadedPayload {
     readonly data: Uint8Array;
-    /** Absolute sandbox path when the payload came from `sourcePath` (for streaming). */
-    readonly sourceAbs?: string;
 }
 
 /** Load the entry content (base64, text or a sandbox file) as bytes. */
@@ -212,10 +209,8 @@ export async function loadPayload(value: EntryPayload, where: string): Promise<L
     }
     if (value.text !== undefined) return { data: new TextEncoder().encode(value.text) };
     if (value.sourcePath !== undefined) {
-        const { resolved, size } = await resolveInputFile(value.sourcePath, null, `${where}.sourcePath`);
-        assertInputWithin(size, MAX_PATH_INPUT_BYTES, `${where}.sourcePath`);
-        const buf = await fs.readFile(resolved);
-        return { data: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), sourceAbs: resolved };
+        const { bytes } = await readInputFile(value.sourcePath, null, `${where}.sourcePath`, (size) => assertInputWithin(size, MAX_PATH_INPUT_BYTES, `${where}.sourcePath`));
+        return { data: bytes };
     }
     return { data: new Uint8Array(0) };
 }

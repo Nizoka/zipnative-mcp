@@ -62,6 +62,15 @@ Expected behavior described but no fenced code block. environment node.
 `;
 
 describe('validateIssueMarkdown', () => {
+    it('CWE-1333: the dependency patterns scan a hostile draft in linear time', () => {
+        // 1.0.0's `"dependencies"\s*:\s*\{[^}]*[\w-]+[^}]*\}` took 40 s on 4 000 characters.
+        const hostile = `"dependencies": {${'a'.repeat(20_000)}`;
+        const started = performance.now();
+        validateIssueMarkdown(hostile);
+        expect(performance.now() - started).toBeLessThan(500);
+        expect(validateIssueMarkdown('{ "dependencies": { "left-pad": "1" } }').ok).toBe(false);
+    });
+
     it('passes a well-formed draft', () => {
         const r = validateIssueMarkdown(GOOD_DRAFT);
         expect(r.ok).toBe(true);
@@ -108,7 +117,8 @@ describe('validateIssueMarkdown', () => {
         const module = await fs.readFile(path.join(ROOT, 'src', 'governance.ts'), 'utf8');
         const patternsOf = (text: string): string[] => {
             const block = /DEPENDENCY_PATTERNS[^=]*=\s*\[([\s\S]*?)\];/.exec(text)?.[1] ?? '';
-            return [...block.matchAll(/\/(?:\\.|[^/\n])+\/[a-z]*/g)].map((m) => m[0]);
+            // `[^/\n\\]` cannot also start an escape, so the alternation never backtracks (CodeQL js/redos).
+            return [...block.matchAll(/\/(?:\\.|[^/\n\\])+\/[a-z]*/g)].map((m) => m[0]);
         };
         const fromCli = patternsOf(cli);
         expect(fromCli.length).toBeGreaterThanOrEqual(5);

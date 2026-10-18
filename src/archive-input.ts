@@ -5,14 +5,13 @@
  * buffered cap before it is read, and can also be opened as a bounded-memory
  * `ByteSource` for the forward scanner.
  */
-import { createReadStream, promises as fs } from 'node:fs';
 import { z } from 'zod';
 import type { ByteSource } from 'zipnative';
 
 import { decodeZipBase64 } from './base64.js';
 import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_PATH_INPUT_BYTES } from './caps.js';
 import { ToolError } from './errors.js';
-import { resolveInputFile, ZIP_CONTAINER_EXTENSIONS } from './sandbox.js';
+import { openInputFile, readInputFile, ZIP_CONTAINER_EXTENSIONS } from './sandbox.js';
 
 /** JSON Schema properties for the two archive inputs (spread into each tool's `properties`). */
 export const ARCHIVE_INPUT_PROPERTIES = {
@@ -76,10 +75,9 @@ export async function loadArchive(input: ArchiveInputFields): Promise<LoadedArch
     if (input.zipPath === undefined) {
         throw new ToolError('VALIDATION_ERROR', 'pass exactly one of zipBase64 / zipPath');
     }
-    const { resolved, size } = await resolveInputFile(input.zipPath, ZIP_CONTAINER_EXTENSIONS, 'zipPath');
-    assertInputWithin(size, MAX_PATH_INPUT_BYTES, `zipPath '${input.zipPath}'`);
-    const buf = await fs.readFile(resolved);
-    return { bytes: new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength), source: 'path', label: input.zipPath };
+    const zipPath = input.zipPath;
+    const { bytes } = await readInputFile(zipPath, ZIP_CONTAINER_EXTENSIONS, 'zipPath', (size) => assertInputWithin(size, MAX_PATH_INPUT_BYTES, `zipPath '${zipPath}'`));
+    return { bytes, source: 'path', label: zipPath };
 }
 
 /** Chunk an in-memory buffer as an async iterable (what a pipe would deliver). */
@@ -103,13 +101,7 @@ export async function openArchiveSource(input: ArchiveInputFields): Promise<{ so
     if (input.zipPath === undefined) {
         throw new ToolError('VALIDATION_ERROR', 'pass exactly one of zipBase64 / zipPath');
     }
-    const { resolved, size } = await resolveInputFile(input.zipPath, ZIP_CONTAINER_EXTENSIONS, 'zipPath');
-    const stream = createReadStream(resolved, { highWaterMark: 64 * 1024 });
-    async function* fromStream(): AsyncGenerator<Uint8Array, void, undefined> {
-        for await (const chunk of stream) {
-            const buf = chunk as Buffer;
-            yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-        }
-    }
-    return { source: fromStream(), label: input.zipPath, sizeBytes: size };
+    // One handle from the open to the last byte; the stream closes it when it ends or is abandoned.
+    const file = await openInputFile(input.zipPath, ZIP_CONTAINER_EXTENSIONS, 'zipPath');
+    return { source: file.chunks(64 * 1024), label: input.zipPath, sizeBytes: file.size };
 }

@@ -143,13 +143,12 @@ describe('entry-spec', () => {
             await expect(loadPayload(PayloadSchema.parse({ name: 'a', dataBase64: '!!' }), 'entries[1]')).rejects.toMatchObject({ code: 'VALIDATION_ERROR', message: expect.stringContaining('entries[1].dataBase64') });
         });
 
-        it('loads a sandbox file and reports its absolute path', async () => {
+        it('loads a sandbox file through one handle', async () => {
             await expect(loadPayload(PayloadSchema.parse({ name: 'a', sourcePath: 'f.bin' }), 'e')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
             sandbox = await makeSandbox();
             await fs.writeFile(path.join(sandbox, 'f.bin'), Buffer.from([7, 8, 9]));
             const loaded = await loadPayload(PayloadSchema.parse({ name: 'a', sourcePath: 'f.bin' }), 'e');
             expect(loaded.data).toEqual(new Uint8Array([7, 8, 9]));
-            expect(loaded.sourceAbs).toBe(path.join(sandbox, 'f.bin'));
             await expect(loadPayload(PayloadSchema.parse({ name: 'a', sourcePath: 'missing.bin' }), 'entries[0]')).rejects.toMatchObject({ code: 'INPUT_NOT_FOUND', message: expect.stringContaining('entries[0].sourcePath') });
             await expect(loadPayload(PayloadSchema.parse({ name: 'a', sourcePath: '../f.bin' }), 'e')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
         });

@@ -3,13 +3,12 @@
  * slice-by-8 `crc32`) of inline data or a sandbox file, streamed in 1 MiB
  * chunks through the `seed` parameter so memory stays constant.
  */
-import { createReadStream } from 'node:fs';
 import { z } from 'zod';
 import { crc32 } from 'zipnative';
 
 import { decodeBase64Field } from '../base64.js';
 import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_PATH_INPUT_BYTES } from '../caps.js';
-import { resolveInputFile } from '../sandbox.js';
+import { openInputFile } from '../sandbox.js';
 import { guard } from '../zip-errors.js';
 import { parseInput } from './_shared.js';
 
@@ -68,11 +67,14 @@ export async function computeCrc32(rawInput: unknown): Promise<ComputeCrc32Resul
     let value = input.seed >>> 0;
     let byteLength = 0;
     if (input.sourcePath !== undefined) {
-        const { resolved, size } = await resolveInputFile(input.sourcePath, null, 'sourcePath');
-        assertInputWithin(size, MAX_PATH_INPUT_BYTES, 'sourcePath');
-        for await (const chunk of createReadStream(resolved, { highWaterMark: CHUNK })) {
-            const buf = chunk as Buffer;
-            const u8 = new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+        const file = await openInputFile(input.sourcePath, null, 'sourcePath');
+        try {
+            assertInputWithin(file.size, MAX_PATH_INPUT_BYTES, 'sourcePath');
+        } catch (err) {
+            await file.close();
+            throw err;
+        }
+        for await (const u8 of file.chunks(CHUNK)) {
             value = guard('Failed to compute CRC-32', () => crc32(u8, value)) >>> 0;
             byteLength += u8.byteLength;
         }

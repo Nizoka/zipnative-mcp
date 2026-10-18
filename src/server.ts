@@ -26,7 +26,7 @@ import { VERSION as ZIPNATIVE_VERSION } from 'zipnative';
 import { isPathInput } from './archive-input.js';
 import { getCached, setCached } from './cache.js';
 import { ensureEngineReady } from './engine.js';
-import { ToolError } from './errors.js';
+import { redactAbsolutePaths, ToolError } from './errors.js';
 import { DRAFT_ISSUE_WORKFLOW, GOVERNANCE_CONTRACT_SUMMARY } from './governance.js';
 import { type OutputResult } from './output.js';
 import { readFields, readVerbosity, selectFields } from './projection.js';
@@ -600,10 +600,15 @@ function buildErrorResult(err: unknown, toolName: string): CallToolResult {
             _meta: { error: { code: err.code, message: err.message, ...(err.data !== undefined ? { data: err.data } : {}) } },
         };
     }
-    const message = err instanceof Error ? err.message : String(err);
+    // Nothing leaves the boundary uncoded (ported from pkinative-mcp A2-044): an escaped throw is
+    // ENGINE_ERROR with its class — and its message never carries an absolute host path.
+    const message = redactAbsolutePaths(err instanceof Error ? err.message : String(err));
+    const stack = err instanceof RangeError && /call stack/i.test(message);
+    const data = { errorClass: 'internal', ...(stack ? { remedy: 'split the input: it nests deeper than this process can walk' } : {}) };
     return {
-        content: [{ type: 'text', text: `${toolName} failed: ${message}` }],
+        content: [{ type: 'text', text: `${toolName} failed [ENGINE_ERROR]: ${message}` }],
         isError: true,
+        _meta: { error: { code: 'ENGINE_ERROR', message, data } },
     };
 }
 

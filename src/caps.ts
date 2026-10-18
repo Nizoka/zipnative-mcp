@@ -41,7 +41,20 @@ export const MAX_MODIFY_OPERATIONS = 1000;
 export const MAX_SANITIZE_NAMES = 10_000;
 export const MAX_FILTER_NAMES = 1000;
 export const MAX_FILTER_GLOBS = 32;
+/**
+ * Longest glob pattern accepted. Matching is linear (src/filter.ts never builds a
+ * backtracking RegExp), so the bound only keeps one pattern × one name inside a
+ * predictable cost: a pattern longer than any legal name (`maxNameBytes`, 4 096)
+ * cannot match anyway.
+ */
+export const MAX_GLOB_LENGTH = 1024;
 export const MAX_EXTRA_FIELDS = 16;
+/**
+ * Longest free-text field of a `draft_governance_issue` call (summary,
+ * reproduction, behaviours). The policy checks scan the assembled draft with
+ * linear-time patterns; the bound keeps a draft a reviewable size.
+ */
+export const MAX_ISSUE_TEXT_CHARS = 16_384;
 export const MAX_FIELDS_PATHS = 16;
 export const MAX_SCAN_ENTRIES_DEFAULT = 10_000;
 /** Diagnostics kept per result after de-duplication by (code, entryName). */
@@ -148,7 +161,9 @@ export const CAPS = {
     maxDiagnostics: MAX_DIAGNOSTICS,
     maxFilterNames: MAX_FILTER_NAMES,
     maxFilterGlobs: MAX_FILTER_GLOBS,
+    maxGlobLength: MAX_GLOB_LENGTH,
     maxExtraFields: MAX_EXTRA_FIELDS,
+    maxIssueTextChars: MAX_ISSUE_TEXT_CHARS,
     maxFieldsPaths: MAX_FIELDS_PATHS,
     defaultScanMaxEntries: MAX_SCAN_ENTRIES_DEFAULT,
     maxResourceLinks: MAX_RESOURCE_LINKS,

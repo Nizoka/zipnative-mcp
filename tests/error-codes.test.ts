@@ -21,7 +21,8 @@ import { GovernanceError, SecurityError, ToolError } from '../src/errors.js';
 import { resolveCallLimits } from '../src/limits.js';
 import { emitArchive, emitArchiveStream, writeSandboxedText } from '../src/output.js';
 import { readResource } from '../src/resources.js';
-import { resolveInputFile, resolveOutputFile } from '../src/sandbox.js';
+import { openInputFile, resolveOutputFile } from '../src/sandbox.js';
+import { WRAPPER_CODE_NAMES } from '../src/wrapper-codes.js';
 import { callToolDirect, ensureEngineReady } from '../src/server.js';
 import { guard, guardAsync, mapZipError, ZIP_ERROR_CLASS, ZIP_ERROR_CODES } from '../src/zip-errors.js';
 import { assertValidZip } from './_zip-assert.js';
@@ -55,12 +56,8 @@ function collectSourceCodes(): string[] {
     return [...codes].sort();
 }
 
-/** The wrapper's own vocabulary (AGENTS.md §6) — everything the server can raise that is not a frozen ZIP_* code. */
-const WRAPPER_CODES = [
-    'VALIDATION_ERROR', 'INPUT_TOO_LARGE', 'INPUT_NOT_FOUND', 'ENTRY_TOO_LARGE', 'ENTRY_NOT_UTF8', 'OUTPUT_TOO_LARGE', 'OUTPUT_EXISTS',
-    'IO_ERROR', 'SECURITY_VIOLATION', 'MISSING_OUTPUT_PATH', 'INVALID_PATH', 'INVALID_EXTENSION', 'LIMIT_CEILING_EXCEEDED', 'UNKNOWN_RESOURCE',
-    'GOVERNANCE_VIOLATION', 'ENGINE_ERROR',
-] as const;
+/** The wrapper's own vocabulary (src/wrapper-codes.ts) — everything the server can raise that is not a frozen ZIP_* code. */
+const WRAPPER_CODES = WRAPPER_CODE_NAMES;
 
 /**
  * Frozen engine codes no input can make this wrapper emit, with the reason.
@@ -190,7 +187,7 @@ describe('previously uncovered codes', () => {
             code = err instanceof ToolError ? err.code : 'other';
         }
         expect(code).toBe('INVALID_PATH');
-        expect((await codeOf(resolveInputFile('', null))).code).toBe('INVALID_PATH');
+        expect((await codeOf(openInputFile('', null))).code).toBe('INVALID_PATH');
     });
 
     it('INVALID_EXTENSION / OUTPUT_EXISTS / IO_ERROR: the file-output guards through the tools', async () => {

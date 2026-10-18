@@ -115,6 +115,38 @@ function expectCleanExit(session: StdioSession): void {
     expect(session.exitCode, `SIGTERM exit code; stderr: ${session.stderr}`).toBe(0);
 }
 
+function bootWith(env: Record<string, string>): Promise<{ code: number | null; stderr: string }> {
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, [CLI], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ZIPNATIVE_MCP_PORT: '', ...env } });
+        let stderr = '';
+        child.stderr.on('data', (c: Buffer) => {
+            stderr += c.toString('utf8');
+        });
+        const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
+        child.on('exit', (code) => {
+            clearTimeout(timer);
+            resolve({ code, stderr });
+        });
+        // A server that boots waits on stdin: closing it ends the session either way.
+        setTimeout(() => child.stdin.end(), 3_000);
+    });
+}
+
+describe.skipIf(!hasDist)('an invalid operator knob refuses to start (ported from pkinative-mcp B2-054 / A2-039)', () => {
+    it.each([['70000'], ['abc'], ['0'], ['-5'], ['8080.5']])('ZIPNATIVE_MCP_PORT=%s is refused with a clean line, never a silent stdio fallback', async (port) => {
+        const { code, stderr } = await bootWith({ ZIPNATIVE_MCP_PORT: port });
+        expect(code, stderr).toBe(1);
+        expect(stderr).toContain('ZIPNATIVE_MCP_PORT must be an integer between 1 and 65535');
+        expect(stderr).not.toContain('ready (stdio transport');
+    }, 30_000);
+
+    it('a relative ZIPNATIVE_MCP_OUTPUT_DIR is refused', async () => {
+        const { code, stderr } = await bootWith({ ZIPNATIVE_MCP_OUTPUT_DIR: 'relative/dir' });
+        expect(code, stderr).toBe(1);
+        expect(stderr).toContain('ZIPNATIVE_MCP_OUTPUT_DIR must be an absolute path');
+    }, 30_000);
+});
+
 describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
     it.each(['2025-03-26', '2025-06-18'])('negotiates the older 2025 revision %s on stdio and serves tools/list', async (version) => {
         const session = await runStdioSession(

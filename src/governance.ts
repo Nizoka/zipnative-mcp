@@ -33,7 +33,8 @@ const DEPENDENCY_PATTERNS: readonly RegExp[] = [
     /\b(yarn|pnpm|bun)\s+add\s+/i,
     /\bpnpm\s+install\s+[a-z@]/i,
     /add\s+[`"']?[\w@/-]+[`"']?\s+to\s+(the\s+)?(runtime\s+)?dependencies\b/i,
-    /"dependencies"\s*:\s*\{[^}]*[\w-]+[^}]*\}/i,
+    // Linear: the leading class excludes [\w-], so no two quantifiers compete for one character (CWE-1333).
+    /"dependencies"\s*:\s*\{[^}\w-]*[\w-][^}]*\}/i,
 ];
 
 /** Required issue fields (advisory — surfaced as warnings when missing). */

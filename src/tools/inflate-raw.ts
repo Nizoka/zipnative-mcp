@@ -8,7 +8,6 @@
  * registered by this server, so only 0 and 8 succeed). Mirrors
  * `zipnative inflate`.
  */
-import { createReadStream } from 'node:fs';
 import { z } from 'zod';
 import { createInflator, getCodec, METHOD_DEFLATE, METHOD_STORE } from 'zipnative';
 
@@ -17,7 +16,7 @@ import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_BASE64_OUTPUT_BYTES, MAX
 import { ensureEngineReady } from '../engine.js';
 import { ToolError } from '../errors.js';
 import { emitArchive, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
-import { resolveInputFile } from '../sandbox.js';
+import { openInputFile } from '../sandbox.js';
 import { guard } from '../zip-errors.js';
 import { parseInput } from './_shared.js';
 import { archiveOutputSchemaWith } from './create-zip.js';
@@ -88,12 +87,14 @@ async function* inputChunks(input: z.infer<typeof InputSchema>): AsyncGenerator<
         for (let o = 0; o < bytes.byteLength; o += 65_536) yield bytes.subarray(o, Math.min(bytes.byteLength, o + 65_536));
         return;
     }
-    const { resolved, size } = await resolveInputFile(input.sourcePath, null, 'sourcePath');
-    assertInputWithin(size, MAX_PATH_INPUT_BYTES, 'sourcePath');
-    for await (const chunk of createReadStream(resolved, { highWaterMark: 65_536 })) {
-        const buf = chunk as Buffer;
-        yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    const file = await openInputFile(input.sourcePath, null, 'sourcePath');
+    try {
+        assertInputWithin(file.size, MAX_PATH_INPUT_BYTES, 'sourcePath');
+    } catch (err) {
+        await file.close();
+        throw err;
     }
+    yield* file.chunks(65_536);
 }
 
 export async function inflateRaw(rawInput: unknown): Promise<InflateRawResult> {
