@@ -194,16 +194,16 @@ describe('HTTP transport — MCP 2026-07-28 hardening (header/body agreement, fr
         expect(err.message).toContain('Mcp-Method');
     });
 
-    it('missing MCP-Protocol-Version header with a modern _meta envelope is accepted (SDK behaviour)', async () => {
-        // The SDK v2 handler is lenient here: the `_meta` envelope alone is enough
-        // to classify the request as 2026-07-28, and the absent header is not a
-        // mismatch. Documented as observed behaviour, not a contract of this server.
+    it('missing MCP-Protocol-Version header with a modern _meta envelope is refused with 400 / −32020 (SDK 2.3 behaviour)', async () => {
+        // The SDK v2.3 handler requires the header on every 2026-07-28 request: the
+        // _meta envelope alone no longer classifies the request. Documented as observed
+        // SDK behaviour (2.0 accepted it), not a contract of this server.
         const { headers, body } = modernRequest('tools/list');
         const { 'mcp-protocol-version': _dropped, ...rest } = headers;
         void _dropped;
         const r = await send(fx.port, { headers: rest, body });
-        expect(r.status).toBe(200);
-        expect((r.json?.['result'] as Record<string, unknown>)['resultType']).toBe('complete');
+        expect(r.status).toBe(400);
+        expect(errorOf(r).code).toBe(-32020);
     });
 
     it('MCP-Protocol-Version header disagreeing with the _meta envelope → 400 / −32020', async () => {

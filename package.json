@@ -77,7 +77,8 @@
         "README.md",
         "CHANGELOG.md",
         "server.json",
-        "llms.txt"
+        "llms.txt",
+        "THIRD-PARTY-NOTICES.md"
     ],
     "engines": {
         "node": ">=22"
@@ -100,24 +101,26 @@
         "verify:issue": "node scripts/verify-issue.mjs",
         "corpus:zip": "node scripts/generate-zip-corpus.mjs",
         "validate:zip": "npm run build && npm run corpus:zip && node scripts/validate-zip.mjs",
-        "prepare": "npm run build",
-        "prepublishOnly": "npm run clean && npm run lint && npm run typecheck && npm run build && npm run test"
+        "prepublishOnly": "npm run build"
     },
     "dependencies": {
-        "@modelcontextprotocol/server": "^2.0.0",
+        "@modelcontextprotocol/server": "^2.3.1",
         "zipnative": "^1.0.0",
-        "zod": "^4.2.0"
+        "zod": "^4.6.5"
     },
     "devDependencies": {
-        "@cyclonedx/cyclonedx-npm": "6.0.1",
         "@eslint/js": "^9.18.0",
         "@types/node": "^22.10.5",
-        "@vitest/coverage-v8": "^4.1.5",
+        "@vitest/coverage-v8": "^4.1.11",
         "eslint": "^9.18.0",
         "tsx": "^4.23.15",
         "typescript": "^5.7.3",
-        "typescript-eslint": "^8.20.0",
-        "vitest": "^4.1.5"
+        "typescript-eslint": "^8.71.1",
+        "vitest": "^4.1.11"
+    },
+    "packageManager": "npm@10.9.8",
+    "overrides": {
+        "js-yaml": "4.3.2"
     },
     "publishConfig": {
         "access": "public",
