@@ -18,7 +18,8 @@
  *     the volatile members removed (`filePath`, `outputDir`: absolute paths
  *     into a temporary sandbox) and the host members neutralised (the Node
  *     version, the platform and the core count `describe_engine` probes and
- *     `draft_governance_issue` records: the baseline is made on the
+ *     `draft_governance_issue` records, and the draft's `sizeBytes` that
+ *     measures those lines: the baseline is made on the
  *     maintainer's machine and held on every CI runner). Every read / verdict
  *     result, and an archive written with `defaultDate: 'now'`.
  */
@@ -69,7 +70,13 @@ export function reportsHost(value: unknown): boolean {
     return Object.values(obj).some(reportsHost);
 }
 
-/** The value with every host member replaced by `"<host>"` and the draft's host lines neutralised. */
+/**
+ * The value with every host member replaced by `"<host>"` and the draft's host
+ * lines neutralised. The draft result's `sizeBytes` is the byte length of its
+ * `draftMarkdown`, host lines included, so it moves with the runner (the
+ * first CI run of the baseline showed 5004 → 5025 B): it is neutralised
+ * wherever it sits next to a `draftMarkdown` string.
+ */
 export function stripHost(value: unknown): unknown {
     if (typeof value === 'string') return value.replace(HOST_LINE, (_m, label: string) => `- ${label}: <host>`);
     if (Array.isArray(value)) return value.map(stripHost);
@@ -82,6 +89,8 @@ export function stripHost(value: unknown): unknown {
             const inner: Record<string, unknown> = {};
             for (const [ik, iv] of Object.entries(v as Record<string, unknown>)) inner[ik] = hostKeys.includes(ik) ? '<host>' : stripHost(iv);
             out[k] = inner;
+        } else if (k === 'sizeBytes' && typeof obj['draftMarkdown'] === 'string') {
+            out[k] = '<host>';
         } else {
             out[k] = stripHost(v);
         }

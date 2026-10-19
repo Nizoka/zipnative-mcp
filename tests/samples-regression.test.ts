@@ -177,6 +177,9 @@ describe('sample fingerprint: the projection', () => {
         expect(stripHost({ capabilities: { cpuCount: 8, defaultWorkers: 7, nodeZlib: true } })).toEqual({ capabilities: { cpuCount: '<host>', defaultWorkers: '<host>', nodeZlib: true } });
         expect(stripHost({ environment: { node: 'v22', os: 'win32', zipnativeMcp: '1.1.0' } })).toEqual({ environment: { node: '<host>', os: '<host>', zipnativeMcp: '1.1.0' } });
         expect(stripHost('x\n- Node: v22.1.0\n- OS: linux 6\n- zipnative-mcp: 1.1.0')).toBe('x\n- Node: <host>\n- OS: <host>\n- zipnative-mcp: 1.1.0');
+        // CI-001: the draft's sizeBytes is the length of a markdown that names the host; a sizeBytes elsewhere is behaviour.
+        expect(stripHost({ draftMarkdown: '- OS: win32 10', sizeBytes: 14, title: 't' })).toEqual({ draftMarkdown: '- OS: <host>', sizeBytes: '<host>', title: 't' });
+        expect(stripHost({ sizeBytes: 14, entries: [{ sizeBytes: 3 }] })).toEqual({ sizeBytes: 14, entries: [{ sizeBytes: 3 }] });
         expect(reportsHost({ a: [{ capabilities: { cpuCount: 2 } }] })).toBe(true);
         expect(reportsHost({ capabilities: { nodeZlib: true } })).toBe(false);
     });
