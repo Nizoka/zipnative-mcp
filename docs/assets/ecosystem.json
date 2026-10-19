@@ -1,6 +1,6 @@
 {
   "$comment": "Single source of every count and version quoted in the docs, the agent files and the release notes. `npx tsx scripts/verify-docs.ts` holds every document to it. `declared` holds figures no filesystem walk can derive (measured at release — the test count, the measured coverage — or an inventory of the engine checked against docs/data/ and the engine's api.json when reachable); `derived` holds figures verify-docs recomputes from the source tree (the TOOLS registry of src/server.ts, the PROMPTS table, src/wrapper-codes.ts, src/zip-errors.ts, src/limits.ts, every ZIPNATIVE_MCP_* variable under src/, examples/, tests/, the sample baseline, the veraZIP corpus of scripts/helpers/zip-corpus.mjs and scripts/verazip-core.mjs) and fails when they drift. `assertions` are the prose tokens each listed file must carry verbatim; `{count}` in a match is a number or a number word. `declared.coverage*` are the floors vitest.config.ts enforces; `declared.coverageMeasured*` the figures measured on the release tree. `declared.tests` is the whole vitest suite, skipped tests included, as the gate's test-output/.gate/vitest.json counts it.",
-  "verifiedOn": "2026-10-18",
+  "verifiedOn": "2026-10-20",
   "packages": {
     "zipnative-mcp": {
       "version": "1.1.0",

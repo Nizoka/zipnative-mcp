@@ -27,7 +27,7 @@ abstract: >-
   2025-era clients and makes no network call, ever.
 license: MIT
 version: 1.1.0
-date-released: "2026-10-18"
+date-released: "2026-10-20"
 keywords:
   - mcp
   - model-context-protocol

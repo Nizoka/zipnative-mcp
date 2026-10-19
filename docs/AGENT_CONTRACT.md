@@ -7,7 +7,7 @@ stable anchors — tests, prompts and other documents cite them.
 
 Agents **contributing** to this repository read [AGENTS.md](../AGENTS.md) instead.
 
-Verified on 2026-10-18 against zipnative-mcp 1.1.0 and zipnative 1.1.0.
+Verified on 2026-10-20 against zipnative-mcp 1.1.0 and zipnative 1.1.0.
 
 The server also returns the §2 decision tree in the `instructions` field of the opening
 exchange (initialize / server/discover result). Deeper references:

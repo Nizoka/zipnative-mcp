@@ -746,5 +746,5 @@
       "via": "create_zip.parallel via dynamic import('zipnative/worker'); byte-identical to createZip per tier"
     }
   ],
-  "verifiedOn": "2026-10-18"
+  "verifiedOn": "2026-10-20"
 }

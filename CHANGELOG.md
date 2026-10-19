@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.0] - 2026-10-18
+## [1.1.0] - 2026-10-20
 
 The first minor release, on zipnative 1.1.0. **15 tools** (two new: `canonicalize_zip`, `merge_zip`), byte-range reads of
 sandbox archives larger than memory, the Zip64 streaming opt-in, cancellation and progress, UTC timestamps on every host —

@@ -5,8 +5,8 @@
 # any of them.
 header:
   schema-version: 2.0.0
-  last-updated: '2026-10-18'
-  last-reviewed: '2026-10-18'
+  last-updated: '2026-10-20'
+  last-reviewed: '2026-10-20'
   url: https://raw.githubusercontent.com/Nizoka/zipnative-mcp/main/.github/SECURITY-INSIGHTS.yml
   comment: >-
     Every statement here can be read in the repository: SECURITY.md,

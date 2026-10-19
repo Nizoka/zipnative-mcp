@@ -4,7 +4,7 @@
 > and human contributors. Captures the full context needed to understand, extend, and debug
 > zipnative-mcp **v1.1.0** without reading every source file.
 >
-> Verified on 2026-10-18 against zipnative-mcp 1.1.0 and zipnative 1.1.0: 15 tools, 7 prompts, 17 wrapper codes,
+> Verified on 2026-10-20 against zipnative-mcp 1.1.0 and zipnative 1.1.0: 15 tools, 7 prompts, 17 wrapper codes,
 > 39 frozen `ZIP_*` codes, 12 diagnostic codes, 9 `ZipLimits` keys, 8 environment variables, 106 exports in the
 > coverage ledger. Every count quoted here comes from [`assets/ecosystem.json`](assets/ecosystem.json) and is held
 > to it by `npm run verify:docs`.
