@@ -3,7 +3,7 @@
 > **Branch:** `release/v1.1.0` → `main`
 > **Type:** Minor release (additive, backward-compatible with v1.0.0 for every valid call; the tightenings are listed in the release note's ledger)
 > **zipnative pin:** `^1.0.0` → `^1.1.0`
-> **Prepared:** 2026-10-18 — release note: `release-notes/v1.1.0.md`
+> **Prepared:** 2026-10-18, dated for the tag on 2026-10-20 — release note: `release-notes/v1.1.0.md`
 
 ## Summary
 
@@ -168,17 +168,19 @@ The 30 v1.0.0 examples replayed against the 1.1.0 build keep their shape. `tools
 
 ## Maintainer steps after merge
 
-Agents stop at this draft; everything below is done by the maintainer (`.github/AGENT_RULES.md`).
+Agents stop at this draft; everything below is done by the maintainer (`.github/AGENT_RULES.md`), in this order.
 
-0. If the tag is not created on 2026-10-18, re-run `npx tsx scripts/release-prepare.ts --version 1.1.0 --previous v1.0.0 --date <YYYY-MM-DD>`: it re-dates CITATION.cff, the ecosystem manifest and its stamps, the `## [1.1.0]` CHANGELOG heading and the Security Insights review dates; then set `_Released …_` in `release-notes/v1.1.0.md` by hand and commit.
-1. Push the branch, open the pull request with this body, wait for `ci (22)`, `ci (24)`, `os (windows-latest)`, `os (macos-latest)`, `sample-regression`, `verazip (ubuntu-latest)` and `verazip (windows-latest)`, merge.
-2. Close PRs #2, #4, #11 with the reasons above, and #3, #5, #6, #7, #8, #12, #13 as integrated if they do not close themselves; dismiss code-scanning #2 (won't fix, reason above) and, at your discretion, #5 and #6.
-3. Replace the live ruleset (it targets no branch): `gh api -X PUT repos/Nizoka/zipnative-mcp/rulesets/22472183 --input .github/rulesets/main.json`, then create the tag ruleset with `gh api -X POST repos/Nizoka/zipnative-mcp/rulesets --input .github/rulesets/tags.json`.
-4. Protect the `npm-publish` environment (audit A-005: today it has no protection rule and admins can bypass): Settings → Environments → npm-publish → required reviewer = the maintainer, deployment branches and tags = `v*` tags only, "Allow administrators to bypass" off. Then run `publish.yml` once with `workflow_dispatch` and `dry-run: true` from `main`.
-5. Tag `v1.1.0` on the merge commit and publish the GitHub Release (title `v1.1.0 - zipnative 1.1.0 parity, canonicalize and merge, byte-range reads, supply-chain hardening`, body = `release-notes/v1.1.0.md`).
-6. Approve the `npm-publish` environment: `publish.yml` re-runs the publish gate, publishes through npm Trusted Publishing, attests the tarball and the SBOM, attaches them to the release and publishes `server.json` to the MCP registry. Confirm with `npm view zipnative-mcp version`.
-7. Update the `zipnative-mcp` entry of `docs/assets/ecosystem.json` in the sibling repositories (zipnative, zipnative-cli).
-8. In Nizoka/zipnative, under your own identity: file `advisory-eager-local-headers.md` as a private security advisory (Security → Advisories → New draft advisory — a security weakness, never a public issue, per its SECURITY.md), and `issue-verify-zip-async.md` / `issue-determinism-doc-path.md` as public issues (the doc path can be a direct pull request). The drafts are local and git-ignored in the zipnative checkout, under `.github/drafts/`.
+0. If the tag is not created on 2026-10-20, re-run `npx tsx scripts/release-prepare.ts --version 1.1.0 --previous v1.0.0 --date <YYYY-MM-DD>` (it re-dates CITATION.cff, the ecosystem manifest and its stamps, the `## [1.1.0]` CHANGELOG heading and the Security Insights review dates), then set `_Released …` in `release-notes/v1.1.0.md` and `verifiedOn` in `docs/data/core-exports.json` by hand and commit.
+1. **Before anything public:** in Nizoka/zipnative, open a private security advisory from `.github/drafts/advisory-eager-local-headers.md` of the zipnative checkout (Security → Advisories → New draft advisory; never a public issue — zipnative's SECURITY.md). The weakness is in the engine's eager validation; this release carries the wrapper-side fix (ledger C8), and `zipnative-cli` `modify` (`openZip` eager then `save()`) needs the same guard. Keep the window between this release and zipnative 1.1.1 short.
+2. Push the branch, open the pull request with this body, wait for `ci (22)`, `ci (24)`, `os (windows-latest)`, `os (macos-latest)`, `sample-regression`, `verazip (ubuntu-latest)` and `verazip (windows-latest)`, merge.
+3. Close PRs #2, #4, #11 with the reasons above, and #3, #5, #6, #7, #8, #12, #13 as integrated if they do not close themselves; dismiss code-scanning #2 (won't fix, reason above) and, at your discretion, #5 and #6.
+4. Replace the live ruleset (it targets no branch): `gh api -X PUT repos/Nizoka/zipnative-mcp/rulesets/22472183 --input .github/rulesets/main.json`, then create the tag ruleset with `gh api -X POST repos/Nizoka/zipnative-mcp/rulesets --input .github/rulesets/tags.json`.
+5. Protect the `npm-publish` environment (audit A-005: today it has no protection rule and admins can bypass): Settings → Environments → npm-publish → required reviewer = the maintainer, deployment branches and tags = `v*` tags only, "Allow administrators to bypass" off. Then run `publish.yml` once with `workflow_dispatch` and `dry-run: true` from `main`.
+6. Tag `v1.1.0` on the merge commit on 2026-10-20 and publish the GitHub Release (title `v1.1.0 - zipnative 1.1.0 parity, canonicalize and merge, byte-range reads, supply-chain hardening`, body = `release-notes/v1.1.0.md`).
+7. Approve the `npm-publish` environment: `publish.yml` re-runs the publish gate, publishes through npm Trusted Publishing, attests the tarball and the SBOM, attaches them to the release and publishes `server.json` to the MCP registry. Confirm with `npm view zipnative-mcp version`.
+8. Open a security advisory on Nizoka/zipnative-mcp for the append path of `modify_zip` (affected 1.0.0, fixed 1.1.0, low severity: every reader of the engine refuses the archive; CWE-436) so `npm audit` and Dependabot alert the users still on 1.0.0; publish it once 1.1.0 is on npm.
+9. Update the `zipnative-mcp` entry of `docs/assets/ecosystem.json` in the sibling repositories (zipnative, zipnative-cli).
+10. Then, in Nizoka/zipnative under your own identity: zipnative 1.1.1 with the eager local-header check and the public advisory; `issue-verify-zip-async.md` as a public issue; `issue-determinism-doc-path.md` as a public issue or a direct pull request (six lines). The drafts are local and git-ignored in the zipnative checkout, under `.github/drafts/`.
 
 ## Checklist
 

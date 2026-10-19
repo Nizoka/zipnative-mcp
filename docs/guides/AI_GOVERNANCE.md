@@ -110,20 +110,21 @@ The `draft_issue_workflow` MCP prompt returns exactly these steps.
 
 ## 5. Using the `draft_governance_issue` tool
 
-Minimal call — drafting an engine report from an `inspect_zip` observation:
+Minimal call — drafting a wrapper feature request from a `list_zip_entries` observation
+(the same request `examples/draft-governance-issue.json` carries):
 
 ```jsonc
 {
-  "title": "openZip validate:'eager' does not compare local-header methods with the central directory",
-  "issueType": "bug",
-  "targetRepo": "zipnative",
-  "summary": "The eager pass checks every entry's extent, but an archive whose local header declares another compression method than its central-directory record opens without error; reading the entry raw refuses it.",
+  "title": "Expose a label-based nameEncoding input for legacy archive names",
+  "issueType": "feature",
+  "targetRepo": "zipnative-mcp",
+  "summary": "Archives written by older Japanese and Russian tools store Shift-JIS or CP866 names without the UTF-8 flag; list_zip_entries shows them as CP437 mojibake. zipnative 1.1.0 can decode them (nameDecoder), but zipnative-mcp deliberately exposes no decoder. A closed enum of TextDecoder labels would reach the feature without accepting code from the caller.",
   "reproduction": {
-    "command": "inspect_zip { zipBase64: <archive whose local-header method differs from its central-directory method>, validate: 'eager' }, then read_zip_entry { mode: 'raw' } on that entry",
-    "result": "inspect_zip returns a report with no error; read_zip_entry fails with _meta.error.code = ZIP_CD_LFH_MISMATCH"
+    "command": "list_zip_entries on an archive whose names are Shift-JIS bytes without flag bit 11",
+    "result": "every name is decoded as CP437 (nameEncoding: 'cp437'); rawNameHex shows the original Shift-JIS bytes"
   },
-  "expectedBehavior": "validate: 'eager' refuses the archive with ZIP_CD_LFH_MISMATCH at open time, as the engine documents for eager validation.",
-  "affectedPackages": ["zipnative", "zipnative-mcp"],
+  "expectedBehavior": "An optional nameEncoding input (a closed enum such as 'shift_jis' | 'cp866' | 'windows-1251') decodes the names before path sanitisation; the default stays CP437.",
+  "affectedPackages": ["zipnative-mcp"],
   "duplicateSearchPerformed": true
 }
 ```
