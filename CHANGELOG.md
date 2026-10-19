@@ -55,7 +55,7 @@ audit summary: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
 - **chore(tooling):** veraZIP core re-vendored from zipnative 1.1.0 (23 check ids); corpus of 43 archives (39 conformant, 4 canaries).
 - **fix(review):** `Cache-Control: no-store` holds on every HTTP response, the legacy-era 200 included (the SDK's `no-cache, no-transform` is overridden, R-027); the Host / Origin and bearer refusals before the body are proven on the built binary.
 - **test(review):** a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame edge run under `ZIPNATIVE_MCP_SLOW_TESTS` (publish gate, weekly); prototype-pollution probes over a real stdio frame (the SDK strips a root `__proto__`, a nested one is `VALIDATION_ERROR`); `parseInput` refuses a replaced prototype; `release-prepare` re-dates the CHANGELOG heading and the Security Insights stamps.
-- **fix(audit):** cancellation reaches `compute_crc32` and `inflate_raw` and the start of `verify_zip` (A-003); `verify_zip` diagnostics de-duplicated and capped at 200 (B-009); `tools/list` about 12 % smaller through shorter shared descriptions (D-018); every documentation finding of the audit fixed; three upstream drafts for zipnative under `.github/drafts/`.
+- **fix(audit):** cancellation reaches `compute_crc32` and `inflate_raw` and the start of `verify_zip` (A-003); `verify_zip` diagnostics de-duplicated and capped at 200 (B-009); `tools/list` about 12 % smaller through shorter shared descriptions (D-018); every documentation finding of the audit fixed; three engine root causes reported to zipnative alongside this release (a private advisory for the eager check, two public issues).
 
 ### Documentation
 

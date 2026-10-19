@@ -124,6 +124,7 @@ Minimal call — drafting a wrapper feature request from a `list_zip_entries` ob
     "result": "every name is decoded as CP437 (nameEncoding: 'cp437'); rawNameHex shows the original Shift-JIS bytes"
   },
   "expectedBehavior": "An optional nameEncoding input (a closed enum such as 'shift_jis' | 'cp866' | 'windows-1251') decodes the names before path sanitisation; the default stays CP437.",
+  "actualBehavior": "The names cannot be decoded by any tool input.",
   "affectedPackages": ["zipnative-mcp"],
   "duplicateSearchPerformed": true
 }

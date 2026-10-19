@@ -84,11 +84,11 @@ What actually ran on the release branch (Windows 11, Node 22.23.2):
 |---|---|
 | `npx tsx scripts/gate.ts --publish --require-all` | 15 steps passed, 0 skipped (typecheck:all, lint, build, dist-check, dist-probe, smoke — 15 tools, verify:tool-shape, server-json, test:generate — 54 samples, test:coverage, verify:docs, verify:samples, corpus:zip — 39 conformant, 4 canaries, verazip, examples:check) |
 | `npm run test:coverage` — tests | 1635 passed, 8 skipped (the slow tests, run apart), 0 failed (1643) across 79 files |
-| `npm run test:coverage` — coverage | 98.16 % statements / 94.78 % branches / 98.74 % functions / 98.8 % lines (thresholds 94 / 90 / 95 / 94) |
+| `npm run test:coverage` — coverage | 98.18 % statements / 94.82 % branches / 98.74 % functions / 98.81 % lines (thresholds 94 / 90 / 95 / 94) |
 | `npm run build && npm run test:generate && npm run verify:samples` | 54 tracked samples match the baseline (16 byte-exact, 38 semantic) |
 | `npm run validate:zip` | 39 PASS, 4 XFAIL, 0 FAIL, 0 XPASS, 0 INFRA (of 43); level 1 locally: Info-ZIP unzip 6.00, 39/39 (the CI images add 7z, python, jar and bsdtar) |
 | `npx tsx scripts/tool-shape.ts --check` | tools/list matches tests/_fixtures/tool-shape.json (15 tools, 118944 bytes; instructions 5954 bytes) |
-| `npm run verify:docs` | 27 rules passed over 34 documents, 1 skipped (npm-drift, online only) |
+| `npm run verify:docs` | 27 rules passed over 35 documents, 1 skipped (npm-drift, online only) |
 | `npm audit --audit-level=high` | found 0 vulnerabilities (full tree) |
 | Built server over stdio (`node dist/cli.js`) | `initialize` 2025-06-18 → `zipnative-mcp 1.1.0`, `tools/list` 15 tools, stdout carries JSON-RPC frames only (2 lines, 0 other) |
 
