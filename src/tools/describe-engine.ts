@@ -9,7 +9,7 @@
 import { z } from 'zod';
 import { activeDeflateTier, DEFAULT_ZIP_LIMITS, getCodec, METHOD_DEFLATE, METHOD_STORE, VERSION as ZIPNATIVE_VERSION } from 'zipnative';
 
-import { CAPS, getCeilings, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, WORKERS_ENV } from '../caps.js';
+import { CAPS, getCeilings, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, WORKERS_ENV, MAX_FILE_OUTPUT_ENV } from '../caps.js';
 import { ensureEngineReady, probeRuntime } from '../engine.js';
 import { PROJECTION_INPUT_PROPERTIES } from '../projection.js';
 import { getOutputSandbox } from '../sandbox.js';
@@ -36,15 +36,19 @@ export const UNEXPOSED_EXPORTS: ReadonlyArray<{ readonly export: string; readonl
     { export: 'ZipCommonOptions.onDiagnostic', rationale: 'Always installed by the server (every result carries diagnostics[]); strict IS exposed.' },
     { export: 'ZipReader.bytes / ZipModifier.reader', rationale: 'The input itself.' },
     { export: 'ByteSource (external ReadableStream)', rationale: 'JSON-RPC has no stream channel; the server builds ByteSources internally from zipPath / sourcePath.' },
+    { export: 'ZipWriter.addRaw / RawEntryMeta', rationale: 'The caller vouches for the CRC and the sizes: an agent could forge an inconsistent archive. merge_zip exposes addFromReader, the checked transplant.' },
+    { export: 'ZipCommonOptions.nameDecoder / ZipNameDecoder', rationale: 'A decoder is a function; legacy code-page names (Shift-JIS, CP866) stay CP437-decoded with rawNameHex kept for forensics. A label-based input is a later candidate.' },
+    { export: 'ZipCodec.createDecompressor / ZipDecompressor', rationale: 'Part of the codec contract; no codec can be registered here (registerCodec is unexposed). codecs[].incremental reports it for the built-in store and deflate.' },
+    { export: 'openZipRange over a remote ByteRangeSource', rationale: 'No network path, ever: the byte-range reader is fed only by a sandbox file (access: range on inspect_zip, list_zip_entries, read_zip_entry) or by inline bytes.' },
 ];
 
 export interface DescribeEngineResult {
     readonly server: { readonly name: string; readonly version: string; readonly toolApiVersion: string; readonly protocol: string; readonly toolCount: number };
     readonly engine: { readonly name: string; readonly version: string; readonly deflateTier: { readonly default: string; readonly deterministic: string } };
     readonly capabilities: { readonly nodeZlib: boolean; readonly compressionStream: boolean; readonly decompressionStream: boolean; readonly workerThreads: boolean; readonly cpuCount: number; readonly defaultWorkers: number };
-    readonly codecs: ReadonlyArray<{ readonly id: number; readonly name: string; readonly sync: boolean; readonly stream: boolean }>;
+    readonly codecs: ReadonlyArray<{ readonly id: number; readonly name: string; readonly sync: boolean; readonly stream: boolean; readonly incremental: boolean }>;
     readonly defaultLimits: Record<string, number>;
-    readonly ceilings: { readonly maxUncompressedBytes: number; readonly maxEntries: number; readonly maxWorkers: number; readonly env: readonly string[] };
+    readonly ceilings: { readonly maxUncompressedBytes: number; readonly maxEntries: number; readonly maxWorkers: number; readonly maxFileOutputBytes: number; readonly env: readonly string[] };
     readonly caps: typeof CAPS;
     readonly sandbox: { readonly enabled: boolean; readonly cacheEnabled: boolean };
     readonly network: 'none';
@@ -61,9 +65,9 @@ export const DESCRIBE_ENGINE_OUTPUT_SCHEMA = {
         server: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, version: { type: 'string' }, toolApiVersion: { type: 'string' }, protocol: { type: 'string' }, toolCount: { type: 'integer' } } },
         engine: { type: 'object', additionalProperties: false, properties: { name: { type: 'string' }, version: { type: 'string' }, deflateTier: { type: 'object', additionalProperties: false, properties: { default: { type: 'string' }, deterministic: { type: 'string' } } } } },
         capabilities: { type: 'object', additionalProperties: false, properties: { nodeZlib: { type: 'boolean' }, compressionStream: { type: 'boolean' }, decompressionStream: { type: 'boolean' }, workerThreads: { type: 'boolean' }, cpuCount: { type: 'integer' }, defaultWorkers: { type: 'integer' } } },
-        codecs: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'integer' }, name: { type: 'string' }, sync: { type: 'boolean' }, stream: { type: 'boolean' } } } },
+        codecs: { type: 'array', items: { type: 'object', additionalProperties: false, properties: { id: { type: 'integer' }, name: { type: 'string' }, sync: { type: 'boolean' }, stream: { type: 'boolean' }, incremental: { type: 'boolean', description: 'The codec exposes createDecompressor (zipnative 1.1.0): the forward reader and the byte-range reader decode it in O(chunk).' } } } },
         defaultLimits: { type: 'object', additionalProperties: { type: 'number' } },
-        ceilings: { type: 'object', additionalProperties: false, properties: { maxUncompressedBytes: { type: 'integer' }, maxEntries: { type: 'integer' }, maxWorkers: { type: 'integer' }, env: { type: 'array', items: { type: 'string' } } } },
+        ceilings: { type: 'object', additionalProperties: false, properties: { maxUncompressedBytes: { type: 'integer' }, maxEntries: { type: 'integer' }, maxWorkers: { type: 'integer' }, maxFileOutputBytes: { type: 'integer' }, env: { type: 'array', items: { type: 'string' } } } },
         caps: { type: 'object', additionalProperties: { type: 'integer' } },
         sandbox: { type: 'object', additionalProperties: false, properties: { enabled: { type: 'boolean' }, cacheEnabled: { type: 'boolean' } } },
         network: { type: 'string', enum: ['none'] },
@@ -86,7 +90,7 @@ export async function describeEngine(rawInput: unknown): Promise<DescribeEngineR
     const ceilings = getCeilings();
     const codecs = [METHOD_STORE, METHOD_DEFLATE].map((id) => {
         const codec = getCodec(id);
-        return { id, name: id === METHOD_STORE ? 'store' : 'deflate', sync: codec?.decompressSync !== undefined, stream: codec?.decompressStream !== undefined };
+        return { id, name: id === METHOD_STORE ? 'store' : 'deflate', sync: codec?.decompressSync !== undefined, stream: codec?.decompressStream !== undefined, incremental: codec?.createDecompressor !== undefined };
     });
     return {
         server: { name: 'zipnative-mcp', version: ZIPNATIVE_MCP_VERSION, toolApiVersion: TOOL_API_VERSION, protocol: 'MCP 2026-07-28 + legacy 2024/2025 initialize', toolCount: _toolCount },
@@ -94,7 +98,7 @@ export async function describeEngine(rawInput: unknown): Promise<DescribeEngineR
         capabilities: { ...runtime },
         codecs,
         defaultLimits: { ...DEFAULT_ZIP_LIMITS },
-        ceilings: { ...ceilings, env: [MAX_UNCOMPRESSED_ENV, MAX_ENTRIES_ENV, WORKERS_ENV] },
+        ceilings: { ...ceilings, env: [MAX_UNCOMPRESSED_ENV, MAX_ENTRIES_ENV, WORKERS_ENV, MAX_FILE_OUTPUT_ENV] },
         caps: CAPS,
         sandbox: { enabled: getOutputSandbox() !== null, cacheEnabled: (process.env['ZIPNATIVE_MCP_CACHE_DIR'] ?? '') !== '' },
         network: 'none',

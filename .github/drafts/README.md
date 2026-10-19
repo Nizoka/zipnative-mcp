@@ -25,5 +25,6 @@ in [Nizoka/zipnative-mcp](https://github.com/Nizoka/zipnative-mcp/issues/new/cho
 The tool's `targetRepo` input records the decision in the draft.
 
 Draft files are intentionally git-ignored (except this README and TEMPLATE.md;
-curated release artifacts `pr-*.md` / `issue-*.md` stay tracked) so
-work-in-progress proposals never leak into the repository history.
+curated release artifacts of this repository, `pr-*.md` / `issue-*.md`, stay tracked) so
+work-in-progress proposals never leak into the repository history. Name a draft meant
+for another repository `upstream-<repo>-<topic>.md`: it stays local until a human files it there.

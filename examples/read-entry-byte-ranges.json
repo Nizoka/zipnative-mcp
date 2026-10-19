@@ -1,0 +1,10 @@
+{
+  "description": "Needs ZIPNATIVE_MCP_OUTPUT_DIR: read one entry of a sandbox archive by byte ranges — access: 'range' opens the file through zipnative's openZipRange over the file's own handle (never a URL): the end record, the central directory and this entry's bytes are read, nothing else, so memory stays at the size of the central directory. A zipPath above the 1 GiB in-memory cap takes this path automatically (access: 'auto'); the result then carries access: 'range'.",
+  "tool": "read_zip_entry",
+  "arguments": {
+    "zipPath": "incoming/report.zip",
+    "access": "range",
+    "name": "docs/guide.md",
+    "encoding": "utf8"
+  }
+}

@@ -8,7 +8,7 @@ import path from 'node:path';
 import { z } from 'zod';
 
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, chunked, isPathInput, loadArchive, openArchiveSource, refineArchiveInput } from '../src/archive-input.js';
-import { resolveInputFile } from '../src/sandbox.js';
+import { openInputFile } from '../src/sandbox.js';
 import { cleanupSandbox, makeSandbox } from './_sandbox.js';
 import { b64, basicZip } from './_zip-fixtures.js';
 
@@ -71,17 +71,19 @@ describe('archive-input', () => {
         await expect(loadArchive({ zipPath: 'a\0b.zip' })).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
     });
 
-    it('resolveInputFile refuses a directory as INPUT_NOT_FOUND', async () => {
+    it('openInputFile refuses a directory as INPUT_NOT_FOUND', async () => {
         sandbox = await makeSandbox();
         await fs.mkdir(path.join(sandbox, 'dir.zip'));
-        await expect(resolveInputFile('dir.zip', null, 'zipPath')).rejects.toMatchObject({ code: 'INPUT_NOT_FOUND', message: expect.stringContaining('not a regular file') });
+        await expect(openInputFile('dir.zip', null, 'zipPath')).rejects.toMatchObject({ code: 'INPUT_NOT_FOUND', message: expect.stringContaining('not a regular file') });
         await fs.writeFile(path.join(sandbox, 'f.zip'), basicZip());
-        const ok = await resolveInputFile('f.zip', ['.zip']);
-        expect(ok).toEqual({ resolved: path.join(sandbox, 'f.zip'), size: basicZip().byteLength });
-        await expect(resolveInputFile('', null, 'zipPath')).rejects.toMatchObject({ code: 'INVALID_PATH' });
-        await expect(resolveInputFile(42, null, 'zipPath')).rejects.toMatchObject({ code: 'INVALID_PATH' });
-        await expect(resolveInputFile('C:\\x.zip', null, 'zipPath')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
-        await expect(resolveInputFile('\\\\srv\\share\\x.zip', null, 'zipPath')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
+        const ok = await openInputFile('f.zip', ['.zip']);
+        expect({ resolved: ok.resolved, size: ok.size }).toEqual({ resolved: path.join(sandbox, 'f.zip'), size: basicZip().byteLength });
+        await ok.close();
+        await ok.close();
+        await expect(openInputFile('', null, 'zipPath')).rejects.toMatchObject({ code: 'INVALID_PATH' });
+        await expect(openInputFile(42, null, 'zipPath')).rejects.toMatchObject({ code: 'INVALID_PATH' });
+        await expect(openInputFile('C:\\x.zip', null, 'zipPath')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
+        await expect(openInputFile('\\\\srv\\share\\x.zip', null, 'zipPath')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
     });
 
     it('chunked splits a buffer into bounded pieces', async () => {

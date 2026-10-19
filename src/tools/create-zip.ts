@@ -10,10 +10,10 @@
  * layout). base64 mode assembles with `toBytes()`; file mode streams the
  * archive to disk with `stream({ chunkSize })` and bounded memory.
  */
-import { createReadStream } from 'node:fs';
 import { z } from 'zod';
 import { activeDeflateTier, createZip, type AddEntryOptions, type CreateZipOptions } from 'zipnative';
 
+import { NO_CONTEXT, type CallContext } from '../call-context.js';
 import { assertInputWithin, getCeilings, MAX_BASE64_INPUT_BYTES, MAX_CREATE_ENTRIES, WORKERS_ENV } from '../caps.js';
 import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
 import { ensureEngineReady, probeRuntime } from '../engine.js';
@@ -34,7 +34,7 @@ import {
 import { ToolError } from '../errors.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
 import { emitArchive, emitArchiveStream, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
-import { resolveInputFile } from '../sandbox.js';
+import { openInputFile, type OpenedInput } from '../sandbox.js';
 import { guard, guardAsync } from '../zip-errors.js';
 import { EngineOptionsShape, parseInput, sha256Hex, STRICT_INPUT_PROPERTY } from './_shared.js';
 
@@ -57,7 +57,8 @@ export const CREATE_ZIP_INPUT_SCHEMA = {
                 required: ['name'],
                 properties: {
                     ...ENTRY_PAYLOAD_PROPERTIES,
-                    stream: { type: 'boolean', default: false, description: 'With sourcePath: feed the file through addStream (bounded memory, data-descriptor layout; entries > 4 GiB refused). The archive is then assembled by streaming.' },
+                    stream: { type: 'boolean', default: false, description: 'With sourcePath: feed the file through addStream (bounded memory, data-descriptor layout). The archive is then assembled by streaming. An entry that crosses 4 GiB is refused with ZIP_UNSUPPORTED_ZIP64_STREAMING unless zip64: true.' },
+                    zip64: { type: 'boolean', default: false, description: "stream: true only (zipnative 1.1.0 AddEntryOptions.zip64): write this streamed entry in the Zip64 streaming layout (APPNOTE 4.3.9.2: version 45, a Zip64 extra in the local header, a 24-byte data descriptor) so it may exceed 4 GiB. An opted-in entry below 4 GiB still carries the Zip64 records, which some streaming readers (Java's ZipInputStream) cannot read — opt in only for entries that may cross 4 GiB. The archive in a file is bounded by ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES (default 4 GiB); compression.deterministic caps a streamed entry at 2 GiB." },
                 },
             },
         },
@@ -84,10 +85,11 @@ export const CREATE_ZIP_INPUT_SCHEMA = {
 } as const;
 
 const EntrySchema = z
-    .strictObject({ ...EntryPayloadShape, stream: z.boolean().default(false) })
+    .strictObject({ ...EntryPayloadShape, stream: z.boolean().default(false), zip64: z.boolean().default(false) })
     .superRefine((v, ctx) => {
         refineEntryPayload(v, ctx);
         if (v.stream && v.sourcePath === undefined) ctx.addIssue({ code: 'custom', message: 'stream: true requires sourcePath', path: ['stream'] });
+        if (v.zip64 && !v.stream) ctx.addIssue({ code: 'custom', message: 'zip64: true applies to stream: true entries only (a buffered entry takes Zip64 automatically when it needs it)', path: ['zip64'] });
     });
 
 const InputSchema = z
@@ -137,7 +139,7 @@ export const ARCHIVE_OUTPUT_SCHEMA = {
     type: 'object',
     additionalProperties: false,
     required: ['mode', 'sizeBytes', 'summary', 'diagnostics'],
-    description: 'Result of an archive-producing tool. base64 mode: the archive arrives as an embedded `resource` content block (not duplicated here); file mode: `filePath` + a resource_link.',
+    description: 'Archive result: base64 mode = an embedded `resource` block (not repeated here); file mode = `filePath` + a resource_link.',
     properties: {
         mode: { type: 'string', enum: ['base64', 'file'] },
         sizeBytes: { type: 'integer', minimum: 0 },
@@ -175,17 +177,10 @@ export const CREATE_ZIP_OUTPUT_SCHEMA = archiveOutputSchemaWith(
 );
 
 
-async function* fileChunks(absPath: string): AsyncGenerator<Uint8Array, void, undefined> {
-    for await (const chunk of createReadStream(absPath, { highWaterMark: 64 * 1024 })) {
-        const buf = chunk as Buffer;
-        yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-    }
-}
-
-export async function createZipTool(rawInput: unknown): Promise<CreateZipResult> {
+export async function createZipTool(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<CreateZipResult> {
     const input = parseInput(InputSchema, rawInput);
     await ensureEngineReady();
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
     const defaultDate = toDefaultDate(input.defaultDate);
     const compression = toCompression(input.compression);
@@ -224,76 +219,84 @@ export async function createZipTool(rawInput: unknown): Promise<CreateZipResult>
         writer = guard('Failed to create the writer', () => createZip(options));
     }
 
-    let fileCount = 0;
-    let directoryCount = 0;
-    let streamedCount = 0;
-    let uncompressedBytes = 0;
-    let inlineBytes = 0;
-    let anyNonDeterministic = compression?.deterministic !== true;
+    const opened: OpenedInput[] = [];
+    try {
+        let fileCount = 0;
+        let directoryCount = 0;
+        let streamedCount = 0;
+        let uncompressedBytes = 0;
+        let inlineBytes = 0;
+        let anyNonDeterministic = compression?.deterministic !== true;
 
-    for (let i = 0; i < input.entries.length; i++) {
-        const spec = input.entries[i] as EntryPayload & { stream: boolean };
-        const where = `entries[${i}]`;
-        const entryOptions = toAddEntryOptions(spec, where);
-        if (spec.compression?.deterministic === false || (spec.compression !== undefined && spec.compression.deterministic === undefined && compression?.deterministic !== true)) {
-            anyNonDeterministic = true;
+        for (let i = 0; i < input.entries.length; i++) {
+            const spec = input.entries[i] as EntryPayload & { stream: boolean; zip64: boolean };
+            const where = `entries[${i}]`;
+            const entryOptions = toAddEntryOptions(spec, where);
+            if (spec.compression?.deterministic === false || (spec.compression !== undefined && spec.compression.deterministic === undefined && compression?.deterministic !== true)) {
+                anyNonDeterministic = true;
+            }
+            if (spec.directory) {
+                directoryCount++;
+                guard(`Failed to add directory '${spec.name}'`, () => writer.addDirectory(spec.name, entryOptions), spec.name, { entryIndex: i });
+                continue;
+            }
+            fileCount++;
+            if (spec.stream && spec.sourcePath !== undefined) {
+                // One handle per streamed source, read from the open to the last byte (never re-opened by
+                // path); the stream closes it, and the finally below closes any the writer never pulled.
+                const file = await openInputFile(spec.sourcePath, null, `${where}.sourcePath`);
+                opened.push(file);
+                streamedCount++;
+                uncompressedBytes += file.size;
+                guard(`Failed to add streamed entry '${spec.name}'`, () => writer.addStream(spec.name, file.chunks(64 * 1024), spec.zip64 ? { ...entryOptions, zip64: true } : entryOptions), spec.name, { entryIndex: i });
+                continue;
+            }
+            const { data } = await loadPayload(spec, where);
+            if (spec.sourcePath === undefined) {
+                inlineBytes += data.byteLength;
+                assertInputWithin(inlineBytes, MAX_BASE64_INPUT_BYTES, 'inline entry payloads (total)');
+            }
+            uncompressedBytes += data.byteLength;
+            guard(`Failed to add entry '${spec.name}'`, () => writer.add(spec.name, data, entryOptions), spec.name, { entryIndex: i });
         }
-        if (spec.directory) {
-            directoryCount++;
-            guard(`Failed to add directory '${spec.name}'`, () => writer.addDirectory(spec.name, entryOptions), spec.name, { entryIndex: i });
-            continue;
-        }
-        fileCount++;
-        if (spec.stream && spec.sourcePath !== undefined) {
-            const { resolved, size } = await resolveInputFile(spec.sourcePath, null, `${where}.sourcePath`);
-            streamedCount++;
-            uncompressedBytes += size;
-            guard(`Failed to add streamed entry '${spec.name}'`, () => writer.addStream(spec.name, fileChunks(resolved), entryOptions), spec.name, { entryIndex: i });
-            continue;
-        }
-        const { data } = await loadPayload(spec, where);
-        if (spec.sourcePath === undefined) {
-            inlineBytes += data.byteLength;
-            assertInputWithin(inlineBytes, MAX_BASE64_INPUT_BYTES, 'inline entry payloads (total)');
-        }
-        uncompressedBytes += data.byteLength;
-        guard(`Failed to add entry '${spec.name}'`, () => writer.add(spec.name, data, entryOptions), spec.name, { entryIndex: i });
-    }
 
-    const deterministic = !anyNonDeterministic && defaultDate !== 'now';
-    const deflateTier = activeDeflateTier(compression?.deterministic === true);
-    const summaryBase = {
-        entryCount: fileCount + directoryCount,
-        fileCount,
-        directoryCount,
-        streamedCount,
-        uncompressedBytes,
-        order: input.order,
-        deterministic,
-        deflateTier,
-        parallel: { requested: parallelRequested, workers },
-    };
+        const deterministic = !anyNonDeterministic && defaultDate !== 'now';
+        const deflateTier = activeDeflateTier(compression?.deterministic === true);
+        const summaryBase = {
+            entryCount: fileCount + directoryCount,
+            fileCount,
+            directoryCount,
+            streamedCount,
+            uncompressedBytes,
+            order: input.order,
+            deterministic,
+            deflateTier,
+            parallel: { requested: parallelRequested, workers },
+        };
 
-    if (input.outputMode === 'file') {
-        const out = await emitArchiveStream(
-            guard('Failed to assemble archive', () => writer.stream(input.chunkSize !== undefined ? { chunkSize: input.chunkSize } : undefined)),
-            input.outputPath,
-            { hash: input.includeSha256 ? 'sha256' : undefined },
-        );
-        return { ...out, summary: { ...summaryBase, ...(out.sha256 !== undefined ? { sha256: out.sha256 } : {}) }, ...sink.report() };
+        if (input.outputMode === 'file') {
+            const out = await emitArchiveStream(
+                guard('Failed to assemble archive', () => writer.stream(input.chunkSize !== undefined ? { chunkSize: input.chunkSize } : undefined)),
+                input.outputPath,
+                { hash: input.includeSha256 ? 'sha256' : undefined },
+            );
+            return { ...out, summary: { ...summaryBase, ...(out.sha256 !== undefined ? { sha256: out.sha256 } : {}) }, ...sink.report() };
+        }
+        let bytes: Uint8Array;
+        if (streamedCount > 0) {
+            // addStream makes toBytes() unavailable: collect the streamed assembly.
+            const parts: Uint8Array[] = [];
+            await guardAsync('Failed to assemble archive', async () => {
+                for await (const chunk of writer.stream(input.chunkSize !== undefined ? { chunkSize: input.chunkSize } : undefined)) parts.push(chunk);
+            });
+            bytes = Buffer.concat(parts.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength)));
+        } else {
+            bytes = await guardAsync('Failed to assemble archive', async () => writer.toBytes());
+        }
+        const out = await emitArchive(bytes, { mode: 'base64' });
+        const sha256 = input.includeSha256 ? await sha256Hex(bytes) : undefined;
+        return { ...out, summary: { ...summaryBase, ...(sha256 !== undefined ? { sha256 } : {}) }, ...sink.report() };
+    } finally {
+        await Promise.all(opened.map((file) => file.close()));
     }
-    let bytes: Uint8Array;
-    if (streamedCount > 0) {
-        // addStream makes toBytes() unavailable: collect the streamed assembly.
-        const parts: Uint8Array[] = [];
-        await guardAsync('Failed to assemble archive', async () => {
-            for await (const chunk of writer.stream(input.chunkSize !== undefined ? { chunkSize: input.chunkSize } : undefined)) parts.push(chunk);
-        });
-        bytes = Buffer.concat(parts.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength)));
-    } else {
-        bytes = await guardAsync('Failed to assemble archive', async () => writer.toBytes());
-    }
-    const out = await emitArchive(bytes, { mode: 'base64' });
-    const sha256 = input.includeSha256 ? await sha256Hex(bytes) : undefined;
-    return { ...out, summary: { ...summaryBase, ...(sha256 !== undefined ? { sha256 } : {}) }, ...sink.report() };
 }

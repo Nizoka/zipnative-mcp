@@ -47,7 +47,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio — MCP 2026-07-28 envelope', 
         expect(list['resultType']).toBe('complete');
         expect(list['ttlMs']).toBe(SERVER_CACHE_HINTS['tools/list'].ttlMs);
         expect(list['cacheScope']).toBe('public');
-        expect((list['tools'] as unknown[]).length).toBe(13);
+        expect((list['tools'] as unknown[]).length).toBe(15);
         const info = (list['_meta'] as Record<string, unknown>)[SERVER_INFO_KEY] as { name: string; version: string };
         expect(info.name).toBe('zipnative-mcp');
         expect(info.version).toMatch(/^\d+\.\d+\.\d+$/);
@@ -82,7 +82,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio — MCP 2026-07-28 envelope', 
             { jsonrpc: '2.0', id: 9_102, method: 'tools/list', params: { _meta: ENVELOPE } },
         ]));
         const list = await agent.request<{ tools: unknown[] }>('tools/list');
-        expect(list.tools.length).toBe(13);
+        expect(list.tools.length).toBe(15);
         // The batch never produced a frame for either of its ids.
         expect(await peekStdout(agent, 9_101)).toBeUndefined();
         expect(await peekStdout(agent, 9_102)).toBeUndefined();
@@ -104,7 +104,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio — MCP 2026-07-28 envelope', 
         const frame = await peekStdout(agent, id);
         expect(frame?.error?.code).toBe(-32022);
         expect((frame?.error?.data as { supported?: string[] } | undefined)?.supported).toContain('2026-07-28');
-        expect((await agent.request<{ tools: unknown[] }>('tools/list')).tools.length).toBe(13);
+        expect((await agent.request<{ tools: unknown[] }>('tools/list')).tools.length).toBe(15);
     });
 });
 

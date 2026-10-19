@@ -8,23 +8,19 @@ Run the full project quality gate and report results.
 
 ## Steps
 
-1. npm run typecheck:all
-2. npm run lint
-3. npm run test
-4. npm run test:coverage
-5. npm run build
-6. Verify dist output contains:
-   - dist/index.js
-   - dist/index.d.ts
-   - dist/cli.js
-   - dist/server.js
-7. npm run validate:zip (veraZIP: corpus from the built server + ISO/IEC 21320-1 validation; level 1 uses the foreign tools present on the machine)
-8. Summarize pass/fail for each step
+1. `npx tsx scripts/gate.ts --ci --require-all` — the single definition of green: typecheck:all,
+   lint, build, dist-check, dist-probe, smoke, verify:tool-shape, server-json, test:generate,
+   test:coverage, verify:docs, verify:samples, corpus:zip, verazip, examples:check (one line per
+   step; the logs land in `test-output/.gate/<step>.log`)
+2. For a release, `npx tsx scripts/gate.ts --publish --require-all` (the profile publish.yml runs)
+3. `npm audit --audit-level=high` (outside the gate: the gate is hermetic, the audit needs the network)
+4. Summarize pass/fail for each step, quoting the gate's summary line
 
 ## Thresholds
-- Zero TypeScript errors
+- Zero TypeScript errors (src, tests and scripts)
 - Zero ESLint errors (warnings fail)
-- All tests passing
-- Coverage thresholds respected
-- Build output present
+- All tests passing; coverage thresholds of `vitest.config.ts` respected
+- Build output present and the built server answers over stdio with JSON-RPC frames only
 - veraZIP: 0 FAIL, 0 XPASS, 0 INFRA; the count canary matches docs/data/verazip.json
+- Samples match the baseline chain; verify-docs reports 0 errors
+- `--require-all`: a skipped step is a failure

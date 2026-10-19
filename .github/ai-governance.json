@@ -83,8 +83,14 @@
     "description": "Authoritative project context an agent SHOULD load before proposing changes.",
     "sources": [
       "AGENTS.md",
+      ".github/AGENT_RULES.md"
+    ],
+    "$comment": "on_demand: load lazily by topic. sources are loaded on every task and verify-docs (governance-sources) holds their total under 16 KiB; ecosystem.json is the counts manifest, needed only when a figure or version is touched; docs/AGENT_CONTRACT.md is the consumer-facing agent contract (tool catalogue, decision tree, token economy, error codes).",
+    "on_demand": [
+      "docs/assets/ecosystem.json",
+      "docs/AGENT_CONTRACT.md",
       ".github/copilot-instructions.md",
-      ".github/AGENT_RULES.md",
+      ".github/instructions/",
       "docs/guides/AI_GOVERNANCE.md",
       "ROADMAP.md",
       "SECURITY.md",
@@ -101,6 +107,7 @@
     "zero_dependency_policy": "README.md",
     "governance_guide": "docs/guides/AI_GOVERNANCE.md",
     "conformance_gate": "docs/guides/CONFORMANCE.md",
+    "agent_contract": "docs/AGENT_CONTRACT.md",
     "issue_templates": [".github/ISSUE_TEMPLATE"],
     "draft_template": ".github/drafts/TEMPLATE.md"
   }

@@ -17,9 +17,10 @@ import path from 'node:path';
 import { z } from 'zod';
 import { extractZip, extractZipStream, openZip, sanitizeEntryPath, type ExtractOptions, type ZipEntry } from 'zipnative';
 
+import { NO_CONTEXT, type CallContext } from '../call-context.js';
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
 import { encodeBase64 } from '../base64.js';
-import { MAX_ENTRY_INLINE_BYTES, MAX_EXTRACT_INLINE_TOTAL_BYTES, MAX_FILE_OUTPUT_BYTES } from '../caps.js';
+import { getCeilings, MAX_ENTRY_INLINE_BYTES, MAX_EXTRACT_INLINE_TOTAL_BYTES, MAX_FILE_OUTPUT_ENV } from '../caps.js';
 import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
 import { crcHex, methodName } from '../entry.js';
 import { ToolError } from '../errors.js';
@@ -164,13 +165,13 @@ function collectSkipped(entries: readonly ZipEntry[], input: Input, keep: (name:
         .map((e) => ({ entryName: e.name, reason: 'unsafe-path' as const }));
 }
 
-export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResult> {
+export async function extractZipTool(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<ExtractZipResult> {
     const input = parseInput(InputSchema, rawInput);
     if (input.outputMode === 'file' && input.outputDir === undefined) {
         throw new ToolError('MISSING_OUTPUT_PATH', "outputDir is required when outputMode='file'.");
     }
     const { bytes } = await loadArchive(input);
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const keep = compileEntryFilter(input.filter);
     const options = engineOptions(input, sink, keep);
 
@@ -280,8 +281,8 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
                 for await (const chunk of item.stream()) {
                     size += chunk.byteLength;
                     totalBytes += chunk.byteLength;
-                    if (totalBytes > MAX_FILE_OUTPUT_BYTES) {
-                        throw new ToolError('OUTPUT_TOO_LARGE', `Extraction exceeds the ${MAX_FILE_OUTPUT_BYTES}-byte file-output cap.`, { entryName: item.entry.name, writtenCount: written });
+                    if (totalBytes > getCeilings().maxFileOutputBytes) {
+                        throw new ToolError('OUTPUT_TOO_LARGE', `Extraction exceeds the ${getCeilings().maxFileOutputBytes}-byte file-output cap (${MAX_FILE_OUTPUT_ENV}).`, { entryName: item.entry.name, writtenCount: written, env: MAX_FILE_OUTPUT_ENV });
                     }
                     if (!stream.write(chunk)) {
                         // Detach whichever listener did not fire: one pair per drain, never accumulated.
@@ -298,7 +299,13 @@ export async function extractZipTool(rawInput: unknown): Promise<ExtractZipResul
                     stream.end(() => resolveEnd());
                 });
             } catch (err) {
-                stream.destroy();
+                // Close before the unlink (B-024): Windows refuses to remove a file that is still open.
+                if (!stream.closed) {
+                    await new Promise<void>((resolveClose) => {
+                        stream.once('close', () => resolveClose());
+                        stream.destroy();
+                    });
+                }
                 await discardPartial(target);
                 if (err instanceof ToolError) throw err;
                 if (err instanceof Error && typeof (err as NodeJS.ErrnoException).code === 'string' && !/^ZIP_/.test(String((err as NodeJS.ErrnoException).code))) {

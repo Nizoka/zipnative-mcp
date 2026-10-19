@@ -14,12 +14,15 @@ import {
     METHOD_DEFLATE,
     METHOD_STORE,
     getCodec,
+    getExtendedTimestamps,
+    getUnixIds,
     getUnixMode,
     isSymlinkEntry,
     sanitizeEntryPath,
     type StreamedZipHeader,
     type ZipEntry,
     type ZipExtraField,
+    type ZipNameEncoding,
 } from 'zipnative';
 
 export interface DecodedFlags {
@@ -43,7 +46,8 @@ export interface ExtraFieldRow {
 export interface EntryView {
     readonly index: number;
     readonly name: string;
-    readonly nameEncoding: 'utf-8' | 'cp437';
+    /** `'custom'` (zipnative 1.1.0) only ever comes from a `nameDecoder`, which this server does not expose. */
+    readonly nameEncoding: ZipNameEncoding;
     readonly isDirectory: boolean;
     /** `null` from a forward scan (no central-directory attributes). */
     readonly isSymlink: boolean | null;
@@ -76,6 +80,10 @@ export interface EntryView {
     readonly rawNameHex: string;
     /** The stored comment bytes, hex (present when the entry has a comment). */
     readonly commentHex?: string;
+    /** Opt-in (`includeExtendedTimestamps`, zipnative 1.1.0 getExtendedTimestamps): UT, then NTFS, then the DOS fields. */
+    readonly extendedTimestamps?: { readonly mtime: string | null; readonly atime: string | null; readonly ctime: string | null; readonly source: 'ut' | 'ntfs' | 'dos' };
+    /** Opt-in (`includeUnixIds`, zipnative 1.1.0 getUnixIds): the Info-ZIP 0x7875 owner ids, or null when absent. */
+    readonly unixIds?: { readonly uid: number; readonly gid: number } | null;
 }
 
 const EXTRA_FIELD_NAMES: Readonly<Record<number, string>> = {
@@ -173,6 +181,10 @@ export function sanitizedPathOf(name: string, isDirectory: boolean): string | nu
 
 export interface EntryViewOptions {
     readonly includeExtraData?: boolean;
+    /** Add `extendedTimestamps` (central-directory entries only). */
+    readonly includeExtendedTimestamps?: boolean;
+    /** Add `unixIds` (central-directory entries only). */
+    readonly includeUnixIds?: boolean;
 }
 
 /** View from a central-directory entry (full metadata). */
@@ -210,7 +222,15 @@ export function viewFromEntry(entry: ZipEntry, index: number, options: EntryView
         extraFields: extraRows(entry.extraFields, options.includeExtraData === true),
         rawNameHex: bytesToHex(entry.rawName),
         ...(entry.comment.length > 0 ? { commentHex: bytesToHex(entry.comment) } : {}),
+        ...(options.includeExtendedTimestamps === true ? { extendedTimestamps: extendedTimestampsOf(entry) } : {}),
+        ...(options.includeUnixIds === true ? { unixIds: getUnixIds(entry) } : {}),
     };
+}
+
+function extendedTimestampsOf(entry: ZipEntry): NonNullable<EntryView['extendedTimestamps']> {
+    const t = getExtendedTimestamps(entry);
+    const iso = (d: Date | null): string | null => (d === null ? null : d.toISOString());
+    return { mtime: iso(t.mtime), atime: iso(t.atime), ctime: iso(t.ctime), source: t.source };
 }
 
 /** View from a forward-streamed local header (no central-directory-only fields). */
@@ -249,7 +269,7 @@ export const ENTRY_VIEW_SCHEMA = {
     properties: {
         index: { type: 'integer', minimum: 0, description: 'Position in the central directory (or in the forward scan).' },
         name: { type: 'string' },
-        nameEncoding: { type: 'string', enum: ['utf-8', 'cp437'] },
+        nameEncoding: { type: 'string', enum: ['utf-8', 'cp437', 'custom'] },
         isDirectory: { type: 'boolean' },
         isSymlink: { type: ['boolean', 'null'], description: 'Unix mode S_IFLNK; null from a forward scan.' },
         method: { type: 'integer', description: 'Compression method id (0 store, 8 deflate).' },
@@ -300,5 +320,22 @@ export const ENTRY_VIEW_SCHEMA = {
         },
         rawNameHex: { type: 'string' },
         commentHex: { type: 'string' },
+        extendedTimestamps: {
+            type: 'object',
+            additionalProperties: false,
+            description: "With includeExtendedTimestamps: modification / access / creation instants (ISO-8601, UTC) from the UT (0x5455) extra, else the NTFS (0x000a) extra, else the DOS fields (source names which); a missing one is null.",
+            properties: {
+                mtime: { type: ['string', 'null'] },
+                atime: { type: ['string', 'null'] },
+                ctime: { type: ['string', 'null'] },
+                source: { type: 'string', enum: ['ut', 'ntfs', 'dos'] },
+            },
+        },
+        unixIds: {
+            type: ['object', 'null'],
+            additionalProperties: false,
+            description: 'With includeUnixIds: the Unix owner uid / gid from the Info-ZIP ux (0x7875) extra; null when the archive carries none.',
+            properties: { uid: { type: 'integer', minimum: 0 }, gid: { type: 'integer', minimum: 0 } },
+        },
     },
 } as const;

@@ -2,8 +2,12 @@
  * Tool: modify_zip — incremental modification through `createZipModifier`:
  * add / replace / remove / rename entries and set the comment, then either
  * `save()` (append-only: original bytes verbatim, no recompression, the
- * SAME buffer back when nothing changed) or `saveCompact()` (canonical
- * rewrite, still no recompression, removed data truly gone).
+ * SAME buffer back when nothing changed) or `saveCompact()` (a rewrite
+ * without the dead bytes, entries sorted by raw name bytes, still no
+ * recompression, removed data truly gone). With `canonical` (zipnative 1.1.0,
+ * compact only) the rewrite also normalises every entry into the canonical
+ * deterministic form — `saveCompact({ canonical })`, the same rules as
+ * canonicalize_zip, applied after the edits.
  *
  * DATA REMANENCE (the engine's warning, restated): `remove` / `replace` +
  * mode 'append' does NOT erase content — every original byte stays in the
@@ -14,8 +18,10 @@
 import { z } from 'zod';
 import { createZipModifier, openZip, type ZipModifierOptions } from 'zipnative';
 
+import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
 import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_MODIFY_OPERATIONS } from '../caps.js';
+import { CANONICAL_OPTION_PROPERTIES, CanonicalOptionShape, toCanonicalOptions } from '../canonical.js';
 import { createDiagnosticSink, type DiagnosticsReport } from '../diagnostics.js';
 import { ensureEngineReady } from '../engine.js';
 import {
@@ -88,7 +94,13 @@ export const MODIFY_ZIP_INPUT_SCHEMA = {
             type: 'string',
             enum: ['append', 'compact'],
             default: 'append',
-            description: "'append' (default): save() — original bytes verbatim + appended entries + new central directory; removed/replaced payloads REMAIN in the file (data remanence). 'compact': saveCompact() — canonical rewrite without recompression, removed data truly gone, SFX prefix dropped.",
+            description: "'append' (default): save() — original bytes verbatim + appended entries + new central directory; removed/replaced payloads REMAIN in the file (data remanence). 'compact': saveCompact() — a rewrite without recompression, entries sorted by raw name bytes, removed data truly gone, SFX prefix dropped (add `canonical` for the canonical deterministic form).",
+        },
+        canonical: {
+            type: 'object',
+            additionalProperties: false,
+            description: "mode 'compact' only (zipnative 1.1.0 saveCompact({ canonical })): after the edits, rewrite every entry into the canonical deterministic form — sorted by raw name bytes, one timestamp, UTF-8 flags, Zip64-only extras, version-made-by 0x032D — still without recompression. `{}` takes the defaults. The same rules as canonicalize_zip.",
+            properties: CANONICAL_OPTION_PROPERTIES,
         },
         compression: COMPRESSION_INPUT_SCHEMA,
         defaultDate: DEFAULT_DATE_SCHEMA,
@@ -114,13 +126,17 @@ const InputSchema = z
         ...ARCHIVE_INPUT_SHAPE,
         operations: z.array(z.union([WriteOp, RemoveOp, RenameOp, CommentOp])).min(1).max(MAX_MODIFY_OPERATIONS),
         mode: z.enum(['append', 'compact']).default('append'),
+        canonical: z.strictObject(CanonicalOptionShape).optional(),
         compression: CompressionSchema.optional(),
         defaultDate: z.string().regex(new RegExp(DEFAULT_DATE_PATTERN)).optional(),
         includeSha256: z.boolean().default(false),
         ...EngineOptionsShape,
         ...OutputShape,
     })
-    .superRefine(refineArchiveInput);
+    .superRefine((value, ctx) => {
+        refineArchiveInput(value, ctx);
+        if (value.canonical !== undefined && value.mode !== 'compact') ctx.addIssue({ code: 'custom', message: "canonical applies to mode 'compact' only (an append-mode save keeps the original bytes verbatim)", path: ['canonical'] });
+    });
 
 export const MODIFY_ZIP_OUTPUT_SCHEMA = archiveOutputSchemaWith(
     {
@@ -132,6 +148,7 @@ export const MODIFY_ZIP_OUTPUT_SCHEMA = archiveOutputSchemaWith(
         outputBytes: { type: 'integer', minimum: 0 },
         grewByBytes: { type: 'integer', description: 'outputBytes − inputBytes (negative after a compacting rewrite).' },
         noOp: { type: 'boolean', description: 'true when the engine returned the input buffer unchanged (no pending edit, same comment).' },
+        canonical: { type: 'boolean', description: "Present (true) when the compact rewrite produced the canonical deterministic form (input canonical)." },
         sha256: { type: 'string', description: 'Present with includeSha256.' },
     },
     'modify_zip summary.',
@@ -146,18 +163,36 @@ export interface ModifyZipSummary {
     readonly outputBytes: number;
     readonly grewByBytes: number;
     readonly noOp: boolean;
+    readonly canonical?: true;
     readonly sha256?: string;
 }
 
 export type ModifyZipResult = OutputResult & DiagnosticsReport & { readonly summary: ModifyZipSummary };
 
-export async function modifyZipTool(rawInput: unknown): Promise<ModifyZipResult> {
+export async function modifyZipTool(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<ModifyZipResult> {
     const input = parseInput(InputSchema, rawInput);
     await ensureEngineReady();
     const { bytes } = await loadArchive(input);
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
-    const reader = guard('Failed to open archive', () => openZip(bytes, { ...(limits !== undefined ? { limits } : {}), ...sink.options }));
+    // Eager: the append path never re-reads the existing entries, so a lazy
+    // open would carry an overlapping (smuggling) or truncated-header archive
+    // into the output unchecked. Every local header and the overlap table are
+    // cross-checked up front, as inspect_zip does by default.
+    const reader = guard('Failed to open archive', () => openZip(bytes, { validate: 'eager', ...(limits !== undefined ? { limits } : {}), ...sink.options }));
+    // A-006: the eager pass checks extents only; the append path also needs each
+    // entry's local header and declared sizes cross-checked before its bytes are
+    // re-emitted (a method / CRC / size divergence, a declared-size bomb). The
+    // engine's raw read does exactly that without decompressing; compaction
+    // reads every entry anyway. Encrypted entries cannot be read raw and are
+    // carried as they are (their extents were checked by the eager pass).
+    if (input.mode === 'append') {
+        for (const entry of reader.entries()) {
+            throwIfCancelled(context);
+            if (entry.isDirectory || entry.isEncrypted) continue;
+            guard('Failed to check an entry of the archive', () => reader.readEntryRaw(entry), entry.name);
+        }
+    }
     const defaultDate = toDefaultDate(input.defaultDate);
     const compression = toCompression(input.compression);
     const options: ZipModifierOptions = {
@@ -202,7 +237,8 @@ export async function modifyZipTool(rawInput: unknown): Promise<ModifyZipResult>
         }
     }
 
-    const outputBytes = guard(input.mode === 'compact' ? 'Failed to save (compact)' : 'Failed to save (append)', () => (input.mode === 'compact' ? modifier.saveCompact() : modifier.save()));
+    const canonical = input.canonical !== undefined ? toCanonicalOptions(input.canonical, 'canonical.') : undefined;
+    const outputBytes = guard(input.mode === 'compact' ? 'Failed to save (compact)' : 'Failed to save (append)', () => (input.mode === 'compact' ? modifier.saveCompact(canonical !== undefined ? { canonical } : undefined) : modifier.save()));
     const noOp = outputBytes === reader.bytes;
     const entryCountAfter = guard('Failed to re-open the saved archive', () => openZip(outputBytes, { onDiagnostic: () => undefined }).entryCount);
     const out = await emitArchive(outputBytes, { mode: input.outputMode, outputPath: input.outputPath });
@@ -218,6 +254,7 @@ export async function modifyZipTool(rawInput: unknown): Promise<ModifyZipResult>
             outputBytes: outputBytes.byteLength,
             grewByBytes: outputBytes.byteLength - bytes.byteLength,
             noOp,
+            ...(canonical !== undefined ? { canonical: true as const } : {}),
             ...(sha256 !== undefined ? { sha256 } : {}),
         },
         ...sink.report(),

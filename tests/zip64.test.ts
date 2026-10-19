@@ -50,7 +50,7 @@ describe('B-010: Zip64 is reachable and readable through the tools', () => {
         expect(out.isZip64).toBe(true);
         expect(out.entryCount).toBe(MANY);
         expect(out.checks?.[0]).toMatchObject({ check: 'zip64', ok: true });
-        expect(out.determinism.deterministic).toBe(true);
+        expect(out.determinism?.deterministic).toBe(true);
     }, 60_000);
 
     it('list_zip_entries pages to the end: offset 69 990 returns the last 10 rows with hasMore false', async () => {

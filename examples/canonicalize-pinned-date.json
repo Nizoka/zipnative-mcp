@@ -1,0 +1,10 @@
+{
+  "description": "Canonicalise with one release timestamp instead of the DOS epoch: date is written on every entry, read as UTC on every host, and keepExternalAttributes: false writes the canonical 0644 / 0755 modes. Verify later with inspect_zip { check: ['canonical-form'], canonicalDate: '2026-10-08T00:00:00Z' }.",
+  "tool": "canonicalize_zip",
+  "arguments": {
+    "zipBase64": "<zip-base64>",
+    "date": "2026-10-08T00:00:00Z",
+    "keepExternalAttributes": false,
+    "includeSha256": true
+  }
+}

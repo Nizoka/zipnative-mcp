@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-20
+
+The first minor release, on zipnative 1.1.0. **15 tools** (two new: `canonicalize_zip`, `merge_zip`), byte-range reads of
+sandbox archives larger than memory, the Zip64 streaming opt-in, cancellation and progress, UTC timestamps on every host —
+and every 1.0.0 call keeps working: the live catalogue is a checked superset of the frozen 1.0.0 one, and the default
+output of every existing tool is byte-identical for every valid input on a UTC host. Two ReDoS paths, a sandbox read race
+and an unchecked `modify_zip` append path are closed, and the repository reaches the hardening level of pkinative-mcp
+1.0.0. An independent two-auditor release audit with an adversarial verifier (73 findings stamped: 0 blocker, 7 major,
+33 minor, 24 note; 2 rejected) is closed in this release. Full notes, with the compatibility ledger C1–C17 and the
+audit summary: [release-notes/v1.1.0.md](release-notes/v1.1.0.md).
+
+### Security
+
+- **fix(security):** linear-time glob matching (CWE-1333), globs bounded at 1 024 characters, an inverted class range is `VALIDATION_ERROR`.
+- **fix(security):** the governance dependency pattern no longer backtracks; `draft_governance_issue` free text bounded at 16 384 characters; CodeQL alert 8 fixed.
+- **fix(security):** every sandbox read goes through one file handle bound to its real path by device and inode (`SECURITY_VIOLATION` on a swap, `IO_ERROR` on a file that changes under the read).
+- **fix(security):** `modify_zip` opens its input eagerly — an overlapping or truncated-header archive is refused in `mode: 'append'` too.
+- **fix(security):** an escaped non-`ToolError` is `ENGINE_ERROR` (`errorClass: 'internal'`) with absolute paths redacted; `fields` paths refuse prototype segments.
+- **fix(security):** the server refuses to start on an invalid `ZIPNATIVE_MCP_PORT` or a relative `ZIPNATIVE_MCP_OUTPUT_DIR`; HTTP timeouts, a header-count bound, `nosniff` and `no-store`.
+- **fix(deps):** `npm audit` clean on the full tree (vitest 4.1.11, js-yaml 4.3.2, `@cyclonedx/cyclonedx-npm` removed in favour of `npm sbom`).
+- **ci(security):** harden-runner on every job, `--ignore-scripts`, one SHA per action, least-privilege permissions, dependency review, weekly audit, CodeQL `security-extended`, committed rulesets.
+- **fix(audit):** `modify_zip` append also cross-checks every entry's local header and declared sizes (A-006); `merge_zip` refuses an entry it cannot verify (A-002); HTTP checks Host / Origin and the bearer token before reading the body (A-015); the cache namespace carries the operator ceilings and `ZIPNATIVE_MCP_CACHE_DIR` must be absolute (A-007, A-020); `resources/read` answers a malformed URI with -32602 (A-014); globs match about three times faster (A-001).
+- **ci(audit):** the publish gate fails closed on veraZIP (`VERAZIP_REQUIRED`, A-004); the npm client installs with `--ignore-scripts` (A-010); the pull-request trigger of `ci.yml` has no path filter (A-009); a weekly veraZIP run (A-023).
+
+### Added
+
+- **feat(tool): canonicalize_zip** — any archive into the engine's canonical deterministic form without recompression, with the engine's `analyzeDeterminism()` verdict on the result.
+- **feat(tool): merge_zip** — up to 32 source archives merged into one without recompression, every entry verified first, `onConflict` `error` | `first` | `last`.
+- **feat(input):** `access: 'auto' | 'memory' | 'range'` on `inspect_zip`, `list_zip_entries`, `read_zip_entry` (the engine's `openZipRange` over the sandbox file's handle, never a URL).
+- **feat(input):** `inspect_zip` `determinismReport`, `canonicalDate` and three `canonical-*` checks; `modify_zip` `canonical` on `mode: 'compact'`; `create_zip` `zip64: true` on stream entries; `includeExtendedTimestamps` / `includeUnixIds`; `limits.maxEntryCompressedSize` (ninth `ZipLimits` key).
+- **feat(output):** `verify_zip` and `read_zip_entry` relay the engine's `skipped` reason (`'unsupported-method'` new).
+- **feat(server):** cancellation and progress on every tool whose work grows with its input (`verify_zip` only before it starts); the `CANCELLED` wrapper code; the fourth operator ceiling `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES`; `describe_engine` `codecs[].incremental` and the 1.1.0 unexposed exports.
+- **feat(tooling):** `scripts/gate.ts`, `scripts/verify-docs.ts`, `scripts/release-prepare.ts`, `scripts/tool-shape.ts`, the sample baseline chain (`generate-samples` / `verify-samples`), `scripts/build-claude-rules.ts`, opt-in git hooks.
+- **fix(tooling):** the semantic fingerprint of a `draft_governance_issue` sample also neutralises its `sizeBytes` (the byte length of a markdown that names the runner's Node and OS), so the baseline holds on every CI runner.
+- **feat(tests):** the catalogue superset gate, the seeded fuzz suite, the no-network doctrine, reproducible builds under two time zones, the tooling suites.
+- **feat(ci):** `publish.yml` `verify` → `publish` → `attest` → `registry` (Trusted Publishing with provenance, registry bytes compared, SLSA build provenance for the tarball and the SBOM, the MCP registry entry); `sample-regression.yml`, `docs.yml`, `audit.yml`, `dependency-review.yml`, `node-current.yml`; rulesets, Security Insights.
+- **feat(governance):** the committed agent layer (deny list, guard hook, rendered rules, release-audit skill); `docs/AGENT_CONTRACT.md`.
+
+### Changed
+
+- **chore(deps):** zipnative ^1.1.0, `@modelcontextprotocol/server` ^2.3.1 (Apache-2.0), zod ^4.6.5.
+- **fix(engine):** dates encoded and decoded in UTC (`dosTimeMode: 'utc'`) — identical bytes on every host (C1).
+- **fix(tool):** `verify_zip` fails an encrypted entry whose local header contradicts the central directory (C3).
+- **chore(tool):** `inspect_zip` determinism sub-checks from `analyzeDeterminism()`, the default verdict unchanged (C4).
+- **chore(errors):** the node:zlib table is gone; `scan_zip_forward` reports `ZIP_DEFLATE_*` where 1.0.0 reported `ZIP_DECOMPRESSION_FAILED` (C6).
+- **fix(http):** request bodies up to the documented 256 MiB (1.0.0 kept the SDK's 4 MiB default) (C10).
+- **chore(tooling):** veraZIP core re-vendored from zipnative 1.1.0 (23 check ids); corpus of 43 archives (39 conformant, 4 canaries).
+- **fix(review):** `Cache-Control: no-store` holds on every HTTP response, the legacy-era 200 included (the SDK's `no-cache, no-transform` is overridden, R-027); the Host / Origin and bearer refusals before the body are proven on the built binary.
+- **test(review):** a real 4 GiB + 1 Zip64 stream and the 256 MiB stdio frame edge run under `ZIPNATIVE_MCP_SLOW_TESTS` (publish gate, weekly); prototype-pollution probes over a real stdio frame (the SDK strips a root `__proto__`, a nested one is `VALIDATION_ERROR`); `parseInput` refuses a replaced prototype; `release-prepare` re-dates the CHANGELOG heading and the Security Insights stamps.
+- **fix(audit):** cancellation reaches `compute_crc32` and `inflate_raw` and the start of `verify_zip` (A-003); `verify_zip` diagnostics de-duplicated and capped at 200 (B-009); `tools/list` about 12 % smaller through shorter shared descriptions (D-018); every documentation finding of the audit fixed; three engine root causes reported to zipnative alongside this release (a private advisory for the eager check, two public issues).
+
+### Documentation
+
+- **docs:** every document brought to 1.1.0; new `docs/AGENT_CONTRACT.md` and `docs/guides/LARGE_ARCHIVES.md`; the 106-export ledger; SECURITY.md supply-chain and reproducibility sections; `tests/fixtures/PROVENANCE.md`.
+
 ## [1.0.0] - 2026-09-07
 
 The first stable release — and the first npm publication — of the MCP server for
@@ -81,5 +136,6 @@ every publish.
 - **No encryption by policy** — encrypted entries are detected (`ZIP_UNSUPPORTED_ENCRYPTION`), never decrypted, never silently skipped by default extraction.
 - **Supply chain** — three runtime dependencies; OIDC Trusted Publishing with provenance attestations and a CycloneDX SBOM per Release; CodeQL, OpenSSF Scorecard, `npm audit --audit-level=high` in CI; secrets (`ZIPNATIVE_MCP_HTTP_TOKEN`) never logged or echoed.
 
-[Unreleased]: https://github.com/Nizoka/zipnative-mcp/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Nizoka/zipnative-mcp/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Nizoka/zipnative-mcp/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Nizoka/zipnative-mcp/releases/tag/v1.0.0

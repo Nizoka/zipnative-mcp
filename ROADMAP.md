@@ -12,49 +12,70 @@ this server is a faithful thin wrapper and never implements ZIP structure on its
 
 ## Released
 
+### v1.1.0 — First minor release, on zipnative 1.1.0
+
+Every 1.0.0 call keeps working: the live catalogue is a checked superset of the frozen 1.0.0 one, and the default output of every existing tool is byte-identical for every valid input on a UTC host (the compatibility ledger is in [release-notes/v1.1.0.md](release-notes/v1.1.0.md)).
+
+- [x] **15 tools** — two new: `canonicalize_zip` (any archive into the engine's canonical deterministic form without recompression, with the engine's `analyzeDeterminism()` verdict on the result) and `merge_zip` (1 to 32 source archives into one without recompression, every entry CRC- and size-checked first — an entry with no codec here is refused, not copied unchecked —, `onConflict` `error` | `first` | `last`).
+- [x] **Byte-range reads** — `access: 'auto' | 'memory' | 'range'` on `inspect_zip`, `list_zip_entries` and `read_zip_entry`: the engine's `openZipRange` over the sandbox file's own handle (never a URL), so a `zipPath` above the 1 GiB in-memory cap is read instead of refused; `limits.maxEntryCompressedSize`, the ninth `ZipLimits` key, bounds one fetched payload.
+- [x] **Zip64 streaming** — `create_zip` stream entries take `zip64: true` (the engine's per-entry opt-in, APPNOTE 4.3.9.2), and the fourth operator ceiling `ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES` (default 4 GiB, unchanged) lets an operator write an archive above 4 GiB into the sandbox.
+- [x] **Cancellation and progress** — the request's signal and, with a `progressToken`, a progress sink reach every tool whose work scales with its input except `verify_zip` (the engine's `verifyZip` takes no signal — see *Blocked upstream*); a cancelled call is the 17th wrapper code `CANCELLED` in-process (over MCP it gets no response), never cached, its partial output file removed; `notifications/progress` are strictly increasing and throttled.
+- [x] **Engine parity** — UTC DOS timestamps on every host (`dosTimeMode: 'utc'`), `verify_zip` / `read_zip_entry` relaying the engine's `skipped` reason, `inspect_zip` determinism from `analyzeDeterminism()` with the opt-in `determinismReport` / `canonicalDate` and three `canonical-*` checks, `modify_zip` `canonical` on `mode: 'compact'`, opt-in extended timestamps and Unix owner ids, `describe_engine` `codecs[].incremental`; 106 engine exports mapped to a touchpoint or deliberately unexposed (`docs/KNOWLEDGE_BASE.md` §8), 12 diagnostic codes.
+- [x] **Catalogue superset gate** — `tests/catalogue-superset.test.ts` compares the live `tools/list` with the frozen `tests/_fixtures/tool-shape.v1.0.0.json`: no removal, no narrowing, no new `required`, no tighter bound; the accepted deltas are enumerated in the test.
+- [x] **MCP registry publication job** — `publish.yml` publishes `server.json` to the MCP registry in its fourth job (`registry`), with `mcp-publisher` pinned by version and SHA-256 and the workflow's GitHub OIDC identity — the manual step of 1.0.0 is gone.
+- [x] **Security fixes** — linear-time globs and governance patterns (CWE-1333), one-handle sandbox reads bound by device and inode (CWE-367), the coded `ENGINE_ERROR` boundary with absolute paths redacted, `modify_zip` opening its input eagerly, HTTP timeouts and security headers, a startup refusal on an invalid port or a relative sandbox path.
+- [x] **One gate and docs as code** — `scripts/gate.ts` (fast / CI / publish profiles, `--require-all`) run by CI on Linux (Node 22 and 24), Windows and macOS; `scripts/verify-docs.ts` holding every count to `docs/assets/ecosystem.json`; `scripts/release-prepare.ts`; `scripts/tool-shape.ts` with size budgets; the 54-sample baseline with a `since` chain; the seeded fuzz suite; `docs/AGENT_CONTRACT.md`.
+- [x] **Release integrity** — the four-job publish workflow (`verify` → `publish` → `attest` → `registry`), npm Trusted Publishing with provenance, an `npm sbom` CycloneDX SBOM and a build-provenance attestation, harden-runner and `--ignore-scripts` on every job, one SHA per action, dependency review, CodeQL `security-extended`, Scorecard, committed rulesets, Security Insights.
+- [x] **Conformance** — the veraZIP core re-vendored from zipnative 1.1.0 (23 check ids, `WF/DESCRIPTOR-WIDTH` new); the corpus covers canonicalisation, merging, compact + canonical and a Zip64 streamed entry: 43 archives, 39 conformant and 4 negative canaries.
+
 ### v1.0.0 — First stable release
 
-- [x] **13 tools on zipnative 1.0.0** — `inspect_zip`, `list_zip_entries`, `read_zip_entry`, `verify_zip`, `extract_zip`, `scan_zip_forward`, `sanitize_entry_paths`, `create_zip`, `modify_zip`, `compute_crc32`, `inflate_raw`, `describe_engine`, `draft_governance_issue`; every tool with typed input / output schemas, annotations, `_meta.apiVersion = '1.0.0'` and ≤ 2 executable `_meta.examples`.
-- [x] **Full engine coverage** — all 77 exports mapped to a tool touchpoint or deliberately unexposed with a reason (`docs/KNOWLEDGE_BASE.md` §8, `describe_engine.unexposed`); the 39 `ZIP_*` error codes passed through verbatim with `_meta.error.data` detail; the 11 diagnostics on every result.
-- [x] **Secure-by-default extraction** — zip-slip / device names, symlinks, duplicate paths, declared-size and ratio bombs, overlapping entries and central/local divergence refused with frozen codes; relaxations are named inputs; one sandbox (`ZIPNATIVE_MCP_OUTPUT_DIR`) for reads and writes, `wx` writes, realpath checks; operator ceilings `ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES` / `_MAX_ENTRIES` / `_WORKERS`.
-- [x] **Deterministic, reproducible creation** — canonical layout by default, `compression.deterministic: true` for cross-runtime identical bytes, worker-parallel byte-identity, streamed sources, `includeSha256` proofs; `inspect_zip` determinism verdict and CI `check` / `assert`.
-- [x] **Incremental modification** — `modify_zip` append / compact without recompression, remanence documented, `ZIP_DEAD_BYTES_RATIO` surfaced.
-- [x] **Forward scanning** — `scan_zip_forward` over truncated / unseekable input with `tolerateTruncation`, `trust: 'local-headers-only'`.
-- [x] **Conformance gate ("veraZIP")** — ISO/IEC 21320-1:2015 asserted on every archive a test produces and over a 38-archive corpus (4 negative canaries, hostile-but-conformant entries with `refusedBy`), blocking on Linux and Windows and before every publish.
-- [x] **MCP 2026-07-28 + legacy fallback** — SDK v2, stateless serving, cache hints, projectable output schemas, `verbosity` / `fields` projections, resources (`zipnative://output/{+path}`), 7 prompts, opt-in response cache, opt-in HTTP bearer token.
-- [x] **AI governance / HITL** — `draft_governance_issue`, `governance_contract` + `draft_issue_workflow` prompts, `.github/ai-governance.json`, `verify:issue`; no network code path.
-- [x] **Governance docs** — AGENTS.md, `llms.txt`, `docs/AI_GUIDE.md`, `docs/API_STABILITY.md`, `docs/KNOWLEDGE_BASE.md`, six guides; docs-consistency and catalogue-parity tests; `tests/_fixtures/tool-shape.v1.0.0.json` frozen.
-- [x] **Release integrity** — npm Trusted Publishing (OIDC), provenance, CycloneDX SBOM, SHA-pinned actions, CodeQL, Scorecard.
+- [x] **13 tools on zipnative 1.0.0** — `inspect_zip`, `list_zip_entries`, `read_zip_entry`, `verify_zip`, `extract_zip`, `scan_zip_forward`, `sanitize_entry_paths`, `create_zip`, `modify_zip`, `compute_crc32`, `inflate_raw`, `describe_engine`, `draft_governance_issue`; every tool with typed input / output schemas, annotations and ≤ 2 executable `_meta.examples`. <!-- verify-docs:allow stale-token -->
+- [x] **Full engine coverage** — all 77 exports of the engine 1.0.0 mapped to a tool touchpoint or deliberately unexposed with a reason; the 39 `ZIP_*` error codes passed through verbatim; the 11 diagnostics of the engine 1.0.0 on every result. <!-- verify-docs:allow stale-token -->
+- [x] **Secure-by-default extraction**, **deterministic creation**, **incremental modification**, **forward scanning**, the **veraZIP conformance gate**, **MCP 2026-07-28 + legacy fallback**, the **AI governance / HITL** layer and npm Trusted Publishing with provenance.
 
-_v1.0.0 is the active release._
+_v1.1.0 is the active release._
+
+---
+
+## Upstream engine findings closed in zipnative 1.1.0
+
+The engine-side observations recorded while building 1.0.0 are closed in zipnative 1.1.0, and this release consumes each fix:
+
+- [x] **DOS timestamps depended on the process time zone** ([zipnative#9](https://github.com/Nizoka/zipnative/issues/9)) — `dosTimeMode: 'utc'`, used on every call here.
+- [x] **node:zlib and `DecompressionStream` errors leaked a runtime-dependent class** ([zipnative#10](https://github.com/Nizoka/zipnative/issues/10)) — every inflate tier now raises `ZIP_DEFLATE_CORRUPT` / `ZIP_DEFLATE_TRUNCATED`; the wrapper's own zlib error table is gone.
+- [x] **`iterateZipEntries()` ignored registered codecs** ([zipnative#11](https://github.com/Nizoka/zipnative/issues/11)) — the incremental codec contract (`createDecompressor`), reported by `describe_engine` `codecs[].incremental`.
+- [x] **`verifyEntry()` reported encrypted and stream-only entries as failed without a reason, with a fabricated `localHeaderMatch`** ([zipnative#12](https://github.com/Nizoka/zipnative/issues/12)) — the `skipped` reason, relayed by `verify_zip` and `read_zip_entry`.
+- [x] **Zip64 streaming** (`addStream` above 4 GiB refused) — the per-entry `zip64` opt-in, exposed on `create_zip` stream entries.
 
 ---
 
 ## Planned
 
-### v1.1.0
-
-- [ ] **Catalogue superset gate** — `tests/catalogue-superset.test.ts` comparing the live `tools/list` with the frozen `tests/_fixtures/tool-shape.v1.0.0.json`: no removal, no narrowing, no new `required`, no tighter bound; accepted deltas enumerated in the test. The fixture already exists; the comparison starts with the first release that has something to compare.
-- [ ] **Automated MCP registry publish** — run `mcp-publisher validate` / `publish` from `publish.yml` after the npm publication instead of the manual step in the go-live runbook.
-- [ ] **Per-entry Zip64 streaming** — surface the engine's per-entry `zip64` opt-in on `create_zip` `stream: true` entries once zipnative ships it (today an `addStream` entry above 4 GiB is refused with `ZIP_UNSUPPORTED_ZIP64_STREAMING`; buffered entries are fully Zip64 already).
-- [ ] **AES read-only** — if the engine adds AES decryption behind an injected crypto provider, expose it as an opt-in read path (`read_zip_entry`, `extract_zip`, `verify_zip`) with the key material never cached or echoed; ZipCrypto stays unsupported by policy.
-- [ ] **Upstream findings** — file the engine-side observations recorded in the guides through `draft_governance_issue` (human-submitted).
-
-### Longer term
+### Still planned
 
 - [ ] **Resource subscriptions** — `resources/subscribe` on the sandbox listing once hosts consume it.
-- [ ] **Larger inline envelopes behind an operator switch** — the inline caps (16 / 32 / 50 MiB) are host-friendly defaults; an opt-in ceiling could raise them for hosts that can carry more.
+- [ ] **Larger inline envelopes behind an operator switch** — the inline caps (16 MiB per entry, 32 MiB per extraction, 50 MiB per output) are host-friendly defaults; an opt-in ceiling could raise them for hosts that can carry more.
+- [ ] **Byte-range reads for the remaining whole-archive tools** — `verify_zip`, `extract_zip` and the determinism analysis of `inspect_zip` take the whole archive in memory today (≤ 1 GiB for a `zipPath`); they follow when the engine offers the same operations over a `ByteRangeSource`.
+- [ ] **`harden-runner` from audit to block mode** — switch the Linux jobs to `egress-policy: block` with the endpoints each job reaches (listed in `publish.yml`); Windows and macOS runners support audit mode only (the macOS gate leg runs without the action today).
+- [ ] **Transport-layer fuzz** — the seeded fuzz suite stops at tool arguments; a seeded generator of frame mutations over both transports is still open. There is no coverage-guided fuzzing here, and none is planned in the wrapper.
+- [ ] **Per-tool HTTP streaming** — MCP 2026-07-28 still has no partial `structuredContent`, so large listings stay paged (`offset` / `limit`) rather than streamed.
 
----
-
-## Blocked upstream
+### Blocked upstream
 
 Everything below waits on a zipnative export; implementing it on raw primitives in the wrapper would contradict the faithful-thin-wrapper philosophy and reintroduce ZIP parsing in `src/`.
 
-- [ ] **Zip64 streaming** (`addStream` > 4 GiB) — designed upstream (per-entry `zip64` opt-in, ADR in zipnative's ROADMAP); typed refusal until it lands.
-- [ ] **Encryption** — none in 1.x by policy (ZipCrypto is broken); AES behind an injected provider is a later-major candidate upstream, read-only here first.
+- [ ] **AES / decryption** — none in the engine 1.x by policy (ZipCrypto is broken); AES (AE-2) behind an injected crypto provider is an engine 2.0 candidate. Only then would a read-only path with a password input exist here, the key material never cached or echoed.
 - [ ] **Custom compression methods** — `registerCodec` is executable code and stays unexposed; a method beyond store / deflate would need an engine-shipped codec, which zipnative does not provide by policy.
-- [ ] **Forward-read custom-method payloads** — the engine's forward reader can only pump store and deflate; `scan_zip_forward` inherits the limitation.
+- [ ] **A cancellable `verify_zip`** — `verifyZip()` is synchronous and its options hold only `limits`, so a started verification runs to completion and blocks the process meanwhile. A signal on a synchronous call would not help (the abort cannot be delivered while it blocks); the request is an asynchronous engine variant yielding between entries, with `signal` and `onProgress`. The tool switches to it when it ships — re-deriving the loop from `verifyEntry()` here would duplicate the archive rule and the report the engine owns.
+- [ ] **Eager validation that compares local headers** — `validate: 'eager'` checks every entry's extent but not its method / CRC / sizes against the central directory (the engine's own documentation says it cross-checks the local headers); `modify_zip` compensates with a raw read of every entry in append mode.
+- [ ] **Engine 1.1.0 limitations that bite here** — a deterministic streamed entry (`stream: true` + `compression.deterministic: true`) is capped at 2 GiB by the pure-TS encoder (`ZIP_INPUT_TOO_LARGE`); the forward reader refuses store + bit 3 and encrypted + bit 3 entries (`ZIP_UNSUPPORTED_CD_LESS_DESCRIPTOR`); `addFromReader()` transplants from in-memory readers only, which is why `merge_zip` holds its sources in memory (1 GiB in all); a `zip64: true` streamed entry below 4 GiB still carries Zip64 records that Java's `ZipInputStream` cannot read.
+
+### Deliberately not exposed
+
+- **`nameEncoding` input / `nameDecoder`** — deliberately not exposed in 1.1.0: a decoder is a function, which JSON cannot carry safely; legacy names are decoded as cp437 (`rawNameHex` keeps the bytes), and `nameEncoding: 'custom'` never appears in a result. Never a free-form input; a label-based, closed-enum input (a fixed list of code pages) is a later candidate.
+- **`addRaw()`** — the caller would vouch for CRC and sizes; `merge_zip` exposes the checked transplant (`addFromReader`) only.
+- **A remote byte-range source** — `openZipRange` runs over a sandbox file handle or inline bytes; no URL, no network path, ever.
 
 ---
 

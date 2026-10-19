@@ -84,25 +84,25 @@ describe('inspect_zip', () => {
             expect(out.earliestDate).not.toBe(out.latestDate);
             expect(out.methods).toEqual([{ id: 0, name: 'store', count: 5 }]);
             // One entry carries a non-epoch date: reproducible order and flags, but not deterministic.
-            expect(out.determinism.epochTimestamps).toBe(false);
-            expect(out.determinism.canonicalOrder).toBe(true);
-            expect(out.determinism.utf8Flags).toBe(true);
-            expect(out.determinism.deterministic).toBe(false);
+            expect(out.determinism?.epochTimestamps).toBe(false);
+            expect(out.determinism?.canonicalOrder).toBe(true);
+            expect(out.determinism?.utf8Flags).toBe(true);
+            expect(out.determinism?.deterministic).toBe(false);
         });
 
         it("a 'now'-dated archive is not deterministic", async () => {
             const out = await inspectZip({ zipBase64: b64(basicZip({ defaultDate: 'now' })) });
-            expect(out.determinism.epochTimestamps).toBe(false);
-            expect(out.determinism.deterministic).toBe(false);
-            expect(out.determinism.canonicalLayout).toBe(true);
+            expect(out.determinism?.epochTimestamps).toBe(false);
+            expect(out.determinism?.deterministic).toBe(false);
+            expect(out.determinism?.canonicalLayout).toBe(true);
         });
 
         it('a streamed archive is deterministic but not canonical layout', async () => {
             const out = await inspectZip({ zipBase64: b64(await streamedZip()) });
             expect(out.dataDescriptorCount).toBe(1);
-            expect(out.determinism.noDataDescriptors).toBe(false);
-            expect(out.determinism.canonicalLayout).toBe(false);
-            expect(out.determinism.deterministic).toBe(true);
+            expect(out.determinism?.noDataDescriptors).toBe(false);
+            expect(out.determinism?.canonicalLayout).toBe(false);
+            expect(out.determinism?.deterministic).toBe(true);
         });
 
         it('counts symlinks, encrypted entries, unsafe names, duplicates and cp437 names', async () => {
@@ -130,8 +130,8 @@ describe('inspect_zip', () => {
     describe('checks', () => {
         it('evaluates every simple check on basicZip', async () => {
             const out = await inspectZip({ zipBase64: b64(basicZip()), check: [...INSPECT_CHECKS] });
-            expect(INSPECT_CHECKS).toHaveLength(15);
-            expect(out.checks).toHaveLength(15);
+            expect(INSPECT_CHECKS).toHaveLength(18);
+            expect(out.checks).toHaveLength(18);
             const byName = Object.fromEntries((out.checks ?? []).map((c) => [c.check, c.ok]));
             expect(byName).toEqual({
                 'deterministic': true,
@@ -149,9 +149,37 @@ describe('inspect_zip', () => {
                 'no-diagnostics': true,
                 'store-only': false,
                 'deflate-only': false,
+                'canonical-form': true,
+                'canonical-extras': true,
+                'canonical-version-made-by': true,
             });
             expect(out.checksPassed).toBe(false);
             for (const c of out.checks ?? []) expect(typeof c.detail).toBe('string');
+            // The opt-in report is absent by default (the 1.0.0 shape).
+            expect(out.determinismReport).toBeUndefined();
+        });
+
+        it('analyzeDeterminism (zipnative 1.1.0): the default verdict keeps the 1.0.0 formula, the canonical form and offenders are opt-in', async () => {
+            const created = await callToolDirect('create_zip', { entries: [{ name: 'b.txt', text: 'b', extraFields: [{ id: 27242, dataBase64: 'AQID' }] }, { name: 'a.txt', text: 'a' }] });
+            const zipBase64 = (created.content[1] as { resource: { blob: string } }).resource.blob;
+            const out = await inspectZip({ zipBase64, determinismReport: true, check: ['deterministic', 'canonical-form', 'canonical-extras'] });
+            // Reproducible by the 1.0.0 definition (epoch, canonical order, UTF-8) — not the canonical form (a foreign extra field).
+            expect(out.determinism?.deterministic).toBe(true);
+            expect(out.determinismReport).toMatchObject({ deterministic: false, canonicalExtras: false, canonicalVersionMadeBy: true, offenderCount: 1, offenders: [{ name: 'b.txt', concern: 'extra-field' }] });
+            expect(out.checks?.map((c) => [c.check, c.ok])).toEqual([['deterministic', true], ['canonical-form', false], ['canonical-extras', false]]);
+            expect(out.checks?.[1]?.detail).toContain('extra-field');
+        });
+
+        it('canonicalDate re-targets the canonical-form verdict only, and is read as UTC', async () => {
+            const created = await callToolDirect('create_zip', { entries: [{ name: 'a.txt', text: 'a', date: '2024-06-01T12:34:56Z' }] });
+            const zipBase64 = (created.content[1] as { resource: { blob: string } }).resource.blob;
+            const plain = await inspectZip({ zipBase64, determinismReport: true });
+            expect(plain.determinism?.epochTimestamps).toBe(false);
+            expect(plain.determinismReport?.deterministic).toBe(false);
+            const pinned = await inspectZip({ zipBase64, determinismReport: true, canonicalDate: '2024-06-01T12:34:56Z' });
+            expect(pinned.determinism?.epochTimestamps).toBe(false);
+            expect(pinned.determinismReport).toMatchObject({ deterministic: true, epochTimestamps: true, pinnedDate: '2024-06-01T12:34:56.000Z', offenderCount: 0, offenders: [] });
+            expect((await inspectZip({ zipBase64, determinismReport: true, canonicalDate: '2024-06-01T12:34:56' })).determinismReport?.deterministic).toBe(true);
         });
 
         it('store-only / zip64 / no-diagnostics hold on the right archives', async () => {
@@ -184,7 +212,7 @@ describe('inspect_zip', () => {
         it('canonical-order fails on an insertion-ordered archive', async () => {
             const out = await inspectZip({ zipBase64: b64(raw([{ name: 'b.txt' }, { name: 'a.txt' }])), check: ['canonical-order'] });
             expect(out.checks?.[0]?.ok).toBe(false);
-            expect(out.determinism.canonicalOrder).toBe(false);
+            expect(out.determinism?.canonicalOrder).toBe(false);
         });
 
         it('evaluates every assert key, passing and failing', async () => {
@@ -278,8 +306,8 @@ describe('inspect_zip', () => {
             const out = await inspectZip({ zipBase64: b64(CP437_NAME()) });
             expect(out.diagnostics).toEqual([]);
             expect(out.cp437NameCount).toBe(1);
-            expect(out.determinism.utf8Flags).toBe(false);
-            expect(out.determinism.deterministic).toBe(false);
+            expect(out.determinism?.utf8Flags).toBe(false);
+            expect(out.determinism?.deterministic).toBe(false);
         });
 
         it('strict:true escalates the first diagnostic to ZIP_STRICT_DIAGNOSTIC', async () => {

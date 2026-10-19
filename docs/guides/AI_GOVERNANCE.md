@@ -49,6 +49,12 @@ and draft a high-quality issue.
 
 ## 3. The contract (seven non-negotiable rules)
 
+The same policy is written at three levels of detail: the seven rules below, which the
+`governance_contract` prompt returns; the nine numbered rules of
+[`.github/AGENT_RULES.md`](../../.github/AGENT_RULES.md), which add *right repository*
+and *anti-goals stay out*; and the eight-item `pre_issue_checklist` of
+`.github/ai-governance.json`, the machine-readable form.
+
 1. **No new runtime dependencies** — never propose adding an external runtime npm
    package beyond the three the server already has. (Enforced: a draft that suggests
    `npm install <pkg>`, a `yarn/pnpm/bun add`, or edits `"dependencies"` is rejected
@@ -56,8 +62,9 @@ and draft a high-quality issue.
 2. **No duplicates** — search **open AND closed** issues/PRs before drafting.
    (`duplicateSearchPerformed` must be `true`.)
 3. **Local reproduction** — run a minimal repro (an MCP tool call or a Node/TS
-   snippet) first and capture the exact command + result. (Enforced: the draft must
-   contain a fenced ```` ``` ```` reproduction block.)
+   snippet) first and capture the exact command + result. (Enforced: `reproduction` is a
+   required input of the tool, and `npm run verify:issue` requires a fenced
+   ```` ``` ```` reproduction block in a hand-written draft.)
 4. **Byte-identity / schema awareness** — keep default output byte-identical
    (`compression.deterministic: true` bytes are semver-major, see
    [`API_STABILITY.md`](../API_STABILITY.md) §3) and keep every JSON Schema aligned
@@ -80,7 +87,7 @@ and draft a high-quality issue.
 3. Confirm zero new runtime dependency is required (a hard blocker otherwise).
 4. Search existing open AND closed issues/PRs for duplicates.
 5. Decide the target: engine behaviour (parsing, writing, limits, codecs) → 'zipnative';
-   wrapper behaviour (schemas, sandbox, transport, projections) → 'zipnative-mcp'.
+   wrapper behaviour (schemas, sandbox, transport) → 'zipnative-mcp'.
 6. Call draft_governance_issue with the title, summary, issueType, targetRepo, reproduction,
    expected vs actual, and affected packages.
 7. Present the returned draft markdown AND the compliance report to the user.
@@ -93,8 +100,9 @@ The `draft_issue_workflow` MCP prompt returns exactly these steps.
 
 | Symptom | Target |
 |---|---|
-| `_meta.error.code` is `ZIP_INTERNAL` or `ZIP_API_MISUSE`; `ENGINE_ERROR` (a non-`ZipError` throw) | `zipnative` |
-| A parse refusal on an archive every foreign tool opens, a wrong `verify_zip` verdict, a non-conformant archive from `create_zip` (the veraZIP gate fails), a `deterministic: true` byte change | `zipnative` |
+| `_meta.error.code` is `ZIP_INTERNAL` or `ZIP_API_MISUSE` | `zipnative` |
+| `ENGINE_ERROR` (a non-`ZipError` throw, `data.errorClass: 'internal'`) | `zipnative` when the reproduction is a bare engine call, `zipnative-mcp` otherwise |
+| A parse refusal on an archive every foreign tool opens, a wrong `verify_zip` verdict, a non-conformant archive from `create_zip` / `canonicalize_zip` / `merge_zip` (the veraZIP gate fails), a `deterministic: true` byte change, a `canonicalize_zip` output that `analyzeDeterminism()` rejects | `zipnative` |
 | A refusal whose message names a relaxation or a limit (`ZIP_PATH_TRAVERSAL`, `ZIP_LIMIT_EXCEEDED`, …) | not a bug — the security posture working |
 | A schema / Zod mismatch, a sandbox refusal on a legitimate relative path, a projection that drops a field, a wrong `_meta.error.data` shape, a wrong `summary`, a transport problem | `zipnative-mcp` |
 
@@ -102,20 +110,22 @@ The `draft_issue_workflow` MCP prompt returns exactly these steps.
 
 ## 5. Using the `draft_governance_issue` tool
 
-Minimal call — drafting an engine report from a `scan_zip_forward` observation:
+Minimal call — drafting a wrapper feature request from a `list_zip_entries` observation
+(the same request `examples/draft-governance-issue.json` carries):
 
 ```jsonc
 {
-  "title": "iterateZipEntries mis-detects the descriptor of a stored entry",
-  "issueType": "bug",
-  "targetRepo": "zipnative",
-  "summary": "A stored entry followed by a signed data descriptor is reported as truncated by the forward reader, while openZip() on the complete archive reads it and verifies its CRC.",
+  "title": "Expose a label-based nameEncoding input for legacy archive names",
+  "issueType": "feature",
+  "targetRepo": "zipnative-mcp",
+  "summary": "Archives written by older Japanese and Russian tools store Shift-JIS or CP866 names without the UTF-8 flag; list_zip_entries shows them as CP437 mojibake. zipnative 1.1.0 can decode them (nameDecoder), but zipnative-mcp deliberately exposes no decoder. A closed enum of TextDecoder labels would reach the feature without accepting code from the caller.",
   "reproduction": {
-    "command": "scan_zip_forward { zipBase64: <archive written by create_zip with compression.method:'store' and stream:true>, data: 'verify' }",
-    "result": "isError: true, _meta.error.code = ZIP_STREAM_TRUNCATED"
+    "command": "list_zip_entries on an archive whose names are Shift-JIS bytes without flag bit 11",
+    "result": "every name is decoded as CP437 (nameEncoding: 'cp437'); rawNameHex shows the original Shift-JIS bytes"
   },
-  "expectedBehavior": "The entry is read and its CRC verified, as verify_zip reports for the same bytes.",
-  "affectedPackages": ["zipnative", "zipnative-mcp"],
+  "expectedBehavior": "An optional nameEncoding input (a closed enum such as 'shift_jis' | 'cp866' | 'windows-1251') decodes the names before path sanitisation; the default stays CP437.",
+  "actualBehavior": "The names cannot be decoded by any tool input.",
+  "affectedPackages": ["zipnative-mcp"],
   "duplicateSearchPerformed": true
 }
 ```
@@ -129,6 +139,11 @@ Optional inputs:
 | `affectedPackages` | `['zipnative-mcp']` | Impacted packages. |
 | `outputMode` | `inline` | `file` also writes the draft `.md` into `ZIPNATIVE_MCP_OUTPUT_DIR`. |
 | `outputPath` | — | Relative `.md` path inside the sandbox (only when `outputMode: 'file'`). |
+
+Bounds: `title` 8–160 characters; `summary`, `expectedBehavior`, `actualBehavior` and
+the two `reproduction` fields at most 16 384 characters each (since 1.1.0 —
+`VALIDATION_ERROR` above; the policy scan is linear and the bound keeps a draft
+reviewable).
 
 ### What you get back
 
@@ -149,9 +164,12 @@ still shows both.
 
 The draft is rejected before you can submit it if it:
 
-- proposes an external runtime dependency,
-- omits a reproduction code block, or
+- proposes an external runtime dependency, or
 - sets `duplicateSearchPerformed: false`.
+
+A call without `reproduction` never reaches the policy: the field is required, so it is
+`VALIDATION_ERROR`. The tool always fences the reproduction command, so the "no
+reproduction code block" check fires only on a hand-written draft (`npm run verify:issue`).
 
 Fix the draft and call again. This keeps the human from ever submitting a
 contract-breaking issue.
@@ -163,8 +181,9 @@ contract-breaking issue.
 When `outputMode: 'file'` is used, the draft `.md` lands in the sandbox
 `ZIPNATIVE_MCP_OUTPUT_DIR` (and is listed under `resources/list` as
 `zipnative://output/<path>`) — the tool never writes anywhere else. Copy it to
-`.github/drafts/` (the human's review staging area, git-ignored) and re-check it with
-the same policy the tool applied:
+`.github/drafts/` (the human's review staging area — git-ignored except its README,
+the templates and the `pr-*.md` / `issue-*.md` drafts a maintainer chooses to keep)
+and re-check it with the same policy the tool applied:
 
 ```bash
 npm run verify:issue -- .github/drafts/<draft>.md
@@ -173,10 +192,13 @@ npm run verify:issue -- .github/drafts/<draft>.md
 No CI job runs this verifier over `.github/drafts/` (drafts are work in progress);
 run it locally before presenting a draft.
 
-`scripts/verify-issue.mjs` mirrors `validateIssueMarkdown()` in
-[`src/governance.ts`](../../src/governance.ts) byte-for-byte, so the CLI and the
-tool never disagree. `tests/governance.test.ts` asserts that alignment, and that the
-policy embedded in the server equals `.github/ai-governance.json`.
+`scripts/verify-issue.mjs` is the dependency-free, build-independent CLI mirror of
+`validateIssueMarkdown()` in [`src/governance.ts`](../../src/governance.ts): the same
+checks (no runtime-dependency proposal, a fenced reproduction block, the required
+fields as an advisory), with the same linear-time dependency pattern. Exit 0 on pass,
+1 on a policy violation, 2 on a usage or I/O error. `tests/governance.test.ts` asserts
+that the two apply the same policy, and that the policy embedded in the server equals
+`.github/ai-governance.json`.
 
 ---
 

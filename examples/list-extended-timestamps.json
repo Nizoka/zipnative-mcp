@@ -1,0 +1,14 @@
+{
+  "description": "Opt-in metadata the engine reads from the extra fields: includeExtendedTimestamps adds each entry's modification / access / creation instants (UT 0x5455, then NTFS 0x000a, then the DOS fields — the source says which; ISO-8601, UTC) and includeUnixIds its Unix uid / gid (Info-ZIP ux 0x7875, or null). Absent by default, so the default row is unchanged.",
+  "tool": "list_zip_entries",
+  "arguments": {
+    "zipBase64": "<rich-zip-base64>",
+    "includeExtendedTimestamps": true,
+    "includeUnixIds": true,
+    "fields": [
+      "entries.name",
+      "entries.extendedTimestamps",
+      "entries.unixIds"
+    ]
+  }
+}

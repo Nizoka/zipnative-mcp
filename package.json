@@ -1,7 +1,7 @@
 {
     "name": "zipnative-mcp",
-    "version": "1.0.0",
-    "description": "Model Context Protocol (MCP) server for ZIP archives: create deterministic, reproducible archives (store/deflate, worker-parallel), list and inspect without extracting, read single entries by random access, extract with secure-by-default guards (zip-slip, zip-bomb, symlink, duplicate-path and device-name refusals), verify integrity in one call, scan unseekable streams, modify archives without recompression, compute CRC-32 and inflate raw DEFLATE. 13 tools on the zipnative engine, ISO/IEC 21320-1 conformance validated in CI, no network ever, for Claude, Cursor, ChatGPT and any MCP client.",
+    "version": "1.1.0",
+    "description": "Model Context Protocol (MCP) server for ZIP archives: create deterministic, reproducible archives (store/deflate, worker-parallel), list and inspect without extracting, read single entries by random access, extract with secure-by-default guards (zip-slip, zip-bomb, symlink, duplicate-path and device-name refusals), verify integrity in one call, scan unseekable streams, modify archives without recompression, rewrite any archive into a canonical reproducible form, merge archives without recompressing, read huge archives by byte ranges, compute CRC-32 and inflate raw DEFLATE. 15 tools on the zipnative engine, ISO/IEC 21320-1 conformance validated in CI, no network ever, for Claude, Cursor, ChatGPT and any MCP client.",
     "mcpName": "io.github.Nizoka/zipnative-mcp",
     "keywords": [
         "mcp",
@@ -24,6 +24,8 @@
         "random-access",
         "incremental",
         "deterministic",
+        "canonical",
+        "merge-zip",
         "reproducible-builds",
         "zip-slip",
         "zip-bomb",
@@ -77,7 +79,8 @@
         "README.md",
         "CHANGELOG.md",
         "server.json",
-        "llms.txt"
+        "llms.txt",
+        "THIRD-PARTY-NOTICES.md"
     ],
     "engines": {
         "node": ">=22"
@@ -89,31 +92,46 @@
         "clean": "node -e \"import('node:fs').then(m=>m.rmSync('dist',{recursive:true,force:true}))\"",
         "lint": "eslint src --max-warnings 0",
         "typecheck": "tsc --noEmit",
-        "typecheck:all": "npm run typecheck",
+        "typecheck:scripts": "tsc --noEmit -p tsconfig.scripts.json",
+        "typecheck:all": "npm run typecheck && npm run typecheck:scripts",
         "test": "vitest run",
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
+        "test:generate": "npx tsx scripts/generate-samples.ts",
         "examples:check": "vitest run tests/examples.test.ts",
+        "gate": "npx tsx scripts/gate.ts",
+        "gate:fast": "npx tsx scripts/gate.ts --fast",
+        "verify:samples": "npx tsx scripts/verify-samples.ts",
+        "verify:docs": "npx tsx scripts/verify-docs.ts",
+        "verify:tool-shape": "npx tsx scripts/tool-shape.ts --check",
         "verify:issue": "node scripts/verify-issue.mjs",
+        "release:prepare": "npx tsx scripts/release-prepare.ts",
         "corpus:zip": "node scripts/generate-zip-corpus.mjs",
         "validate:zip": "npm run build && npm run corpus:zip && node scripts/validate-zip.mjs",
-        "prepare": "npm run build",
-        "prepublishOnly": "npm run clean && npm run lint && npm run typecheck && npm run build && npm run test"
+        "verazip": "node scripts/validate-zip.mjs",
+        "agents:rules": "npx tsx scripts/build-claude-rules.ts",
+        "hooks:install": "node scripts/install-git-hooks.mjs",
+        "hooks:uninstall": "node scripts/install-git-hooks.mjs --uninstall",
+        "prepublishOnly": "npm run build"
     },
     "dependencies": {
-        "@modelcontextprotocol/server": "^2.0.0",
-        "zipnative": "^1.0.0",
-        "zod": "^4.2.0"
+        "@modelcontextprotocol/server": "^2.3.1",
+        "zipnative": "^1.1.0",
+        "zod": "^4.6.5"
     },
     "devDependencies": {
-        "@cyclonedx/cyclonedx-npm": "6.0.1",
         "@eslint/js": "^9.18.0",
         "@types/node": "^22.10.5",
-        "@vitest/coverage-v8": "^4.1.5",
+        "@vitest/coverage-v8": "^4.1.11",
         "eslint": "^9.18.0",
+        "tsx": "^4.23.15",
         "typescript": "^5.7.3",
-        "typescript-eslint": "^8.20.0",
-        "vitest": "^4.1.5"
+        "typescript-eslint": "^8.71.1",
+        "vitest": "^4.1.11"
+    },
+    "packageManager": "npm@10.9.8",
+    "overrides": {
+        "js-yaml": "4.3.2"
     },
     "publishConfig": {
         "access": "public",

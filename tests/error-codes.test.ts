@@ -1,6 +1,6 @@
 /**
  * Error-code inventory: every `ToolError('CODE', …)` literal in `src/` must be
- * (a) documented in the AGENTS.md error table and (b) exercised by at least
+ * (a) documented in the docs/AGENT_CONTRACT.md error table and (b) exercised by at least
  * one test under `tests/`; and every one of the engine's 39 frozen `ZIP_*`
  * codes (passed through verbatim by `src/zip-errors.ts`) must either be named
  * by a test that reaches it or be listed in `UNREACHABLE_THROUGH_WRAPPER` with
@@ -21,17 +21,18 @@ import { GovernanceError, SecurityError, ToolError } from '../src/errors.js';
 import { resolveCallLimits } from '../src/limits.js';
 import { emitArchive, emitArchiveStream, writeSandboxedText } from '../src/output.js';
 import { readResource } from '../src/resources.js';
-import { resolveInputFile, resolveOutputFile } from '../src/sandbox.js';
+import { openInputFile, resolveOutputFile } from '../src/sandbox.js';
+import { WRAPPER_CODE_NAMES } from '../src/wrapper-codes.js';
 import { callToolDirect, ensureEngineReady } from '../src/server.js';
 import { guard, guardAsync, mapZipError, ZIP_ERROR_CLASS, ZIP_ERROR_CODES } from '../src/zip-errors.js';
 import { assertValidZip } from './_zip-assert.js';
 import { b64, basicZip, bytesOf, CD_MISMATCH, CORRUPT_DEFLATE, CRC_OVERRIDE, DEVICE_NAME, DUPLICATE_PATHS, ENCRYPTED_FLAG, highRatioZip, LFH_METHOD_MISMATCH, MULTI_DISK, OVERLAP, raw, SFX_PREFIXED, STORE_DESCRIPTOR, SYMLINK, TRAILING_GARBAGE, truncated, UNKNOWN_METHOD, ZIP64_CONTRADICTION, ZIP64_DROPPED, ZIP64_HUGE_COUNT, ZIP_SLIP } from './_zip-fixtures.js';
 
-/** The documented `data.remedy` vocabulary (docs/API_STABILITY.md §2, AGENTS.md §6). */
-const REMEDY_VOCABULARY = ["outputMode:'file'", 'range', 'filter', "encoding:'base64'", "data:'verify'", 'list_zip_entries', 'resources/list'] as const;
+/** The documented `data.remedy` vocabulary (docs/API_STABILITY.md §2, docs/AGENT_CONTRACT.md §6) — the fixed values src/ emits (`maxEntries ≤ N` aside). */
+const REMEDY_VOCABULARY = ["outputMode:'file'", 'range', "encoding:'base64'", "data:'verify'", 'list_zip_entries', 'resources/list', 'zipPath', "access:'memory'", 'retry'] as const;
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const AGENTS = path.join(ROOT, 'AGENTS.md');
+const CONTRACT = path.join(ROOT, 'docs', 'AGENT_CONTRACT.md');
 
 function walk(dir: string, out: string[] = []): string[] {
     for (const entry of readdirSync(dir)) {
@@ -55,12 +56,8 @@ function collectSourceCodes(): string[] {
     return [...codes].sort();
 }
 
-/** The wrapper's own vocabulary (AGENTS.md §6) — everything the server can raise that is not a frozen ZIP_* code. */
-const WRAPPER_CODES = [
-    'VALIDATION_ERROR', 'INPUT_TOO_LARGE', 'INPUT_NOT_FOUND', 'ENTRY_TOO_LARGE', 'ENTRY_NOT_UTF8', 'OUTPUT_TOO_LARGE', 'OUTPUT_EXISTS',
-    'IO_ERROR', 'SECURITY_VIOLATION', 'MISSING_OUTPUT_PATH', 'INVALID_PATH', 'INVALID_EXTENSION', 'LIMIT_CEILING_EXCEEDED', 'UNKNOWN_RESOURCE',
-    'GOVERNANCE_VIOLATION', 'ENGINE_ERROR',
-] as const;
+/** The wrapper's own vocabulary (src/wrapper-codes.ts) — everything the server can raise that is not a frozen ZIP_* code. */
+const WRAPPER_CODES = WRAPPER_CODE_NAMES;
 
 /**
  * Frozen engine codes no input can make this wrapper emit, with the reason.
@@ -77,6 +74,9 @@ const UNREACHABLE_THROUGH_WRAPPER: Readonly<Record<string, string>> = {
     ZIP_INTERNAL: 'an engine invariant failure; no input reaches it',
     ZIP_LIMIT_INVALID: 'the limits shape is validated by Zod (integers ≥ 1) before resolveCallLimits merges it, so the engine never sees an invalid bound',
     ZIP_UNSUPPORTED_ZIP64_STREAMING: 'needs a > 4 GiB streamed entry (stream:true on a sourcePath), above the practical test envelope',
+    // zipnative 1.1.0 (issue #10): corrupt or truncated deflate is ZIP_DEFLATE_* on every inflate tier, the forward
+    // reader included; ZIP_DECOMPRESSION_FAILED is reserved for registered or injected codecs, which this server never adds.
+    ZIP_DECOMPRESSION_FAILED: 'reserved by the engine for registered or injected codecs since 1.1.0; corrupt deflate is ZIP_DEFLATE_CORRUPT / _TRUNCATED on every tier',
     ZIP_UNSUPPORTED_CODEC_MODE: 'needs a registered codec without a synchronous decompressor; this server registers none beyond store / deflate, so ZIP_UNSUPPORTED_METHOD fires first',
 };
 
@@ -97,10 +97,10 @@ describe('ToolError code inventory', () => {
         }
     });
 
-    it.skipIf(!existsSync(AGENTS))('documents every code in the AGENTS.md error table', () => {
-        const agents = readFileSync(AGENTS, 'utf8');
+    it.skipIf(!existsSync(CONTRACT))('documents every code in the docs/AGENT_CONTRACT.md error table', () => {
+        const agents = readFileSync(CONTRACT, 'utf8');
         const missing = [...new Set([...codes, ...WRAPPER_CODES, ...ZIP_ERROR_CODES])].filter((c) => !agents.includes(`\`${c}\``));
-        expect(missing, `codes missing from AGENTS.md error table: ${missing.join(', ')}`).toEqual([]);
+        expect(missing, `codes missing from the docs/AGENT_CONTRACT.md error table: ${missing.join(', ')}`).toEqual([]);
     });
 
     it('exercises every wrapper code in at least one test under tests/', () => {
@@ -190,7 +190,7 @@ describe('previously uncovered codes', () => {
             code = err instanceof ToolError ? err.code : 'other';
         }
         expect(code).toBe('INVALID_PATH');
-        expect((await codeOf(resolveInputFile('', null))).code).toBe('INVALID_PATH');
+        expect((await codeOf(openInputFile('', null))).code).toBe('INVALID_PATH');
     });
 
     it('INVALID_EXTENSION / OUTPUT_EXISTS / IO_ERROR: the file-output guards through the tools', async () => {
@@ -343,9 +343,8 @@ describe('previously uncovered codes', () => {
         expect(() => guard('ctx', () => { throw new Error('sync'); })).toThrow(expect.objectContaining({ code: 'ENGINE_ERROR' }));
         await expect(guardAsync('ctx', async () => { throw new Error('async'); })).rejects.toMatchObject({ code: 'ENGINE_ERROR', message: 'ctx: async' });
         expect(guard('ctx', () => 42)).toBe(42);
-        // zlib errors on the node-zlib tier map to the same codes as the pure tier.
-        expect(mapZipError(Object.assign(new Error('bad'), { code: 'Z_DATA_ERROR' }), 'ctx', 'e.txt').code).toBe('ZIP_DEFLATE_CORRUPT');
-        expect(mapZipError(Object.assign(new Error('bad'), { code: 'Z_BUF_ERROR' }), 'ctx').data).toEqual({ errorClass: 'parse', engineError: 'ZlibError' });
+        // A raw zlib error is no longer remapped: zipnative 1.1.0 normalises every inflate tier itself.
+        expect(mapZipError(Object.assign(new Error('bad'), { code: 'Z_DATA_ERROR' }), 'ctx', 'e.txt').code).toBe('ENGINE_ERROR');
         // Engine subclasses: detail extraction.
         const limit = mapZipError(new ZipLimitError('ZIP_LIMIT_EXCEEDED', 'too big', 'maxEntries', 1, 4), 'ctx');
         expect(limit.data).toEqual({ errorClass: 'limit', engineError: 'ZipLimitError', limit: 'maxEntries', configured: 1, observed: 4 });
@@ -433,7 +432,8 @@ describe('previously uncovered codes', () => {
             ['ZIP_CRC_MISMATCH', 'extract_zip', { zipBase64: b64(CORRUPT_DEFLATE()) }, 'data'],
             ['ZIP_SIZE_MISMATCH', 'read_zip_entry', { zipBase64: b64(raw([{ name: 'a.txt', data: bytesOf('abcd'), uncompressedSizeOverride: 2 }])), index: 0 }, 'data'],
             ['ZIP_DESCRIPTOR_MISMATCH', 'scan_zip_forward', { zipBase64: b64(raw([{ name: 'x', data: bytesOf('xxxxxxxxxx'), method: 8, dataDescriptor: 'signed', descriptorUncompressedSizeOverride: 3 }])), data: 'verify' }, 'data'],
-            ['ZIP_DECOMPRESSION_FAILED', 'scan_zip_forward', { zipBase64: b64(LFH_METHOD_MISMATCH()), data: 'verify' }, 'data'],
+            // 1.0.0 surfaced ZIP_DECOMPRESSION_FAILED here (node:zlib via the stream tier); 1.1.0 normalises it.
+            ['ZIP_DEFLATE_TRUNCATED', 'scan_zip_forward', { zipBase64: b64(LFH_METHOD_MISMATCH()), data: 'verify' }, 'parse'],
             ['ZIP_INFLATE_OUTPUT_OVERFLOW', 'inflate_raw', { dataBase64: b64(deflateRawSync(Buffer.alloc(4096))), maxOutput: 10 }, 'data'],
             ['ZIP_INFLATE_OUTPUT_OVERFLOW', 'inflate_raw', { dataBase64: b64(new Uint8Array(20)), maxOutput: 10, method: 'store' }, 'data'],
             ['ZIP_LIMIT_EXCEEDED', 'extract_zip', { zipBase64: b64(highRatioZip()), limits: { maxCompressionRatio: 2 } }, 'limit'],

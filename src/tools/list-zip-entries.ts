@@ -3,14 +3,17 @@
  * entry (duplicates included) appears in central-directory order, projected
  * through the shared EntryView; `filter` selects by name / prefix / glob and
  * `offset` / `limit` page the result so a 100 000-entry archive stays
- * token-bounded.
+ * token-bounded. A `zipPath` above the 1 GiB in-memory cap (or any archive
+ * with `access: 'range'`) is listed through zipnative's byte-range reader:
+ * only the end record and the central directory are read.
  */
 import { z } from 'zod';
-import { openZip, type ZipEntry } from 'zipnative';
+import type { ZipEntry } from 'zipnative';
 
-import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
+import { NO_CONTEXT, type CallContext } from '../call-context.js';
+import { ACCESS_INPUT_PROPERTY, AccessShape, ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, openArchive, refineArchiveInput, type ArchiveHandle } from '../archive-input.js';
 import { DEFAULT_LIST_LIMIT, MAX_LIST_LIMIT } from '../caps.js';
-import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticsReport } from '../diagnostics.js';
+import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticSink, type DiagnosticsReport } from '../diagnostics.js';
 import { ENTRY_VIEW_SCHEMA, viewFromEntry, type EntryView } from '../entry.js';
 import { compileEntryFilter, FILTER_INPUT_SCHEMA, FilterSchema } from '../filter.js';
 import { LIMITS_INPUT_SCHEMA, resolveCallLimits } from '../limits.js';
@@ -29,7 +32,10 @@ export const LIST_ZIP_ENTRIES_INPUT_SCHEMA = {
         limit: { type: 'integer', minimum: 1, maximum: MAX_LIST_LIMIT, default: DEFAULT_LIST_LIMIT, description: `Return at most this many entries (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}); \`hasMore\` tells you to page.` },
         filter: FILTER_INPUT_SCHEMA,
         includeExtraData: { type: 'boolean', default: false, description: 'Include each extra field payload as base64 (forensics).' },
+        includeExtendedTimestamps: { type: 'boolean', default: false, description: "Add each entry's `extendedTimestamps` (zipnative getExtendedTimestamps: UT, then NTFS, then the DOS fields; ISO-8601, UTC)." },
+        includeUnixIds: { type: 'boolean', default: false, description: "Add each entry's `unixIds` (zipnative getUnixIds: the Info-ZIP ux uid / gid, or null)." },
         validate: { type: 'string', enum: ['lazy', 'eager'], default: 'lazy', description: "'lazy' (default) parses the central directory only; 'eager' also cross-checks every local header up front." },
+        ...ACCESS_INPUT_PROPERTY,
         ...STRICT_INPUT_PROPERTY,
         limits: LIMITS_INPUT_SCHEMA,
         ...PROJECTION_INPUT_PROPERTIES,
@@ -43,7 +49,10 @@ const InputSchema = z
         limit: z.number().int().min(1).max(MAX_LIST_LIMIT).default(DEFAULT_LIST_LIMIT),
         filter: FilterSchema.optional(),
         includeExtraData: z.boolean().default(false),
+        includeExtendedTimestamps: z.boolean().default(false),
+        includeUnixIds: z.boolean().default(false),
         validate: z.enum(['lazy', 'eager']).default('lazy'),
+        ...AccessShape,
         ...EngineOptionsShape,
         ...ProjectionShape,
     })
@@ -58,6 +67,8 @@ export interface ListZipEntriesResult extends DiagnosticsReport {
     readonly hasMore: boolean;
     readonly isZip64: boolean;
     readonly entries: readonly EntryView[];
+    /** Present ('range') when the archive was read by byte ranges. */
+    readonly access?: 'range';
 }
 
 export const LIST_ZIP_ENTRIES_OUTPUT_SCHEMA = {
@@ -72,18 +83,26 @@ export const LIST_ZIP_ENTRIES_OUTPUT_SCHEMA = {
         returnedCount: { type: 'integer', minimum: 0 },
         hasMore: { type: 'boolean' },
         isZip64: { type: 'boolean' },
+        access: { type: 'string', enum: ['range'], description: "Present when the archive was read by byte ranges (access 'range', or a zipPath above the in-memory cap)." },
         entries: { type: 'array', items: ENTRY_VIEW_SCHEMA },
         ...DIAGNOSTICS_OUTPUT_PROPERTIES,
     },
 } as const;
 
-export async function listZipEntries(rawInput: unknown): Promise<ListZipEntriesResult> {
+export async function listZipEntries(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<ListZipEntriesResult> {
     const input = parseInput(InputSchema, rawInput);
-    const { bytes } = await loadArchive(input);
-    const sink = createDiagnosticSink(input.strict);
+    const sink = createDiagnosticSink(input.strict, context);
     const limits = resolveCallLimits(input.limits);
-    const reader = guard('Failed to open archive', () => openZip(bytes, { validate: input.validate, ...(limits !== undefined ? { limits } : {}), ...sink.options }));
-    const all: ZipEntry[] = guard('Failed to read the central directory', () => [...reader.entries()]);
+    const reader = await openArchive(input, input.access, { validate: input.validate, ...(limits !== undefined ? { limits } : {}), ...sink.options });
+    try {
+        return listOpened(input, reader, sink);
+    } finally {
+        await reader.close();
+    }
+}
+
+function listOpened(input: z.infer<typeof InputSchema>, reader: ArchiveHandle, sink: DiagnosticSink): ListZipEntriesResult {
+    const all: ZipEntry[] = guard('Failed to read the central directory', () => reader.entries());
     // Directories are listed unless a filter explicitly excludes them — the
     // filter default (`includeDirectories: false`) exists for extraction.
     const keep = compileEntryFilter(input.filter === undefined ? { includeDirectories: true } : input.filter);
@@ -100,8 +119,9 @@ export async function listZipEntries(rawInput: unknown): Promise<ListZipEntriesR
         returnedCount: page.length,
         hasMore: input.offset + page.length < matched.length,
         isZip64: reader.isZip64,
-        entries: page.map(({ entry, index }) => viewFromEntry(entry, index, { includeExtraData: input.includeExtraData })),
+        entries: page.map(({ entry, index }) => viewFromEntry(entry, index, { includeExtraData: input.includeExtraData, includeExtendedTimestamps: input.includeExtendedTimestamps, includeUnixIds: input.includeUnixIds })),
         ...sink.report(),
+        ...(reader.access === 'range' ? { access: 'range' as const } : {}),
     };
 }
 

@@ -1,9 +1,28 @@
 name: CI
 
-# Docs are contracts here (tests/docs-consistency.test.ts checks the counts
-# and names README.md, AGENTS.md, llms.txt and the guides quote), so `**.md`
-# is deliberately NOT in paths-ignore: a docs-only change must still run the
-# suite.
+# The `ci` job runs `scripts/gate.ts --ci`, the single definition of "green":
+# the step list lives in that file's STEPS table (typecheck:all, lint, build,
+# dist-check, dist-probe, smoke, verify:tool-shape, server-json,
+# test:generate, test:coverage, verify:docs, verify:samples, corpus:zip,
+# verazip, examples:check) and is not repeated here, so CI and the
+# contributor loop cannot drift apart. `--require-all` turns any SKIP into a
+# FAIL: a runner missing a tool goes red instead of quietly passing, and
+# VERAZIP_REQUIRED=1 holds the level-1 foreign extractors of the veraZIP gate
+# to the same rule.
+#
+# `npm audit` runs outside the gate on purpose: the gate is hermetic (no
+# network) so its verdict is the same on a laptop and on a runner.
+#
+# The `smoke` step drives the BUILT server (dist/cli.js) over stdio the way an
+# MCP host does and fails on any stdout line that is not a JSON-RPC frame —
+# source tests import the handlers directly and cannot catch that.
+#
+# Docs are contracts here (tests/docs-consistency.test.ts and verify:docs
+# check the counts and names README.md, AGENTS.md, llms.txt and the guides
+# quote), so `**.md` is deliberately NOT in paths-ignore: a docs-only change
+# still runs the gate. The pull_request trigger has no path filter at all: its jobs are
+# required status checks, and a filtered pull request would wait forever for them.
+
 on:
   push:
     branches: [main, master]
@@ -15,12 +34,6 @@ on:
       - '.gitignore'
   pull_request:
     branches: [main, master]
-    paths-ignore:
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/FUNDING.yml'
-      - 'LICENSE'
-      - '.editorconfig'
-      - '.gitignore'
 
 permissions:
   contents: read
@@ -29,75 +42,111 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  VERAZIP_REQUIRED: '1'
+
 jobs:
+  # The job ids and the matrices are load-bearing: the main ruleset requires the
+  # status checks `ci (22)`, `ci (24)`, `os (windows-latest)` and
+  # `os (macos-latest)` (.github/rulesets/main.json).
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
+
     strategy:
       fail-fast: false
       matrix:
         node-version: [22, 24]
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
 
+      # No lifecycle script of any dependency runs on the runner; the
+      # repository's own .npmrc says the same for every developer machine.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Audit dependencies
         run: npm audit --audit-level=high
 
-      - name: Type check
-        run: npm run typecheck:all
+      - name: Run the quality gate (CI profile)
+        run: npx tsx scripts/gate.ts --ci --require-all
 
-      - name: Lint
-        run: npm run lint
+      - name: Upload the gate logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-logs-node${{ matrix.node-version }}
+          path: test-output/.gate/
+          retention-days: 7
+          if-no-files-found: ignore
 
-      - name: Build
-        run: npm run build
+  # The stdio server is spawned by hosts on Windows and macOS too, so the same
+  # gate runs there, on the pinned Node line: the built server over stdio
+  # (TerminateProcess-style SIGTERM on win32, POSIX signals on macOS), CRLF and
+  # path rules, reserved device names and junction semantics in the sandbox,
+  # the coverage run, the sample baseline and the veraZIP corpus — which is how
+  # "the same archive bytes on every host" is proven on three operating
+  # systems rather than asserted on one. Both matrix entries are required
+  # status checks (.github/rulesets/main.json).
+  #
+  # harden-runner supports Windows runners in audit mode only, so this job
+  # can never move to `egress-policy: block`; on macOS it runs in audit mode
+  # only as well, and this leg keeps the pkinative-mcp shape of skipping it
+  # (`if: runner.os != 'macOS'`, a ROADMAP item to revisit) —
+  # the one documented exemption to "every job starts with harden-runner".
+  os:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
 
-      - name: Test with coverage
-        run: npm run test:coverage
-
-      - name: Verify dist output
-        run: |
-          test -f dist/index.js
-          test -f dist/index.d.ts
-          test -f dist/cli.js
-          test -f dist/server.js
-
-  # The stdio server is spawned by hosts on Windows too; this job runs the
-  # suite on win32 (TerminateProcess-style SIGTERM, CRLF, path rules, reserved
-  # device names) without the coverage gate, which the Linux matrix already
-  # enforces.
-  windows:
-    runs-on: windows-latest
-    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
 
     steps:
+      - name: Harden the runner
+        if: runner.os != 'macOS'
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Setup Node.js 22
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22
+          node-version-file: .nvmrc
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
-      - name: Build
-        run: npm run build
+      # The same gate as the Linux matrix; `npm audit` stays on Linux (network,
+      # once is enough). The gate builds before the suites that need dist/.
+      - name: Run the quality gate (CI profile)
+        run: npx tsx scripts/gate.ts --ci --require-all
 
-      - name: Test
-        run: npm test
+      - name: Upload the gate logs on failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gate-logs-${{ matrix.os }}
+          path: test-output/.gate/
+          retention-days: 7
+          if-no-files-found: ignore

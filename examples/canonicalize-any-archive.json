@@ -1,0 +1,8 @@
+{
+  "description": "Make an archive you did not build reproducible: canonicalize_zip rewrites it into the canonical deterministic form zipnative writes — entries sorted by raw name bytes, the DOS-epoch timestamp, UTF-8 flags, no extra field but Zip64, the constant version-made-by — WITHOUT recompressing a payload. summary.canonicalForm is the engine's own analyzeDeterminism() verdict on the output; running it again returns the same bytes (summary.alreadyCanonical). The entry comments and the archive comment are dropped unless keepComments: true.",
+  "tool": "canonicalize_zip",
+  "arguments": {
+    "zipBase64": "<rich-zip-base64>",
+    "includeSha256": true
+  }
+}

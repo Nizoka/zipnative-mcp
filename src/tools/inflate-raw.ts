@@ -8,16 +8,16 @@
  * registered by this server, so only 0 and 8 succeed). Mirrors
  * `zipnative inflate`.
  */
-import { createReadStream } from 'node:fs';
 import { z } from 'zod';
 import { createInflator, getCodec, METHOD_DEFLATE, METHOD_STORE } from 'zipnative';
 
 import { decodeBase64Field } from '../base64.js';
-import { assertInputWithin, MAX_BASE64_INPUT_BYTES, MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES, MAX_PATH_INPUT_BYTES } from '../caps.js';
+import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
+import { assertInputWithin, getCeilings, MAX_BASE64_INPUT_BYTES, MAX_BASE64_OUTPUT_BYTES, MAX_FILE_OUTPUT_BYTES, MAX_PATH_INPUT_BYTES } from '../caps.js';
 import { ensureEngineReady } from '../engine.js';
 import { ToolError } from '../errors.js';
 import { emitArchive, OUTPUT_INPUT_PROPERTIES, OutputShape, type OutputResult } from '../output.js';
-import { resolveInputFile } from '../sandbox.js';
+import { openInputFile } from '../sandbox.js';
 import { guard } from '../zip-errors.js';
 import { parseInput } from './_shared.js';
 import { archiveOutputSchemaWith } from './create-zip.js';
@@ -31,10 +31,14 @@ export const INFLATE_RAW_INPUT_SCHEMA = {
     properties: {
         dataBase64: { type: 'string', description: 'The compressed stream as base64 (e.g. the payload from read_zip_entry mode:"raw"). Exclusive with sourcePath.' },
         sourcePath: { type: 'string', minLength: 1, description: 'Relative path of a file inside the sandbox holding the compressed stream (streamed). Exclusive with dataBase64.' },
-        maxOutput: { type: 'integer', minimum: 1, description: `Mandatory output bound in bytes: decompression stops with ZIP_INFLATE_OUTPUT_OVERFLOW beyond it (zip-bomb guard). Inline results are further capped at ${MAX_BASE64_OUTPUT_BYTES} bytes, file results at ${MAX_FILE_OUTPUT_BYTES}.` },
+        maxOutput: { type: 'integer', minimum: 1, description: `Mandatory output bound in bytes: decompression stops with ZIP_INFLATE_OUTPUT_OVERFLOW beyond it (zip-bomb guard). Inline results are further capped at ${MAX_BASE64_OUTPUT_BYTES} bytes, file results at the file cap (ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES, default ${MAX_FILE_OUTPUT_BYTES}).` },
         method: { type: 'string', pattern: '^(?:deflate|store|[0-9]+)$', default: 'deflate', description: "'deflate' (default, method 8), 'store' (method 0, bounded pass-through) or a numeric method id for a registered codec." },
         allowTrailing: { type: 'boolean', default: false, description: 'Accept bytes after the end of the deflate stream silently (they are always reported as `leftover`).' },
         ...OUTPUT_INPUT_PROPERTIES,
+        outputPath: {
+            ...OUTPUT_INPUT_PROPERTIES.outputPath,
+            description: "Relative path inside the sandbox (only when outputMode='file'); the inflated bytes are raw data, so it must end in .bin, .dat, .raw, .txt, .json, .xml, .md, .csv, .html, .tar or .zip.",
+        },
     },
 } as const;
 
@@ -88,19 +92,21 @@ async function* inputChunks(input: z.infer<typeof InputSchema>): AsyncGenerator<
         for (let o = 0; o < bytes.byteLength; o += 65_536) yield bytes.subarray(o, Math.min(bytes.byteLength, o + 65_536));
         return;
     }
-    const { resolved, size } = await resolveInputFile(input.sourcePath, null, 'sourcePath');
-    assertInputWithin(size, MAX_PATH_INPUT_BYTES, 'sourcePath');
-    for await (const chunk of createReadStream(resolved, { highWaterMark: 65_536 })) {
-        const buf = chunk as Buffer;
-        yield new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
+    const file = await openInputFile(input.sourcePath, null, 'sourcePath');
+    try {
+        assertInputWithin(file.size, MAX_PATH_INPUT_BYTES, 'sourcePath');
+    } catch (err) {
+        await file.close();
+        throw err;
     }
+    yield* file.chunks(65_536);
 }
 
-export async function inflateRaw(rawInput: unknown): Promise<InflateRawResult> {
+export async function inflateRaw(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<InflateRawResult> {
     const input = parseInput(InputSchema, rawInput);
     await ensureEngineReady();
     const method = input.method === 'deflate' ? METHOD_DEFLATE : input.method === 'store' ? METHOD_STORE : Number(input.method);
-    const cap = input.outputMode === 'file' ? MAX_FILE_OUTPUT_BYTES : MAX_BASE64_OUTPUT_BYTES;
+    const cap = input.outputMode === 'file' ? getCeilings().maxFileOutputBytes : MAX_BASE64_OUTPUT_BYTES;
     const bound = Math.min(input.maxOutput, cap);
 
     let bytesIn = 0;
@@ -109,10 +115,16 @@ export async function inflateRaw(rawInput: unknown): Promise<InflateRawResult> {
     let bytesConsumed = 0;
     let finished = false;
     const parts: Uint8Array[] = [];
+    // A-003: cancellation between 64 KiB input chunks, progress as bytes in / out.
+    const tick = (): void => {
+        throwIfCancelled(context);
+        context.onProgress?.({ entriesDone: 0, entriesTotal: null, bytesIn, bytesOut });
+    };
 
     if (method === METHOD_DEFLATE) {
         const inflator = guard('Failed to create the inflater', () => createInflator(bound));
         for await (const chunk of inputChunks(input)) {
+            tick();
             bytesIn += chunk.byteLength;
             if (inflator.finished) {
                 leftover += chunk.byteLength;
@@ -131,6 +143,7 @@ export async function inflateRaw(rawInput: unknown): Promise<InflateRawResult> {
     } else {
         const collected: Uint8Array[] = [];
         for await (const chunk of inputChunks(input)) {
+            tick();
             bytesIn += chunk.byteLength;
             collected.push(chunk);
         }
@@ -159,6 +172,7 @@ export async function inflateRaw(rawInput: unknown): Promise<InflateRawResult> {
         finished = true;
     }
 
+    tick();
     const output = Buffer.concat(parts.map((p) => Buffer.from(p.buffer, p.byteOffset, p.byteLength)));
     const result = await emitArchive(new Uint8Array(output.buffer, output.byteOffset, output.byteLength), {
         mode: input.outputMode,

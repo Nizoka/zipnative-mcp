@@ -13,12 +13,12 @@
  * directory, and every read is re-validated to stay inside it. When the
  * sandbox is disabled, there are simply no resources.
  */
-import { promises as fs, type Dirent, type Stats } from 'node:fs';
+import { promises as fs, type Dirent } from 'node:fs';
 import path from 'node:path';
 
 import { ToolError } from './errors.js';
 import { MAX_LISTED_RESOURCES, MAX_RESOURCE_READ_BYTES, MAX_RESOURCE_WALK_DEPTH as MAX_WALK_DEPTH } from './caps.js';
-import { assertRealpathInside, getOutputSandbox, resolveOutputDir, ZIP_CONTAINER_EXTENSIONS } from './sandbox.js';
+import { getOutputSandbox, openSandboxFile, readExactly, resolveSandboxPath, ZIP_CONTAINER_EXTENSIONS } from './sandbox.js';
 
 /** URI scheme + authority for sandboxed resources. */
 export const RESOURCE_URI_PREFIX = 'zipnative://output/';
@@ -166,27 +166,32 @@ export async function readResource(uri: string): Promise<ResourceContents> {
     if (!uri.startsWith(RESOURCE_URI_PREFIX)) {
         throw new ToolError('UNKNOWN_RESOURCE', `Unsupported resource URI: ${uri}`);
     }
-    const relative = decodeURIComponent(uri.slice(RESOURCE_URI_PREFIX.length));
+    let relative: string;
+    try {
+        relative = decodeURIComponent(uri.slice(RESOURCE_URI_PREFIX.length));
+    } catch {
+        // A malformed percent-escape is a bad URI from the client (-32602), not an internal error (A-014).
+        throw new ToolError('UNKNOWN_RESOURCE', `Malformed resource URI: ${uri}`);
+    }
     if (relative.length === 0) {
         throw new ToolError('UNKNOWN_RESOURCE', 'Resource URI is missing a path.');
     }
-    const resolved = resolveOutputDir(relative, 'resource path');
-    let stat: Stats;
+    const resolved = resolveSandboxPath(relative, 'resource path');
+    // One handle from the open to the last byte: the real-path check (a pre-planted junction /
+    // symlink must not redirect a read outside the sandbox) is bound to the file actually read.
+    const opened = await openSandboxFile(resolved, 'resource path');
+    if (opened === 'absent' || opened === 'not-a-file') {
+        throw new ToolError('UNKNOWN_RESOURCE', `No resource found at ${uri}.`);
+    }
     try {
-        stat = await fs.stat(resolved);
-    } catch {
-        throw new ToolError('UNKNOWN_RESOURCE', `No resource found at ${uri}.`);
+        if (opened.size > MAX_RESOURCE_READ_BYTES) {
+            throw new ToolError('OUTPUT_TOO_LARGE', `Resource ${uri} (${opened.size} bytes) exceeds the maximum read size (${MAX_RESOURCE_READ_BYTES} bytes).`);
+        }
+        const bytes = await readExactly(opened.handle, opened.size, `resource ${uri}`);
+        return { uri, mimeType: mimeTypeFor(resolved), blob: Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('base64') };
+    } finally {
+        await opened.handle.close();
     }
-    if (!stat.isFile()) {
-        throw new ToolError('UNKNOWN_RESOURCE', `No resource found at ${uri}.`);
-    }
-    if (stat.size > MAX_RESOURCE_READ_BYTES) {
-        throw new ToolError('OUTPUT_TOO_LARGE', `Resource ${uri} (${stat.size} bytes) exceeds the maximum read size (${MAX_RESOURCE_READ_BYTES} bytes).`);
-    }
-    // A pre-planted junction / symlink inside the sandbox must not redirect a read outside it.
-    await assertRealpathInside(resolved, 'resource path');
-    const bytes = await fs.readFile(resolved);
-    return { uri, mimeType: mimeTypeFor(resolved), blob: bytes.toString('base64') };
 }
 
 /** MCP resource template describing the sandbox address space (`resources/templates/list`). */
@@ -207,7 +212,7 @@ export function listResourceTemplates(): ResourceTemplate[] {
             name: 'sandbox-file',
             title: 'Sandbox file (archives and extracted files)',
             description:
-                'An archive written by create_zip / modify_zip, a file written by extract_zip, or an archive placed in the sandbox for zipPath, addressed by its path relative to ZIPNATIVE_MCP_OUTPUT_DIR. Enumerate concrete URIs with resources/list.',
+                'An archive written by create_zip / modify_zip / canonicalize_zip / merge_zip, a file written by extract_zip or inflate_raw, or a file placed in the sandbox for zipPath / sourcePath, addressed by its path relative to ZIPNATIVE_MCP_OUTPUT_DIR. The template names the archive type; each resources/list entry carries the MIME type of its own extension. Enumerate concrete URIs with resources/list.',
             mimeType: 'application/zip',
         },
     ];

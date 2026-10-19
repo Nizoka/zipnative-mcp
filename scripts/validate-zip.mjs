@@ -11,8 +11,8 @@
  * VENDORED from zipnative (the engine does not ship scripts/ in its npm
  * tarball, so the validator is copied, not imported):
  *   upstream file:   scripts/validate-zip.ts
- *   upstream commit: 4f1bc3619372e8543bccea65d2365bf0c048a10c (zipnative 1.0.0)
- *   upstream blob:   5ddea000a3b6a4adfb720d673a43664972118139
+ *   upstream commit: e6f0b3f592e15be7b45a88b08fc3178862bce2d9 (zipnative 1.1.0)
+ *   upstream blob:   604321fa40ef1afba04eb9ce14f53e0c19efa474
  *   via:             zipnative-cli 1.0.0 scripts/validate-zip.mjs (the 1:1 .mjs
  *                    port with the manifest driver). The parser body lives in
  *                    scripts/verazip-core.mjs so this driver and the vitest gate
@@ -20,7 +20,7 @@
  *   sync rule:       when upstream's validate-zip.ts changes, re-port the parser
  *                    body 1:1 (types erased) into verazip-core.mjs and bump BOTH
  *                    hashes there and here in the same PR.
- *                    tests/verazip-vendor.test.ts pins the 22-id check vocabulary
+ *                    tests/verazip-vendor.test.ts pins the 23-id check vocabulary
  *                    and these hashes.
  *
  * INDEPENDENT BY CONSTRUCTION: the validator core raw-parses the bytes with

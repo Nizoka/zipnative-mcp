@@ -10,9 +10,9 @@
  *
  * Transport selection:
  *   - stdio (default): suitable for local host integration (Claude Desktop, Cursor, etc.)
- *   - ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES / ZIPNATIVE_MCP_MAX_ENTRIES / ZIPNATIVE_MCP_WORKERS
- *     are the operator ceilings per-call `limits` cannot exceed (read once; an
- *     invalid value refuses to start).
+ *   - ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES / ZIPNATIVE_MCP_MAX_ENTRIES / ZIPNATIVE_MCP_WORKERS /
+ *     ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES are the four operator ceilings per-call
+ *     `limits` and outputs cannot exceed (read once; an invalid value refuses to start).
  *   - HTTP: set ZIPNATIVE_MCP_PORT=<port> to expose the MCP endpoint on that port.
  *           Requests are POST /mcp (2026-07-28 clients send `Mcp-Method` / `Mcp-Name`
  *           headers and the `_meta` envelope; 2025-era clients use `initialize`).
@@ -38,7 +38,9 @@
  * # Then connect via: http://127.0.0.1:3000/mcp
  * ```
  */
-import { getCeilings, MAX_ENTRIES_ENV, MAX_UNCOMPRESSED_ENV, STDIO_MAX_FRAME_BYTES, WORKERS_ENV } from './caps.js';
+import { isAbsolute } from 'node:path';
+
+import { getCeilings, MAX_ENTRIES_ENV, MAX_FILE_OUTPUT_ENV, MAX_UNCOMPRESSED_ENV, STDIO_MAX_FRAME_BYTES, WORKERS_ENV } from './caps.js';
 import { createServer, ensureEngineReady } from './server.js';
 
 function log(line: string): void {
@@ -49,19 +51,36 @@ async function main(): Promise<void> {
     await ensureEngineReady();
     // Operator ceilings are read once; an invalid value throws before serving.
     const ceilings = getCeilings();
-    for (const [env, value] of [[MAX_UNCOMPRESSED_ENV, ceilings.maxUncompressedBytes], [MAX_ENTRIES_ENV, ceilings.maxEntries], [WORKERS_ENV, ceilings.maxWorkers]] as const) {
+    for (const [env, value] of [[MAX_UNCOMPRESSED_ENV, ceilings.maxUncompressedBytes], [MAX_ENTRIES_ENV, ceilings.maxEntries], [WORKERS_ENV, ceilings.maxWorkers], [MAX_FILE_OUTPUT_ENV, ceilings.maxFileOutputBytes]] as const) {
         if (process.env[env] !== undefined && process.env[env] !== '') log(`${env} = ${value}`);
     }
 
     const factory = (): ReturnType<typeof createServer> => createServer();
     const onerror = (err: Error): void => log(`transport error: ${err.message}`);
+    // An operator knob is valid or the server does not start — never a silent fallback to stdio
+    // (1.0.0 read '8080.5' as 8080 and 'abc' / '70000' as "no port").
     const portEnv = process.env['ZIPNATIVE_MCP_PORT'];
-    const port = portEnv !== undefined ? parseInt(portEnv, 10) : NaN;
+    const portText = portEnv?.trim() ?? '';
+    const port = portText !== '' ? Number(portText) : null;
+    if (port !== null && (!/^\d+$/.test(portText) || port < 1 || port > 65535)) {
+        throw new Error(`ZIPNATIVE_MCP_PORT must be an integer between 1 and 65535 (got ${JSON.stringify(portEnv)}); unset it for stdio.`);
+    }
+    // The sandbox is an absolute path (README) or the server does not start: a relative value would
+    // resolve against whatever directory the host happened to launch the server from.
+    const outputDir = process.env['ZIPNATIVE_MCP_OUTPUT_DIR'];
+    if (outputDir !== undefined && outputDir.trim() !== '' && !isAbsolute(outputDir.trim())) {
+        throw new Error(`ZIPNATIVE_MCP_OUTPUT_DIR must be an absolute path (got ${JSON.stringify(outputDir)}).`);
+    }
+    // The same rule for the opt-in cache (A-020): a relative directory would follow the launch directory.
+    const cacheDir = process.env['ZIPNATIVE_MCP_CACHE_DIR'];
+    if (cacheDir !== undefined && cacheDir.trim() !== '' && !isAbsolute(cacheDir.trim())) {
+        throw new Error(`ZIPNATIVE_MCP_CACHE_DIR must be an absolute path (got ${JSON.stringify(cacheDir)}).`);
+    }
 
-    if (!Number.isNaN(port) && port > 0 && port < 65536) {
+    if (port !== null) {
         // --- HTTP / Streamable HTTP transport ---
         const { createMcpHandler } = await import('@modelcontextprotocol/server');
-        const { guardLoopback, sendWebResponse, toWebRequest, RequestTooLargeError } = await import('./http.js');
+        const { applySecurityHeaders, guardLoopback, hardenHttpServer, sendWebResponse, toWebHead, toWebRequest, RequestTooLargeError, MAX_REQUEST_BODY_BYTES } = await import('./http.js');
         const { createServer: createHttpServer } = await import('node:http');
         const { guardBearer, readHttpToken } = await import('./auth.js');
         // Opt-in bearer token (ZIPNATIVE_MCP_HTTP_TOKEN); a weak value throws before we listen.
@@ -69,11 +88,14 @@ async function main(): Promise<void> {
 
         // Both eras: 2026-07-28 requests are served by a fresh per-request instance;
         // 2025-era requests fall back to the stateless streamable-HTTP idiom.
-        const handler = createMcpHandler(factory, { legacy: 'stateless', onerror });
+        // The SDK's own body bound (4 MiB by default) is raised to the documented 256 MiB envelope:
+        // up to 1.0.0 an inline archive above ~4 MiB failed over HTTP while stdio accepted it.
+        const handler = createMcpHandler(factory, { legacy: 'stateless', onerror, maxRequestBodySize: MAX_REQUEST_BODY_BYTES });
         const origin = `http://127.0.0.1:${port}`;
 
         const httpServer = createHttpServer((req, res) => {
             void (async () => {
+                applySecurityHeaders(res);
                 try {
                     const path = new URL(req.url ?? '/', origin).pathname;
                     if (path !== '/mcp') {
@@ -81,9 +103,16 @@ async function main(): Promise<void> {
                         res.end('Not Found. MCP endpoint is POST /mcp');
                         return;
                     }
+                    // Host / Origin and the bearer token are checked on the headers before the body is read.
+                    const head = toWebHead(req, origin);
+                    const refused = guardLoopback(head) ?? guardBearer(head, httpToken);
+                    if (refused !== undefined) {
+                        req.resume();
+                        await sendWebResponse(res, refused);
+                        return;
+                    }
                     const request = await toWebRequest(req, origin, res);
-                    const response = guardLoopback(request) ?? guardBearer(request, httpToken) ?? (await handler.fetch(request));
-                    await sendWebResponse(res, response);
+                    await sendWebResponse(res, await handler.fetch(request));
                 } catch (err) {
                     if (err instanceof RequestTooLargeError) {
                         if (!res.headersSent) res.writeHead(413, { 'Content-Type': 'text/plain' });
@@ -98,6 +127,8 @@ async function main(): Promise<void> {
                 }
             })();
         });
+
+        hardenHttpServer(httpServer);
 
         const shutdown = async (signal: string): Promise<void> => {
             log(`received ${signal}, shutting down...`);

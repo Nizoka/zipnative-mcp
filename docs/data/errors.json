@@ -1,14 +1,14 @@
 {
-  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 11 diagnostic codes, with raisedWhen/remedy per code). zipnative-mcp passes every ZIP_* code through verbatim in _meta.error.code (src/zip-errors.ts is the only reader of err.code) and carries the diagnostics on every result; the engine remedy in each row is the one an agent reads in the message. The per-code \"cli\" sub-objects (E_* class, exitCode, remedy, raisedBy) are inherited from the sibling zipnative-cli registry and are informational cross-references only: the MCP server has no E_* codes, exit codes or CLI flags. tests/docs-consistency.test.ts enforces that the codes here equal ZIP_ERROR_CODES + ZIP_DIAGNOSTIC_CODES and that zipnativeVersion equals the installed engine VERSION.",
+  "$comment": "Copy of zipnative docs/data/errors.json (the frozen 39-code error vocabulary and 12 diagnostic codes, with raisedWhen/remedy per code). zipnative-mcp passes every ZIP_* code through verbatim in _meta.error.code (src/zip-errors.ts is the only reader of err.code) and carries the diagnostics on every result; the engine remedy in each row is the one an agent reads in the message. The per-code \"cli\" sub-objects (E_* class, exitCode, remedy, raisedBy) are inherited from the sibling zipnative-cli registry and are informational cross-references only: the MCP server has no E_* codes, exit codes or CLI flags. tests/docs-consistency.test.ts enforces that the codes here equal ZIP_ERROR_CODES + ZIP_DIAGNOSTIC_CODES and that zipnativeVersion equals the installed engine VERSION.",
   "package": "zipnative",
-  "zipnativeVersion": "1.0.0",
-  "verifiedOn": "2026-09-05",
+  "zipnativeVersion": "1.1.0",
+  "verifiedOn": "2026-10-08",
   "errors": [
     {
       "code": "ZIP_INVALID_OPTION",
       "class": "ZipError",
       "since": "0.8.0",
-      "raisedWhen": "An option value fails validation: compression.level outside 0-9, a non-positive chunkSize, or an argument shape the API forbids.",
+      "raisedWhen": "An option value fails validation: compression.level outside 0-9, a non-positive chunkSize, any zip64 value on a buffered entry (add(), addDirectory(), the modifier — only addStream() takes it), a malformed RawEntryMeta or a compression option for addRaw(), a directory entry carrying data, an extra-field block over 65 535 bytes, a Unix mode outside 0-0o177777, a ByteRangeSource whose size is not a non-negative integer, or an argument shape the API forbids.",
       "remedy": "Fix the option value at the call site — the message names the offending option and the accepted range.",
       "cli": {
         "code": "E_USAGE",
@@ -30,7 +30,7 @@
       "code": "ZIP_ENTRY_NOT_FOUND",
       "class": "ZipError",
       "since": "0.8.0",
-      "raisedWhen": "A named entry does not exist where one is required (readEntry, replaceEntry, removeEntry, renameEntry).",
+      "raisedWhen": "A named entry does not exist where one is required (readEntry and the other per-entry reads of openZip and openZipRange, replaceEntry, removeEntry, renameEntry, addFromReader).",
       "remedy": "Names are case-sensitive — iterate entries() to list what the archive holds.",
       "cli": {
         "code": "E_NOT_FOUND",
@@ -77,7 +77,7 @@
       "code": "ZIP_INTERNAL",
       "class": "ZipError",
       "since": "0.8.0",
-      "raisedWhen": "An internal invariant broke — this is a zipnative bug, not an input problem.",
+      "raisedWhen": "An internal invariant broke — this is a zipnative bug, not an input problem. verifyZip() also reports any non-ZipError thrown while verifying under this code in report.error.",
       "remedy": "Report it with a reproduction archive or generator script.",
       "cli": {
         "code": "E_RUNTIME",
@@ -121,7 +121,7 @@
       "code": "ZIP_ZIP64_EOCD_MISPLACED",
       "class": "ZipFormatError",
       "since": "0.8.0",
-      "raisedWhen": "The zip64 end-of-central-directory record is not where the locator points (and not at the fallback position).",
+      "raisedWhen": "The zip64 end-of-central-directory record is not where the locator points (and not at the fallback position). The byte-range reader (openZipRange) sizes its tail window for the APPNOTE layout, so a record placed far from its locator is reported with this code there too.",
       "remedy": "Corrupt archive, or an unsupported prepended-data layout — rebuild the archive without the prefix.",
       "cli": {
         "code": "E_PARSE",
@@ -143,7 +143,7 @@
       "code": "ZIP_RECORD_TRUNCATED",
       "class": "ZipFormatError",
       "since": "0.8.0",
-      "raisedWhen": "A fixed or variable-length ZIP record (EOCD, zip64 EOCD, central or local header) or an entry's payload overruns the available bytes.",
+      "raisedWhen": "A fixed or variable-length ZIP record (EOCD, zip64 EOCD, central or local header) or an entry's payload overruns the available bytes — including a byte-range source (openZipRange) whose declared size is smaller than the records imply or whose read() returns fewer bytes than requested.",
       "remedy": "The archive is truncated — verify the transfer completed.",
       "cli": {
         "code": "E_PARSE",
@@ -155,7 +155,7 @@
       "class": "ZipFormatError",
       "since": "0.8.0",
       "raisedWhen": "An expected PK signature is absent: no local file header at the offset the central directory declares, no EOCD signature at the resolved offset, or a forward stream that does not start with a local header.",
-      "remedy": "The archive is corrupt or the bytes are not a ZIP stream.",
+      "remedy": "Check that the bytes are a ZIP archive (not a response body, an HTML error page or a different format) and re-obtain them; a truncated download shows the same way.",
       "cli": {
         "code": "E_PARSE",
         "exitCode": 1
@@ -177,7 +177,7 @@
       "class": "ZipFormatError",
       "since": "0.8.0",
       "raisedWhen": "A 64-bit field exceeds Number.MAX_SAFE_INTEGER (2^53 - 1).",
-      "remedy": "Archives this large are not supported — the public API uses number, not bigint.",
+      "remedy": "Split the content into archives under 2^53 bytes (about 9 PB); the public API uses number, not bigint, by design.",
       "cli": {
         "code": "E_PARSE",
         "exitCode": 1
@@ -211,7 +211,7 @@
       "code": "ZIP_DEFLATE_TRUNCATED",
       "class": "ZipFormatError",
       "since": "0.8.0",
-      "raisedWhen": "A deflate stream ends mid-block: the data ran out before the final block completed.",
+      "raisedWhen": "A deflate stream ends mid-block: the data ran out before the final block completed. Raised on every tier since 1.1.0 — the pure-TS inflater and node:zlib (Z_BUF_ERROR) distinguish truncation; a DecompressionStream outside Node reports no cause, so its failures surface as ZIP_DEFLATE_CORRUPT.",
       "remedy": "The compressed payload is truncated — re-obtain the archive.",
       "cli": {
         "code": "E_PARSE",
@@ -222,7 +222,7 @@
       "code": "ZIP_DEFLATE_CORRUPT",
       "class": "ZipFormatError",
       "since": "0.8.0",
-      "raisedWhen": "A deflate stream is structurally invalid: bad Huffman codes, invalid symbols, out-of-range back-references, LEN/NLEN mismatches, or an unsupported block type.",
+      "raisedWhen": "A deflate stream is structurally invalid: bad Huffman codes, invalid symbols, out-of-range back-references, LEN/NLEN mismatches, or an unsupported block type. Raised on every tier since 1.1.0 — node:zlib (Z_DATA_ERROR, Z_NEED_DICT) and DecompressionStream failures are normalised to this code.",
       "remedy": "The compressed payload is corrupt — re-obtain the archive.",
       "cli": {
         "code": "E_PARSE",
@@ -234,8 +234,8 @@
       "class": "ZipSecurityError",
       "since": "0.8.0",
       "cwe": "CWE-405",
-      "raisedWhen": "Two entries share bytes: duplicate local-header offsets, an entry extending into another, or an entry claiming to start inside the central directory.",
-      "remedy": "Overlapping-entry archives are a decompression-bomb/smuggling shape and are always rejected — there is no opt-out.",
+      "raisedWhen": "Two entries share bytes: duplicate local-header offsets, an entry extending into another, or an entry claiming to start inside the central directory. The lazy reader checks the local-header signature first, so for the last shape a lazy readEntry() may report ZIP_SIGNATURE_MISMATCH where validate: 'eager' and verifyZip() report this code.",
+      "remedy": "Rebuild the archive with a conformant tool (or saveCompact() from a trusted copy); overlapping-entry archives are a decompression-bomb/smuggling shape and are always rejected — there is no opt-out.",
       "cli": {
         "code": "E_SECURITY",
         "exitCode": 1
@@ -309,7 +309,7 @@
       "class": "ZipDataError",
       "since": "0.8.0",
       "raisedWhen": "Decompressed bytes fail the declared CRC-32 (central directory, local header, or data descriptor).",
-      "remedy": "The data is corrupt; expectedCrc/actualCrc carry both values. Pass verifyCrc: false only if you accept corrupt output.",
+      "remedy": "The data is corrupt; expectedCrc/actualCrc carry both values. Pass verifyCrc: false only if you accept corrupt output (addFromReader: verify: false copies the entry unchecked).",
       "cli": {
         "code": "E_DATA",
         "exitCode": 1
@@ -320,7 +320,7 @@
       "class": "ZipDataError",
       "since": "0.8.0",
       "raisedWhen": "Sizes contradict: the decompressed size differs from the declared size, or local-header sizes/CRC contradict the central directory.",
-      "remedy": "The archive metadata lies — treat the archive as corrupt or hostile.",
+      "remedy": "The archive metadata lies — treat the archive as corrupt or hostile (addFromReader: verify: false copies the entry unchecked).",
       "cli": {
         "code": "E_DATA",
         "exitCode": 1
@@ -352,8 +352,8 @@
       "code": "ZIP_DECOMPRESSION_FAILED",
       "class": "ZipDataError",
       "since": "0.8.0",
-      "raisedWhen": "The active codec failed mid-decompression (corrupt payload surfaced through node:zlib, DecompressionStream, or an injected codec).",
-      "remedy": "The data is corrupt or hostile — the wrapped detail is in the message.",
+      "raisedWhen": "A codec registered with registerCodec() or injected with setInflateImpl() threw mid-decompression. Since 1.1.0 the built-in deflate tiers never raise it: their failures are ZIP_DEFLATE_CORRUPT, ZIP_DEFLATE_TRUNCATED or ZIP_INFLATE_OUTPUT_OVERFLOW on every tier.",
+      "remedy": "The data is corrupt or hostile, or the injected codec is faulty — the wrapped detail is in the message.",
       "cli": {
         "code": "E_DATA",
         "exitCode": 1
@@ -389,8 +389,8 @@
       "code": "ZIP_UNSUPPORTED_ENCRYPTION",
       "class": "ZipUnsupportedError",
       "since": "0.8.0",
-      "feature": "zipcrypto | strong-encryption",
-      "raisedWhen": "An entry is encrypted (ZipCrypto or strong encryption) — encryption is unsupported in 1.x by policy.",
+      "feature": "zipcrypto | aes | strong-encryption",
+      "raisedWhen": "An entry is encrypted — ZipCrypto (bit 0), WinZip AES (method 99 or the 0x9901 extra field, labelled feature 'aes' since 1.1.0) or strong encryption (bit 6). Encryption is unsupported in 1.x by policy; AES is a 2.0 candidate.",
       "remedy": "Check entry.isEncrypted to route around such entries; encrypted entries remain copyable by the modifier without decompression.",
       "cli": {
         "code": "E_UNSUPPORTED",
@@ -428,8 +428,8 @@
       "class": "ZipUnsupportedError",
       "since": "0.8.0",
       "feature": "zip64-streaming",
-      "raisedWhen": "An addStream() entry exceeds 4 GiB (Zip64 streaming is not implemented yet).",
-      "remedy": "Buffer the content via add() or split it; a per-entry opt-in is tracked on the roadmap.",
+      "raisedWhen": "An addStream() entry crosses 4 GiB without the per-entry Zip64 opt-in — the classic streaming layout cannot represent it, and the refusal happens before the crossing chunk is emitted.",
+      "remedy": "Pass { zip64: true } to addStream() for entries that may exceed 4 GiB (Zip64 local header, 24-byte descriptor — 1.1.0), buffer the content via add(), or split it.",
       "cli": {
         "code": "E_UNSUPPORTED",
         "exitCode": 1,
@@ -441,7 +441,7 @@
       "class": "ZipUnsupportedError",
       "since": "0.8.0",
       "feature": "cd-less-descriptor",
-      "raisedWhen": "Forward reading met a data-descriptor (bit 3) entry whose payload cannot be delimited without the central directory: store+bit3, encrypted+bit3, or a custom codec without consumed-byte reporting.",
+      "raisedWhen": "Forward reading met a data-descriptor (bit 3) entry whose payload cannot be delimited without the central directory: any method other than deflate (store, a registered codec) or an encrypted entry — only the resumable deflate decoder reports exactly where the payload ends.",
       "remedy": "Use openZip() on the complete archive instead.",
       "cli": {
         "code": "E_UNSUPPORTED",
@@ -454,8 +454,8 @@
       "class": "ZipUnsupportedError",
       "since": "0.8.0",
       "feature": "method:<n>",
-      "raisedWhen": "A registered codec supports only the other access mode: stream-only codecs via readEntry(), or codecs without a streaming decompressor via readEntryStream().",
-      "remedy": "The message names the compliant call (readEntryStream() or readEntry()).",
+      "raisedWhen": "A registered codec supports only the other access mode: stream-only codecs via readEntry(), codecs without a streaming decompressor via readEntryStream(); and, since 1.1.0, the forward reader (iterateZipEntries) refuses — before the first byte — a codec for a method other than store/deflate that does not expose createDecompressor(), as does the byte-range reader (openZipRange): its readEntry() needs decompressSync, its readEntryStream() needs createDecompressor() or decompressStream (a decompressSync-only codec is refused with this code — use readEntry()).",
+      "remedy": "The message names the compliant call (readEntryStream() or readEntry()); in the forward reader, skip() the entry or open the complete archive with openZip(); for your own codec, implement createDecompressor().",
       "cli": {
         "code": "E_UNSUPPORTED",
         "exitCode": 1,
@@ -610,11 +610,17 @@
         "modify"
       ],
       "raisedByNote": "Append-only save() of modify (not --compact)."
+    },
+    {
+      "code": "ZIP_TIMESTAMP_CLAMPED",
+      "severity": "info",
+      "since": "1.1.0",
+      "raisedWhen": "A Date passed as defaultDate or an entry date is invalid, before 1980-01-01 or after 2107-12-31 23:59:58; the DOS epoch (or the maximum) was written instead of a fictitious in-range date. Since 1.1.0.",
+      "remedy": "Pass a Date within 1980-2107 (dosTimeMode selects the wall-clock it is read with), or omit it for the deterministic epoch default."
     }
   ],
   "sink": {
     "errors": "Thrown; every message starts 'zipnative: ' and names the remedy; err.code is the stable machine key, err.name/instanceof give the class.",
-    "diagnostics": "console.warn deduplicated per code per operation by default; onDiagnostic receives all; strict: true throws ZipError code ZIP_STRICT_DIAGNOSTIC.",
-    "cli": "Every core call is wrapped by mapZipError(): error.code = the E_* class, error.zipCode = the ZIP_* code verbatim, plus entryName and code-specific detail when the core knows them. Diagnostics go to stderr as text (suppressed by --quiet) or travel in the --json envelope / report, deduplicated by (code, entryName) per run; --strict escalates the first one into ZIP_STRICT_DIAGNOSTIC -> E_CHECK_FAILED (verify --strict prints the report, then E_VERIFY_FAILED)."
+    "diagnostics": "console.warn deduplicated per code per operation by default; onDiagnostic receives all; strict: true throws ZipError code ZIP_STRICT_DIAGNOSTIC."
   }
 }

@@ -1,7 +1,7 @@
 /**
  * Custom error type for tool-level failures (returned to the client as
  * `isError: true`). `code` is either one of the wrapper codes documented in
- * AGENTS.md §6 or one of zipnative's 39 frozen `ZIP_*` codes carried verbatim
+ * docs/AGENT_CONTRACT.md §6 or one of zipnative's 39 frozen `ZIP_*` codes carried verbatim
  * (see src/zip-errors.ts). `data` carries machine-readable detail (the limit
  * that fired, the entry name, the unsupported feature, …) and is surfaced as
  * `_meta.error.data` — never anything secret.
@@ -45,4 +45,17 @@ export class GovernanceError extends ToolError {
     public constructor(message: string) {
         super('GOVERNANCE_VIOLATION', message);
     }
+}
+
+/**
+ * Replace every absolute filesystem path in a message with `<path>`: a POSIX
+ * path of two segments or more, a Windows drive path, or a UNC path. Used on
+ * messages the server did not write itself (a raw Node or runtime error), so
+ * an escaped `ENOENT, open 'C:\Users\…'` never tells the client where the
+ * server runs. URIs (`zipnative://output/…`) and relative names are kept.
+ */
+export function redactAbsolutePaths(message: string): string {
+    return message
+        .replace(/(?:\b[A-Za-z]:[\\/]|\\\\)[^\s'"`,;)]*/g, '<path>')
+        .replace(/(?<![\w:/.~-])\/(?:[^\s'"`,;)/]+\/)+[^\s'"`,;)]*/g, '<path>');
 }

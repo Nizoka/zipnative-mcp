@@ -23,6 +23,7 @@ async function rpc<T = Record<string, unknown>>(method: string, params: Record<s
 const OUTPUT_ENV = 'ZIPNATIVE_MCP_OUTPUT_DIR';
 
 const ALL_TOOLS = [
+    'canonicalize_zip',
     'compute_crc32',
     'create_zip',
     'describe_engine',
@@ -31,6 +32,7 @@ const ALL_TOOLS = [
     'inflate_raw',
     'inspect_zip',
     'list_zip_entries',
+    'merge_zip',
     'modify_zip',
     'read_zip_entry',
     'sanitize_entry_paths',
@@ -61,12 +63,12 @@ describe('server', () => {
         expect(typeof __serverMetadata.title).toBe('string');
         expect(__serverMetadata.title.length).toBeGreaterThan(0);
         expect(__serverMetadata.description).toMatch(/MCP server/i);
-        expect(__serverMetadata.description).toMatch(/13 tools/);
+        expect(__serverMetadata.description).toMatch(/15 tools/);
         expect(__serverMetadata.description).toMatch(/no network ever/);
     });
 
     it('SERVER_INSTRUCTIONS advertises the decision tree, security posture and pitfalls for AI clients', () => {
-        expect(__serverInstructions).toContain(`zipnative-mcp: 13 tools over the zipnative v${ZIPNATIVE_VERSION}`);
+        expect(__serverInstructions).toContain(`zipnative-mcp: 15 tools over the zipnative v${ZIPNATIVE_VERSION}`);
         expect(__serverInstructions).toContain(`Tool API ${TOOL_API_VERSION}`);
         expect(__serverInstructions).toContain('MCP 2026-07-28');
         expect(__serverInstructions).toContain('DECISION TREE');
@@ -116,7 +118,7 @@ describe('server', () => {
         expect((err as McpRpcError).message).toContain('[UNKNOWN_PROMPT]');
     });
 
-    it('lists all 13 tools with apiVersion, 1–2 examples and annotations each', async () => {
+    it('lists all 15 tools with apiVersion, 1–2 examples and annotations each', async () => {
         const response = (await rpc('tools/list')) as {
             tools: Array<{ name: string; title?: string; description: string; _meta?: { apiVersion?: string; examples?: Array<{ title: string; input: unknown }> }; annotations?: Record<string, boolean> }>;
         };
@@ -128,7 +130,7 @@ describe('server', () => {
 
         for (const t of response.tools) {
             expect(t._meta?.apiVersion, t.name).toBe(TOOL_API_VERSION);
-            expect(t._meta?.apiVersion).toBe('1.0.0');
+            expect(t._meta?.apiVersion).toBe('1.1.0');
             expect(Array.isArray(t._meta?.examples), t.name).toBe(true);
             expect((t._meta?.examples ?? []).length, t.name).toBeGreaterThan(0);
             expect((t._meta?.examples ?? []).length, `${t.name}: at most 2 examples (token budget)`).toBeLessThanOrEqual(2);
@@ -460,7 +462,7 @@ describe('token-frugal projection (verbosity / fields)', () => {
         const eng = await call('describe_engine', { verbosity: 'summary' });
         expect(Object.keys(eng.structuredContent!).sort()).toEqual(['capabilities', 'engine', 'network', 'sandbox', 'server']);
         const fields = await call('describe_engine', { fields: ['server.toolCount', 'network', 'ceilings.env'] });
-        expect(fields.structuredContent).toEqual({ server: { toolCount: 13 }, network: 'none', ceilings: { env: ['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES', 'ZIPNATIVE_MCP_MAX_ENTRIES', 'ZIPNATIVE_MCP_WORKERS'] } });
+        expect(fields.structuredContent).toEqual({ server: { toolCount: 15 }, network: 'none', ceilings: { env: ['ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES', 'ZIPNATIVE_MCP_MAX_ENTRIES', 'ZIPNATIVE_MCP_WORKERS', 'ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES'] } });
     });
 
     it('unmatched fields are reported in _meta.unmatchedFields over the wire', async () => {

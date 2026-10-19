@@ -1,0 +1,146 @@
+# zipnative-mcp — OpenSSF Security Insights (specification 2.0.0).
+# https://github.com/ossf/security-insights
+# Every statement here must stay true of SECURITY.md, package.json,
+# server.json and .github/workflows/; update this file in the same change as
+# any of them.
+header:
+  schema-version: 2.0.0
+  last-updated: '2026-10-20'
+  last-reviewed: '2026-10-20'
+  url: https://raw.githubusercontent.com/Nizoka/zipnative-mcp/main/.github/SECURITY-INSIGHTS.yml
+  comment: >-
+    Every statement here can be read in the repository: SECURITY.md,
+    package.json, server.json and the workflows under .github/workflows/.
+
+project:
+  name: zipnative-mcp
+  homepage: https://github.com/Nizoka/zipnative-mcp
+  administrators:
+    - name: Nizoka
+      primary: true
+      social: https://github.com/Nizoka
+  repositories:
+    - name: zipnative-mcp
+      url: https://github.com/Nizoka/zipnative-mcp
+      comment: The MCP server, its tests, its samples and its veraZIP conformance corpus.
+    - name: zipnative
+      url: https://github.com/Nizoka/zipnative
+      comment: The ZIP engine the server wraps, where every parsing and writing decision is made.
+    - name: zipnative-cli
+      url: https://github.com/Nizoka/zipnative-cli
+      comment: The sibling command line over the same engine; the entry view and the veraZIP validator are shared with it.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    contact:
+      name: Nizoka
+      primary: true
+      social: https://github.com/Nizoka
+    security-policy: https://github.com/Nizoka/zipnative-mcp/blob/main/SECURITY.md
+    comment: >-
+      Report privately, never in a public issue, through GitHub private
+      vulnerability reporting:
+      https://github.com/Nizoka/zipnative-mcp/security/advisories/new. A
+      vulnerability in the zipnative engine itself is reported to
+      https://github.com/Nizoka/zipnative/security/advisories/new. The
+      handling timeline and the credit are in SECURITY.md.
+  documentation:
+    detailed-guide: https://github.com/Nizoka/zipnative-mcp/blob/main/README.md
+    code-of-conduct: https://github.com/Nizoka/zipnative-mcp/blob/main/CODE_OF_CONDUCT.md
+    release-process: https://github.com/Nizoka/zipnative-mcp/blob/main/CONTRIBUTING.md#release
+    signature-verification: https://github.com/Nizoka/zipnative-mcp/blob/main/SECURITY.md
+
+repository:
+  url: https://github.com/Nizoka/zipnative-mcp
+  status: active
+  accepts-change-request: true
+  # Dependabot opens the automated ones (.github/dependabot.yml).
+  accepts-automated-change-request: true
+  core-team:
+    - name: Nizoka
+      primary: true
+      social: https://github.com/Nizoka
+  license:
+    url: https://github.com/Nizoka/zipnative-mcp/blob/main/LICENSE
+    expression: MIT
+  documentation:
+    contributing-guide: https://github.com/Nizoka/zipnative-mcp/blob/main/CONTRIBUTING.md
+    security-policy: https://github.com/Nizoka/zipnative-mcp/blob/main/SECURITY.md
+  release:
+    automated-pipeline: true
+    distribution-points:
+      - uri: https://www.npmjs.com/package/zipnative-mcp
+        comment: >-
+          npm, published by .github/workflows/publish.yml on a published GitHub
+          Release, through Trusted Publishing (OIDC) with provenance.
+      - uri: https://github.com/Nizoka/zipnative-mcp/releases
+        comment: >-
+          GitHub Releases, published by the maintainer; each one triggers the
+          publish workflow, which attaches the tarball, the CycloneDX SBOM and
+          their Sigstore attestation.
+      - uri: https://registry.modelcontextprotocol.io
+        comment: >-
+          The MCP registry entry io.github.Nizoka/zipnative-mcp, published from
+          server.json by the same workflow through mcp-publisher (pinned by
+          version and SHA-256) with the workflow's GitHub OIDC identity.
+    changelog: https://github.com/Nizoka/zipnative-mcp/blob/main/CHANGELOG.md
+  security:
+    assessments:
+      self:
+        comment: >-
+          The adversarial release audit run before every release
+          (.claude/skills/release-audit/): two auditors, a verifier and a
+          GO/NO-GO ledger. Coverage thresholds of 94/90/95/94 enforced by the
+          gate, hostile-archive tests at the tools/call boundary (zip-slip,
+          device names, symlinks, declared bombs, overlaps, CD/LFH divergence,
+          Zip64 contradictions), a seeded fuzz suite, a byte baseline chain of
+          every sample, and ISO/IEC 21320-1 validation of every archive the
+          tools write by an engine-independent validator. The server contains
+          no network code path; every file access is confined to one sandbox
+          directory through a single file handle. There is no coverage-guided
+          fuzzing and no third-party audit.
+        evidence: https://github.com/Nizoka/zipnative-mcp/blob/main/SECURITY.md
+    tools:
+      - name: CodeQL
+        type: SAST
+        rulesets: [security-extended]
+        integration: { adhoc: false, ci: true, release: false }
+        results: {}
+        comment: TypeScript, on every push and pull request to main and weekly (codeql.yml).
+      - name: veraZIP
+        type: other
+        rulesets: [ISO/IEC 21320-1:2015, APPNOTE 6.3.10]
+        integration: { adhoc: true, ci: true, release: true }
+        results: {}
+        comment: >-
+          The external conformance judge: a vendored, engine-independent
+          ISO/IEC 21320-1 validator plus foreign extractors (unzip, 7z,
+          python zipfile, bsdtar, jar) over every archive the tools write, on
+          ubuntu-latest and windows-latest (verazip.yml, both required),
+          inside the CI gate on every platform (ci.yml) and in the publish
+          gate (publish.yml), with VERAZIP_REQUIRED=1 so a missing judge fails
+          rather than skips.
+      - name: npm audit
+        type: SCA
+        rulesets: [default]
+        integration: { adhoc: true, ci: true, release: true }
+        results: {}
+        comment: The lockfile against the npm advisory database on every push and pull request (ci.yml), weekly (audit.yml) and in the publish job, at audit-level high.
+      - name: Dependabot
+        type: SCA
+        rulesets: [default]
+        integration: { adhoc: false, ci: true, release: false }
+        results: {}
+        comment: Weekly update pull requests for npm and GitHub Actions (.github/dependabot.yml).
+      - name: Dependency Review
+        type: SCA
+        rulesets: [default]
+        integration: { adhoc: false, ci: true, release: false }
+        results: {}
+        comment: The dependency changes of every pull request, with a licence allow-list (dependency-review.yml); three runtime dependencies is a hard rule.
+      - name: Scorecard
+        type: other
+        rulesets: [default]
+        integration: { adhoc: false, ci: true, release: false }
+        results: {}
+        comment: OpenSSF Scorecard on every push to main and weekly (scorecard.yml).

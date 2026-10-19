@@ -10,15 +10,19 @@
  * VENDORED (the engine does not ship scripts/ in its npm tarball, so the
  * validator is copied, not imported):
  *   upstream file:   scripts/validate-zip.ts
- *   upstream commit: 4f1bc3619372e8543bccea65d2365bf0c048a10c (zipnative 1.0.0)
- *   upstream blob:   5ddea000a3b6a4adfb720d673a43664972118139
+ *   upstream commit: e6f0b3f592e15be7b45a88b08fc3178862bce2d9 (zipnative 1.1.0)
+ *   upstream blob:   604321fa40ef1afba04eb9ce14f53e0c19efa474
  *   via:             zipnative-cli 1.0.0 scripts/validate-zip.mjs (the 1:1 .mjs port,
  *                    types erased) — this module is that port's parser body,
  *                    split out so the CLI driver (scripts/validate-zip.mjs) and the
- *                    vitest gate (tests/_verazip.ts) share ONE source.
+ *                    vitest gate (tests/_verazip.ts) share ONE source. The 1.1.0
+ *                    re-port carries the one parser change since 1.0.0: the data
+ *                    descriptor width is keyed on the LOCAL header's Zip64 extra
+ *                    (APPNOTE 4.3.9.2, WF/DESCRIPTOR-WIDTH) instead of the central
+ *                    record — the layout of zipnative's Zip64 streaming opt-in.
  *   sync rule:       when upstream's validate-zip.ts changes, re-port the parser
  *                    body 1:1 and bump BOTH hashes above in the same PR.
- *                    tests/verazip-vendor.test.ts pins the 22-id check vocabulary
+ *                    tests/verazip-vendor.test.ts pins the 23-id check vocabulary
  *                    and these hashes.
  *
  * INDEPENDENT BY CONSTRUCTION: this module raw-parses the bytes with its own
@@ -41,7 +45,7 @@ export const REQUIRED_NEGATIVE_CHECKS = Object.freeze([
     'WF/LFH-NAME-MISMATCH',
 ]);
 
-/** The frozen ISO/IEC 21320-1 + well-formedness vocabulary (22 ids). */
+/** The frozen ISO/IEC 21320-1 + well-formedness vocabulary (23 ids; WF/DESCRIPTOR-WIDTH joined with zipnative 1.1.0). */
 export const CHECK_IDS = Object.freeze([
     'ISO21320-1/APPNOTE-4.3.3',
     'ISO21320-1/APPNOTE-4.3.8',
@@ -64,6 +68,7 @@ export const CHECK_IDS = Object.freeze([
     'WF/LFH-SIZE-MISMATCH',
     'WF/LFH-CRC-MISMATCH',
     'WF/DESCRIPTOR-MISMATCH',
+    'WF/DESCRIPTOR-WIDTH',
     'WF/ENTRY-OVERLAP',
 ]);
 
@@ -331,24 +336,39 @@ export function validateArchive(bytes, file) {
             }
         } else {
             // Bit 3 is PERMITTED by ISO 21320-1. Validate the trailing
-            // descriptor against the authoritative CD values.
-            const sizeLen = entry.usesZip64 ? 8 : 4;
-            const readSize = entry.usesZip64 ? u64 : u32;
-            let matched = false;
-            for (const sigLen of [4, 0]) {
-                const p = dataEnd + sigLen;
-                if (p + 4 + 2 * sizeLen > bytes.length) continue;
-                if (sigLen === 4 && u32(bytes, dataEnd) !== SIG_DESCRIPTOR) continue;
-                const dCrc = u32(bytes, p);
-                const dComp = readSize(bytes, p + 4);
-                const dUnc = readSize(bytes, p + 4 + sizeLen);
-                if (dCrc === entry.crc && dComp === entry.compressedSize && dUnc === entry.uncompressedSize) {
-                    matched = true;
-                    dataEnd = p + 4 + 2 * sizeLen;
-                    break;
-                }
+            // descriptor against the authoritative CD values. APPNOTE
+            // §4.3.9.2: the descriptor's size fields are 8 bytes exactly when
+            // the LOCAL header carries a Zip64 extra (the speculative
+            // streaming form) — not when the central record does, which can
+            // happen for an offset-only Zip64 entry with a 4-byte descriptor.
+            const lfhExtra = bytes.subarray(lfhPos + 30 + lfhNameLen, dataStart);
+            let lfhZip64 = false;
+            for (let e = 0; e + 4 <= lfhExtra.length;) {
+                if (u16(lfhExtra, e) === 0x0001) lfhZip64 = true;
+                e += 4 + u16(lfhExtra, e + 2);
             }
-            if (!matched) {
+            const matchDescriptor = (wide) => {
+                const sizeLen = wide ? 8 : 4;
+                const readSize = wide ? u64 : u32;
+                for (const sigLen of [4, 0]) {
+                    const p = dataEnd + sigLen;
+                    if (p + 4 + 2 * sizeLen > bytes.length) continue;
+                    if (sigLen === 4 && u32(bytes, dataEnd) !== SIG_DESCRIPTOR) continue;
+                    const dCrc = u32(bytes, p);
+                    const dComp = readSize(bytes, p + 4);
+                    const dUnc = readSize(bytes, p + 4 + sizeLen);
+                    if (dCrc === entry.crc && dComp === entry.compressedSize && dUnc === entry.uncompressedSize) {
+                        return p + 4 + 2 * sizeLen;
+                    }
+                }
+                return null;
+            };
+            const end = matchDescriptor(lfhZip64);
+            if (end !== null) {
+                dataEnd = end;
+            } else if (matchDescriptor(!lfhZip64) !== null) {
+                fail('WF/DESCRIPTOR-WIDTH', `entry '${label}': the data descriptor uses ${lfhZip64 ? '4' : '8'}-byte sizes but the local header ${lfhZip64 ? 'carries' : 'has no'} Zip64 extra (APPNOTE 4.3.9.2 keys the width on the local header)`);
+            } else {
                 fail('WF/DESCRIPTOR-MISMATCH', `entry '${label}': no data descriptor matching the central directory values follows the payload`);
             }
         }

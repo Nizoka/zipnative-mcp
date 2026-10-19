@@ -143,7 +143,7 @@ describe('verify_zip', () => {
         }
     });
 
-    it('B-020: an entry whose method has no codec here is reported FAILED (ok:false, no skipped reason), never skipped', async () => {
+    it('B-020: an entry whose method has no codec here is FAILED (ok:false), never counted as skipped — zipnative 1.1.0 names the reason', async () => {
         const out = await verifyZipTool({ zipBase64: b64(UNKNOWN_METHOD()) });
         expect(out.ok).toBe(false);
         expect(out.error).toBeNull();
@@ -151,13 +151,30 @@ describe('verify_zip', () => {
         expect(out.failedCount).toBe(1);
         expect(out.skippedCount).toBe(0);
         expect(out.entries[0]).toMatchObject({ name: 'w.bin', ok: false });
-        expect(out.entries[0]?.skipped).toBeUndefined();
+        // 1.0.0 had no reason here; 1.1.0 relays the engine's 'unsupported-method' — the counts are unchanged.
+        expect(out.entries[0]?.skipped).toBe('unsupported-method');
+        expect((await verifyZipTool({ zipBase64: b64(UNKNOWN_METHOD()), entries: 'skipped' })).entries).toEqual([]);
         const failed = await verifyZipTool({ zipBase64: b64(UNKNOWN_METHOD()), entries: 'failed' });
         expect(failed.entries.map((e) => e.name)).toEqual(['w.bin']);
         // Encrypted entries (ZipCrypto or strong encryption) are the ones that ARE skipped.
         const strong = await verifyZipTool({ zipBase64: b64(STRONG_ENCRYPTION_FLAG()) });
         expect(strong.ok).toBe(true);
         expect(strong.entries.find((e) => e.name === 'aes.bin')?.skipped).toBe('encrypted');
+    });
+
+    it('C3 (zipnative 1.1.0): an encrypted entry whose local header contradicts the central directory now FAILS the archive', async () => {
+        const hostile = raw([{ name: 'secret.txt', data: bytesOf('secret'), flags: 0x0001, lfhMethodOverride: 8 }, { name: 'ok.txt', data: bytesOf('ok') }]);
+        const out = await verifyZipTool({ zipBase64: b64(hostile) });
+        expect(out.ok).toBe(false);
+        expect(out.failedCount).toBe(1);
+        expect(out.skippedCount).toBe(0);
+        const row = out.entries.find((e) => e.name === 'secret.txt');
+        expect(row).toMatchObject({ ok: false, skipped: 'encrypted', localHeaderMatch: false });
+        expect((await verifyZipTool({ zipBase64: b64(hostile), entries: 'failed' })).entries.map((e) => e.name)).toEqual(['secret.txt']);
+        // The honest encrypted entry still passes as a design-time skip.
+        const honest = await verifyZipTool({ zipBase64: b64(ENCRYPTED_FLAG()) });
+        expect(honest).toMatchObject({ ok: true, failedCount: 0, skippedCount: 1 });
+        expect(honest.entries.find((e) => e.name === 'secret.txt')).toMatchObject({ skipped: 'encrypted', localHeaderMatch: true });
     });
 
     it('summary projection keeps the verdict and counts', async () => {

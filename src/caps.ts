@@ -21,7 +21,7 @@ export const MAX_BASE64_INPUT_BYTES = 128 * MiB;
 export const MAX_PATH_INPUT_BYTES = 1 * GiB;
 /** Largest base64 payload returned inline (archives, inflated data). */
 export const MAX_BASE64_OUTPUT_BYTES = 50 * MiB;
-/** Largest file written in `outputMode: 'file'` (enforced while streaming). */
+/** Default largest file written in `outputMode: 'file'` (enforced while streaming); ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES moves it. */
 export const MAX_FILE_OUTPUT_BYTES = 4 * GiB;
 /** Largest single entry returned inline by `read_zip_entry` / `extract_zip`. */
 export const MAX_ENTRY_INLINE_BYTES = 16 * MiB;
@@ -38,12 +38,30 @@ export const DEFAULT_LIST_LIMIT = 200;
  */
 export const MAX_CREATE_ENTRIES = 100_000;
 export const MAX_MODIFY_OPERATIONS = 1000;
+/** merge_zip: archives merged in one call, and their total size (every source is opened in memory). */
+export const MAX_MERGE_SOURCES = 32;
+export const MAX_MERGE_INPUT_BYTES = MAX_PATH_INPUT_BYTES;
 export const MAX_SANITIZE_NAMES = 10_000;
 export const MAX_FILTER_NAMES = 1000;
 export const MAX_FILTER_GLOBS = 32;
+/**
+ * Longest glob pattern accepted. Matching is linear (src/filter.ts never builds a
+ * backtracking RegExp), so the bound only keeps one pattern × one name inside a
+ * predictable cost: a pattern longer than any legal name (`maxNameBytes`, 4 096)
+ * cannot match anyway.
+ */
+export const MAX_GLOB_LENGTH = 1024;
 export const MAX_EXTRA_FIELDS = 16;
+/**
+ * Longest free-text field of a `draft_governance_issue` call (summary,
+ * reproduction, behaviours). The policy checks scan the assembled draft with
+ * linear-time patterns; the bound keeps a draft a reviewable size.
+ */
+export const MAX_ISSUE_TEXT_CHARS = 16_384;
 export const MAX_FIELDS_PATHS = 16;
 export const MAX_SCAN_ENTRIES_DEFAULT = 10_000;
+/** `inspect_zip` `determinismReport`: offender rows kept (the counts stay exact). */
+export const MAX_DETERMINISM_OFFENDERS = 200;
 /** Diagnostics kept per result after de-duplication by (code, entryName). */
 export const MAX_DIAGNOSTICS = 200;
 /** `extract_zip` file mode: resource links attached to the result (the rest stay in `entries[]`). */
@@ -55,7 +73,7 @@ export const MAX_LISTED_RESOURCES = 1000;
 export const MAX_RESOURCE_WALK_DEPTH = 8;
 /** `resources/read`: largest payload returned (mirrors the inline output cap). */
 export const MAX_RESOURCE_READ_BYTES = MAX_BASE64_OUTPUT_BYTES;
-/** Opt-in response cache (`ZIPNATIVE_MCP_CACHE_DIR`): entry TTL and total size (LRU by mtime). */
+/** Opt-in response cache (`ZIPNATIVE_MCP_CACHE_DIR`): entry TTL and total size (the oldest-written entries are evicted first, by mtime). */
 export const CACHE_TTL_SECONDS = 3600;
 export const CACHE_MAX_BYTES = 256 * MiB;
 
@@ -63,19 +81,29 @@ export const CACHE_MAX_BYTES = 256 * MiB;
 export const MAX_UNCOMPRESSED_ENV = 'ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES';
 export const MAX_ENTRIES_ENV = 'ZIPNATIVE_MCP_MAX_ENTRIES';
 export const WORKERS_ENV = 'ZIPNATIVE_MCP_WORKERS';
+/**
+ * The file-output ceiling (1.1.0). Default 4 GiB — the 1.0.0 cap, unchanged —
+ * so nothing moves unless the operator raises it, which is what makes the
+ * Zip64 streaming opt-in (`create_zip` `stream` + `zip64`) useful for an
+ * archive above 4 GiB written into the sandbox.
+ */
+export const MAX_FILE_OUTPUT_ENV = 'ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES';
 
 /** Defaults equal the engine defaults, so nothing changes unless the operator says so. */
 export const DEFAULT_MAX_UNCOMPRESSED_CEILING = 8 * GiB;
 export const DEFAULT_MAX_ENTRIES_CEILING = 100_000;
 export const DEFAULT_WORKERS_CEILING = 8;
+export const DEFAULT_MAX_FILE_OUTPUT_CEILING = MAX_FILE_OUTPUT_BYTES;
 
 export interface Ceilings {
-    /** Upper bound for `limits.maxEntryUncompressedSize` and `limits.maxTotalUncompressedSize`. */
+    /** Upper bound for `limits.maxEntryUncompressedSize`, `limits.maxTotalUncompressedSize` and `limits.maxEntryCompressedSize`. */
     readonly maxUncompressedBytes: number;
     /** Upper bound for `limits.maxEntries`. */
     readonly maxEntries: number;
     /** Upper bound for `create_zip.parallel.workers` (0 disables worker threads). */
     readonly maxWorkers: number;
+    /** Largest file a tool writes in `outputMode: 'file'` (enforced while streaming). */
+    readonly maxFileOutputBytes: number;
 }
 
 function parseCeiling(env: NodeJS.ProcessEnv, name: string, fallback: number, minimum: number): number {
@@ -101,6 +129,7 @@ export function readCeilings(env: NodeJS.ProcessEnv = process.env): Ceilings {
         maxUncompressedBytes: parseCeiling(env, MAX_UNCOMPRESSED_ENV, DEFAULT_MAX_UNCOMPRESSED_CEILING, 1024),
         maxEntries: parseCeiling(env, MAX_ENTRIES_ENV, DEFAULT_MAX_ENTRIES_CEILING, 1),
         maxWorkers: parseCeiling(env, WORKERS_ENV, DEFAULT_WORKERS_CEILING, 0),
+        maxFileOutputBytes: parseCeiling(env, MAX_FILE_OUTPUT_ENV, DEFAULT_MAX_FILE_OUTPUT_CEILING, MiB),
     };
 }
 
@@ -144,11 +173,16 @@ export const CAPS = {
     defaultListLimit: DEFAULT_LIST_LIMIT,
     maxCreateEntries: MAX_CREATE_ENTRIES,
     maxModifyOperations: MAX_MODIFY_OPERATIONS,
+    maxMergeSources: MAX_MERGE_SOURCES,
+    maxMergeInputBytes: MAX_MERGE_INPUT_BYTES,
     maxSanitizeNames: MAX_SANITIZE_NAMES,
     maxDiagnostics: MAX_DIAGNOSTICS,
+    maxDeterminismOffenders: MAX_DETERMINISM_OFFENDERS,
     maxFilterNames: MAX_FILTER_NAMES,
     maxFilterGlobs: MAX_FILTER_GLOBS,
+    maxGlobLength: MAX_GLOB_LENGTH,
     maxExtraFields: MAX_EXTRA_FIELDS,
+    maxIssueTextChars: MAX_ISSUE_TEXT_CHARS,
     maxFieldsPaths: MAX_FIELDS_PATHS,
     defaultScanMaxEntries: MAX_SCAN_ENTRIES_DEFAULT,
     maxResourceLinks: MAX_RESOURCE_LINKS,

@@ -115,6 +115,38 @@ function expectCleanExit(session: StdioSession): void {
     expect(session.exitCode, `SIGTERM exit code; stderr: ${session.stderr}`).toBe(0);
 }
 
+function bootWith(env: Record<string, string>): Promise<{ code: number | null; stderr: string }> {
+    return new Promise((resolve) => {
+        const child = spawn(process.execPath, [CLI], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, ZIPNATIVE_MCP_PORT: '', ...env } });
+        let stderr = '';
+        child.stderr.on('data', (c: Buffer) => {
+            stderr += c.toString('utf8');
+        });
+        const timer = setTimeout(() => child.kill('SIGKILL'), 15_000);
+        child.on('exit', (code) => {
+            clearTimeout(timer);
+            resolve({ code, stderr });
+        });
+        // A server that boots waits on stdin: closing it ends the session either way.
+        setTimeout(() => child.stdin.end(), 3_000);
+    });
+}
+
+describe.skipIf(!hasDist)('an invalid operator knob refuses to start (ported from pkinative-mcp B2-054 / A2-039)', () => {
+    it.each([['70000'], ['abc'], ['0'], ['-5'], ['8080.5']])('ZIPNATIVE_MCP_PORT=%s is refused with a clean line, never a silent stdio fallback', async (port) => {
+        const { code, stderr } = await bootWith({ ZIPNATIVE_MCP_PORT: port });
+        expect(code, stderr).toBe(1);
+        expect(stderr).toContain('ZIPNATIVE_MCP_PORT must be an integer between 1 and 65535');
+        expect(stderr).not.toContain('ready (stdio transport');
+    }, 30_000);
+
+    it('a relative ZIPNATIVE_MCP_OUTPUT_DIR is refused', async () => {
+        const { code, stderr } = await bootWith({ ZIPNATIVE_MCP_OUTPUT_DIR: 'relative/dir' });
+        expect(code, stderr).toBe(1);
+        expect(stderr).toContain('ZIPNATIVE_MCP_OUTPUT_DIR must be an absolute path');
+    }, 30_000);
+});
+
 describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
     it.each(['2025-03-26', '2025-06-18'])('negotiates the older 2025 revision %s on stdio and serves tools/list', async (version) => {
         const session = await runStdioSession(
@@ -128,7 +160,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
         const init = session.frames.find((f) => f.id === 1)?.result as { protocolVersion?: string } | undefined;
         expect(init?.protocolVersion).toBe(version);
         const tools = (session.frames.find((f) => f.id === 2)?.result as { tools?: Array<{ name: string }> } | undefined)?.tools ?? [];
-        expect(tools.length).toBe(13);
+        expect(tools.length).toBe(15);
     });
 
     it('serves a legacy initialize → tools/list → tools/call session with JSON-only stdout', async () => {
@@ -160,7 +192,7 @@ describe.skipIf(!hasDist)('dist/cli.js over stdio', () => {
         expect(init?.serverInfo?.name).toBe('zipnative-mcp');
 
         const tools = (session.frames.find((f) => f.id === 2)?.result as { tools?: Array<{ name: string }> } | undefined)?.tools ?? [];
-        expect(tools.length).toBe(13);
+        expect(tools.length).toBe(15);
 
         const call = session.frames.find((f) => f.id === 3)?.result as { isError?: boolean; content?: Array<{ type: string; resource?: { mimeType?: string } }>; structuredContent?: { diagnostics?: Array<{ code: string }> } } | undefined;
         expect(call?.isError).not.toBe(true);
@@ -324,4 +356,41 @@ describe.skipIf(!process.env['ZIPNATIVE_MCP_SLOW_TESTS'])('stdio transport — t
             await session.close().catch(() => undefined);
         }
     }, 300_000);
+});
+
+describe.skipIf(!hasDist)('A-020: a relative ZIPNATIVE_MCP_CACHE_DIR refuses to start', () => {
+    it('A-020: the server exits with one clean line instead of caching under the launch directory', async () => {
+        const { code, stderr } = await bootWith({ ZIPNATIVE_MCP_CACHE_DIR: 'relative-cache' });
+        expect(code, stderr).toBe(1);
+        expect(stderr).toContain('ZIPNATIVE_MCP_CACHE_DIR must be an absolute path');
+        expect(stderr).not.toContain('ready (stdio transport');
+    });
+});
+
+describe.skipIf(!hasDist)('A-017: prototype pollution over a real stdio frame (dist/cli.js)', () => {
+    it('A-017: a root __proto__ key is stripped by the SDK envelope before the server (the call runs on the rest), a nested one is VALIDATION_ERROR, and the process keeps answering', async () => {
+        // JSON.parse makes __proto__ an OWN key, and JSON.stringify writes it back out — exactly what a host sends.
+        const poisonedRoot = JSON.parse('{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sanitize_entry_paths","arguments":{"names":["a.txt"],"__proto__":{"polluted":"yes"}}}}') as Record<string, unknown>;
+        const poisonedEntry = JSON.parse('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"create_zip","arguments":{"entries":[{"name":"a","text":"a","__proto__":{"polluted":"yes"}}]}}}') as Record<string, unknown>;
+        expect(JSON.stringify(poisonedRoot)).toContain('"__proto__"');
+        const session = await runStdioSession(
+            [
+                { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'proto-probe', version: '0' } } },
+                { jsonrpc: '2.0', method: 'notifications/initialized' },
+                poisonedRoot,
+                poisonedEntry,
+                { jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'sanitize_entry_paths', arguments: { names: ['a.txt'] } } },
+            ],
+            [1, 2, 3, 4],
+        );
+        const stripped = session.frames.find((f) => f.id === 2)?.result as { isError?: boolean; structuredContent?: { results?: Array<{ sanitized?: string }> } } | undefined;
+        expect(stripped?.isError, 'frame 2 (root key, stripped by the envelope)').not.toBe(true);
+        expect(stripped?.structuredContent?.results?.[0]?.sanitized).toBe('a.txt');
+        const refused = session.frames.find((f) => f.id === 3)?.result as { isError?: boolean; content?: Array<{ text?: string }> } | undefined;
+        expect(refused?.isError, 'frame 3 (nested key)').toBe(true);
+        expect(refused?.content?.[0]?.text, 'frame 3').toContain('[VALIDATION_ERROR]');
+        const after = session.frames.find((f) => f.id === 4)?.result as { isError?: boolean; structuredContent?: { results?: Array<{ sanitized?: string }> } } | undefined;
+        expect(after?.isError).not.toBe(true);
+        expect(after?.structuredContent?.results?.[0]?.sanitized).toBe('a.txt');
+    });
 });

@@ -3,8 +3,8 @@ import { Agent, request as httpRequest } from 'node:http';
 import type { Socket } from 'node:net';
 
 import { ensureEngineReady } from '../src/server.js';
-import { MAX_REQUEST_BODY_BYTES } from '../src/http.js';
-import { startHttpFixture, send, modernRequest, JSON_HEADERS, type HttpFixture } from './_http-fixture.js';
+import { HTTP_SERVER_LIMITS, MAX_REQUEST_BODY_BYTES, SECURITY_HEADERS } from '../src/http.js';
+import { startHttpFixture, send, modernRequest, legacyInitBody, JSON_HEADERS, type HttpFixture } from './_http-fixture.js';
 
 /**
  * HTTP transport hardening regressions:
@@ -58,6 +58,48 @@ describe('HTTP transport — request-body cap', () => {
         expect((await send(fx.port, { headers: JSON_HEADERS, body: over })).status).toBe(413);
         const { headers, body } = modernRequest('server/discover');
         expect((await send(fx.port, { headers, body })).status).toBe(200);
+    });
+});
+
+describe('HTTP transport — 1.1.0 hardening: SDK body bound, timeouts, security headers', () => {
+    let fx: HttpFixture;
+    beforeAll(async () => {
+        await ensureEngineReady();
+        fx = await startHttpFixture();
+    });
+    afterAll(async () => {
+        await fx.close();
+    });
+
+    it('a 5 MiB body (above the SDK default of 4 MiB) reaches the server instead of a 413', async () => {
+        const padding = 'x'.repeat(5 * 1024 * 1024);
+        const { headers, body } = modernRequest('tools/call', { name: 'describe_engine', arguments: { padding } });
+        expect(Buffer.byteLength(body)).toBeGreaterThan(4 * 1024 * 1024);
+        const r = await send(fx.port, { headers, body });
+        expect(r.status).toBe(200);
+        // The call itself is refused by the schema (unknown key), proving the body was parsed and dispatched.
+        const result = r.json?.['result'] as { isError?: boolean; _meta?: { error?: { code?: string } } };
+        expect(result.isError).toBe(true);
+        expect(result._meta?.error?.code).toBe('VALIDATION_ERROR');
+    });
+
+    it('R-027: every response carries nosniff and no-store — the modern answer, the legacy-era 200 (whose SDK Cache-Control is overridden) and the 404 alike', async () => {
+        const { headers, body } = modernRequest('tools/list');
+        const ok = await send(fx.port, { headers, body });
+        const legacy = await send(fx.port, { headers: { ...JSON_HEADERS }, body: legacyInitBody() });
+        expect(legacy.status).toBe(200);
+        const missing = await send(fx.port, { path: '/elsewhere', headers, body });
+        expect(missing.status).toBe(404);
+        for (const r of [ok, legacy, missing]) {
+            for (const [name, value] of Object.entries(SECURITY_HEADERS)) expect(r.headers[name.toLowerCase()]).toBe(value);
+        }
+    });
+
+    it('the Node server timeouts and header count are bounded (slowloris)', () => {
+        expect(fx.httpServer.headersTimeout).toBe(HTTP_SERVER_LIMITS.headersTimeoutMs);
+        expect(fx.httpServer.requestTimeout).toBe(HTTP_SERVER_LIMITS.requestTimeoutMs);
+        expect(fx.httpServer.keepAliveTimeout).toBe(HTTP_SERVER_LIMITS.keepAliveTimeoutMs);
+        expect(fx.httpServer.maxHeadersCount).toBe(HTTP_SERVER_LIMITS.maxHeadersCount);
     });
 });
 

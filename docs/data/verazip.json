@@ -1,11 +1,11 @@
 {
   "$comment": "veraZIP corpus contract. `declared` is what scripts/generate-zip-corpus.mjs writes to test-output/zip/ (defined in scripts/helpers/zip-corpus.mjs): `conformant` archives the validator must accept (of which `hostileConformant` are spec-valid but hostile shapes the server must REFUSE) and `nonConformant` crafted negatives it must REJECT with the check id they declare. scripts/validate-zip.mjs fails when the corpus on disk disagrees; tests/verazip-vendor.test.ts pins these numbers to the corpus definition and `checkIds` to the validator's frozen vocabulary; README.md, CONTRIBUTING.md and docs/guides/CONFORMANCE.md quote conformant + nonConformant archives.",
   "declared": {
-    "conformant": 34,
+    "conformant": 39,
     "nonConformant": 4,
     "hostileConformant": 4
   },
-  "checkIds": 22,
+  "checkIds": 23,
   "requiredNegativeChecks": [
     "WF/ENTRY-OVERLAP",
     "WF/CD-COUNT",

@@ -6,8 +6,8 @@
  * re-checks the real path of the parent (symlinked directories), bounds the
  * output size, and removes a partial file when a streamed write fails.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { promises as fs } from 'node:fs';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fsSync, { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -25,7 +25,12 @@ import {
     openExclusiveWriteStream,
     OUTPUT_DIR_ENV,
     relativeLabel,
-    resolveInputFile,
+    openInputFile,
+    openSandboxFile,
+    readExactly,
+    readInputFile,
+    realpathInside,
+    resolveSandboxPath,
     resolveOutputDir,
     resolveOutputFile,
     writeExclusive,
@@ -68,7 +73,7 @@ describe('sandbox resolution', () => {
         expect(getOutputSandbox()).toBeNull();
         expect(() => resolveOutputFile('a.zip')).toThrow(SecurityError);
         expect(() => resolveOutputDir('out')).toThrow(SecurityError);
-        expect((await codeOf(resolveInputFile('a.zip', null))).code).toBe('SECURITY_VIOLATION');
+        expect((await codeOf(openInputFile('a.zip', null))).code).toBe('SECURITY_VIOLATION');
         expect((await codeOf(emitArchive(new Uint8Array([1]), { mode: 'file', outputPath: 'a.zip' }))).code).toBe('SECURITY_VIOLATION');
         expect((await codeOf(assertRealpathInside(os.tmpdir()))).code).toBe('SECURITY_VIOLATION');
         // The message names the variable an operator must set.
@@ -122,22 +127,78 @@ describe('sandbox resolution', () => {
         for (const ext of ZIP_CONTAINER_EXTENSIONS) {
             expect(resolveOutputFile(`out/file${ext.toUpperCase()}`)).toBe(path.join(sandboxDir, 'out', `file${ext.toUpperCase()}`));
         }
-        expect((await codeOf(resolveInputFile('in.txt', ZIP_CONTAINER_EXTENSIONS))).code).toBe('INVALID_EXTENSION');
+        expect((await codeOf(openInputFile('in.txt', ZIP_CONTAINER_EXTENSIONS))).code).toBe('INVALID_EXTENSION');
         // A custom allow-list (text artifacts) and no allow-list (any file) both work.
         expect(resolveOutputFile('drafts/issue.md', ['.md'])).toBe(path.join(sandboxDir, 'drafts', 'issue.md'));
     });
 
-    it('resolveInputFile: INPUT_NOT_FOUND for a missing file or a directory, and the size of a real file', async () => {
-        const missing = await codeOf(resolveInputFile('nope.zip', null));
+    it('openInputFile: INPUT_NOT_FOUND for a missing file or a directory, and the size of a real file', async () => {
+        const missing = await codeOf(openInputFile('nope.zip', null));
         expect(missing.code).toBe('INPUT_NOT_FOUND');
         expect(missing.message).not.toContain(sandboxDir);
         expect(missing.data).toEqual({ path: 'nope.zip', remedy: 'resources/list' });
         expect(missing.message).toContain('resources/list');
         await fs.mkdir(path.join(sandboxDir, 'dir'));
-        expect((await codeOf(resolveInputFile('dir', null, 'sourcePath'))).message).toContain('not a regular file');
+        expect((await codeOf(openInputFile('dir', null, 'sourcePath'))).message).toContain('not a regular file');
         await fs.writeFile(path.join(sandboxDir, 'real.bin'), Buffer.alloc(10));
-        const found = await resolveInputFile('real.bin', null, 'sourcePath');
-        expect(found).toEqual({ resolved: path.join(sandboxDir, 'real.bin'), size: 10 });
+        const found = await openInputFile('real.bin', null, 'sourcePath');
+        expect({ resolved: found.resolved, size: found.size }).toEqual({ resolved: path.join(sandboxDir, 'real.bin'), size: 10 });
+        await found.close();
+    });
+
+    it('one handle from the open to the last byte: a file that grows or shrinks under the read is IO_ERROR', async () => {
+        const target = path.join(sandboxDir, 'live.bin');
+        await fs.writeFile(target, Buffer.alloc(100, 1));
+        // readInputFile: the size is fixed at the open; growth before the read is detected by the probe byte.
+        const grew = await codeOf(readInputFile('live.bin', null, 'sourcePath', () => { fsSync.appendFileSync(target, Buffer.alloc(5)); }));
+        expect(grew.code).toBe('IO_ERROR');
+        expect(grew.message).toContain('grew');
+        await fs.writeFile(target, Buffer.alloc(100, 1));
+        const shrank = await codeOf(readInputFile('live.bin', null, 'sourcePath', () => { fsSync.truncateSync(target, 40); }));
+        expect(shrank.code).toBe('IO_ERROR');
+        expect(shrank.message).toContain('shrank');
+        // The chunk stream holds the same contract and closes its handle whatever happens.
+        await fs.writeFile(target, Buffer.alloc(100, 2));
+        const streamed = await openInputFile('live.bin', null, 'sourcePath');
+        const chunks: Uint8Array[] = [];
+        const drain = async (): Promise<void> => {
+            for await (const c of streamed.chunks(30)) {
+                chunks.push(c);
+                if (chunks.length === 1) fsSync.appendFileSync(target, Buffer.alloc(3));
+            }
+        };
+        expect((await codeOf(drain())).code).toBe('IO_ERROR');
+        await fs.writeFile(target, Buffer.alloc(100, 3));
+        const shrinking = await openInputFile('live.bin', null, 'sourcePath');
+        const drainShrink = async (): Promise<void> => {
+            for await (const c of shrinking.chunks(30)) {
+                void c;
+                fsSync.truncateSync(target, 50);
+            }
+        };
+        expect((await codeOf(drainShrink())).message).toContain('shrank');
+        // A complete, unchanged read returns exactly the bytes and a positional read is short only at the end.
+        await fs.writeFile(target, Buffer.from([1, 2, 3, 4, 5]));
+        expect([...(await readInputFile('live.bin', null)).bytes]).toEqual([1, 2, 3, 4, 5]);
+        const positional = await openInputFile('live.bin', null);
+        expect([...(await positional.read(3, 10))]).toEqual([4, 5]);
+        expect([...(await positional.read(0, 2))]).toEqual([1, 2]);
+        await positional.close();
+    });
+
+    it('openSandboxFile: absent, not a file, and the handle-bound size; readExactly holds the announced size', async () => {
+        expect(await openSandboxFile(path.join(sandboxDir, 'nothing.bin'))).toBe('absent');
+        await fs.mkdir(path.join(sandboxDir, 'adir'));
+        expect(await openSandboxFile(path.join(sandboxDir, 'adir'))).toBe('not-a-file');
+        await fs.writeFile(path.join(sandboxDir, 'six.bin'), Buffer.alloc(6, 9));
+        const opened = await openSandboxFile(path.join(sandboxDir, 'six.bin'));
+        if (typeof opened === 'string') throw new Error('expected an open file');
+        expect(opened.size).toBe(6);
+        expect((await codeOf(readExactly(opened.handle, 4))).code).toBe('IO_ERROR');
+        expect([...(await readExactly(opened.handle, 6))]).toEqual([9, 9, 9, 9, 9, 9]);
+        await opened.handle.close();
+        expect(resolveSandboxPath('x/y.bin')).toBe(path.join(sandboxDir, 'x', 'y.bin'));
+        expect(await realpathInside(sandboxDir)).toBe(await fs.realpath(sandboxDir));
     });
 
     it('relativeLabel is POSIX-style relative to the sandbox (basename when disabled)', () => {
@@ -199,8 +260,8 @@ describe('exclusive writes', () => {
         const oversized = { byteLength: MAX_FILE_OUTPUT_BYTES + 1 } as unknown as Uint8Array;
         const file = await codeOf(emitArchive(oversized, { mode: 'file', outputPath: 'huge.zip' }));
         expect(file.code).toBe('OUTPUT_TOO_LARGE');
-        expect(file.message).toContain('file cap — split the content');
-        expect(file.data).toEqual({ sizeBytes: MAX_FILE_OUTPUT_BYTES + 1, cap: MAX_FILE_OUTPUT_BYTES });
+        expect(file.message).toContain('file cap (ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES) — split the content');
+        expect(file.data).toEqual({ sizeBytes: MAX_FILE_OUTPUT_BYTES + 1, cap: MAX_FILE_OUTPUT_BYTES, env: 'ZIPNATIVE_MCP_MAX_FILE_OUTPUT_BYTES' });
         await expect(fs.stat(path.join(sandboxDir, 'huge.zip'))).rejects.toThrow();
     });
 
@@ -383,7 +444,7 @@ describe('A-002: junction / symlink escape is refused on every read path', () =>
         expect((await refusal('inflate_raw', { sourcePath: 'link.bin', maxOutput: 10, method: 'store' })).code).toBe('SECURITY_VIOLATION');
         expect((await refusal('create_zip', { entries: [{ name: 'a', sourcePath: 'link.bin' }] })).code).toBe('SECURITY_VIOLATION');
         await expect(readResource('zipnative://output/link.zip')).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
-        await expect(resolveInputFile('link.zip', null)).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
+        await expect(openInputFile('link.zip', null)).rejects.toMatchObject({ code: 'SECURITY_VIOLATION' });
     });
 
     it('a link that stays INSIDE the sandbox is fine (the check is about the real location, not the link)', async () => {
@@ -518,5 +579,38 @@ describe('writeSandboxedText (governance drafts)', () => {
         // Buffer.from(text) is what the guard measures; build a string just over the cap cheaply.
         const text = 'x'.repeat(huge.byteLength);
         expect((await codeOf(writeSandboxedText(text, 'huge.md'))).code).toBe('OUTPUT_TOO_LARGE');
+    });
+});
+
+describe('A-013: a file swapped between the open and the real-path check is refused', () => {
+    let sandboxDir: string;
+
+    beforeEach(async () => {
+        sandboxDir = await fs.mkdtemp(path.join(os.tmpdir(), 'zipnative-mcp-a013-'));
+        process.env[ENV_KEY] = sandboxDir;
+        await fs.writeFile(path.join(sandboxDir, 'in.zip'), basicZip());
+    });
+    afterEach(async () => {
+        vi.restoreAllMocks();
+        delete process.env[ENV_KEY];
+        await fs.rm(sandboxDir, { recursive: true, force: true });
+    });
+
+    it('A-013: the path resolving to another inode than the opened handle is SECURITY_VIOLATION, and the handle is closed', async () => {
+        const resolved = resolveSandboxPath('in.zip', 'zipPath');
+        const realStat = fs.stat.bind(fs);
+        // The located file (stat of the real path) is no longer the one the handle holds: a swap.
+        vi.spyOn(fs, 'stat').mockImplementation((async (p: fsSync.PathLike, opts?: fsSync.StatOptions) => {
+            const s = await realStat(p, { ...opts, bigint: true });
+            return Object.assign(Object.create(Object.getPrototypeOf(s) as object) as fsSync.BigIntStats, s, { ino: s.ino + 1n });
+        }) as typeof fs.stat);
+        const err = await codeOf(openSandboxFile(resolved, 'zipPath'));
+        expect(err).toBeInstanceOf(SecurityError);
+        expect(err.code).toBe('SECURITY_VIOLATION');
+        expect(err.message).toMatch(/changed while it was being opened/);
+        expect(err.message).not.toContain(sandboxDir);
+        vi.restoreAllMocks();
+        // The handle was closed: the file can be removed and reopened at once (Windows refuses an unlink of an open file).
+        await fs.rm(path.join(sandboxDir, 'in.zip'));
     });
 });

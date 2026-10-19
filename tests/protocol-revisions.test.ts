@@ -26,7 +26,7 @@ async function proveLegacy(transport: 'http-legacy' | 'stdio-legacy', version: s
         expect(Object.keys(agent.handshake['capabilities'] as Record<string, unknown>)).toEqual(expect.arrayContaining(['tools', 'prompts', 'resources']));
         const list = await agent.request<{ tools: Array<{ name: string }>; ttlMs?: number }>('tools/list');
         expect(list.tools.map((t) => t.name)).toEqual(toolNames());
-        expect(list.tools).toHaveLength(13);
+        expect(list.tools).toHaveLength(15);
         expect(list.ttlMs).toBeUndefined(); // 2026-07-28 cache hints never leak into a legacy session
     } finally {
         const report = await agent.close();
@@ -42,7 +42,7 @@ async function proveModern(transport: 'http-modern' | 'stdio-modern'): Promise<v
         const list = await agent.request<{ tools: Array<{ name: string }>; resultType?: string }>('tools/list');
         expect(list.resultType).toBe('complete');
         expect(list.tools.map((t) => t.name)).toEqual(toolNames());
-        expect(list.tools).toHaveLength(13);
+        expect(list.tools).toHaveLength(15);
     } finally {
         const report = await agent.close();
         if (transport === 'stdio-modern') expectCleanStdioExit(report);
@@ -54,21 +54,21 @@ describe('protocol revisions over Streamable HTTP', () => {
         await ensureEngineReady();
     });
 
-    it.each(LEGACY_REVISIONS)('legacy initialize %s negotiates exactly that revision and serves the 13 tools', async (version) => {
+    it.each(LEGACY_REVISIONS)('legacy initialize %s negotiates exactly that revision and serves the 15 tools', async (version) => {
         await proveLegacy('http-legacy', version);
     });
 
-    it(`${MODERN_REVISION} via server/discover serves the 13 tools`, async () => {
+    it(`${MODERN_REVISION} via server/discover serves the 15 tools`, async () => {
         await proveModern('http-modern');
     });
 });
 
 describe.skipIf(!hasDist)('protocol revisions over stdio (dist/cli.js)', () => {
-    it.each(LEGACY_REVISIONS)('legacy initialize %s negotiates exactly that revision and serves the 13 tools', async (version) => {
+    it.each(LEGACY_REVISIONS)('legacy initialize %s negotiates exactly that revision and serves the 15 tools', async (version) => {
         await proveLegacy('stdio-legacy', version);
     });
 
-    it(`${MODERN_REVISION} via server/discover serves the 13 tools`, async () => {
+    it(`${MODERN_REVISION} via server/discover serves the 15 tools`, async () => {
         await proveModern('stdio-modern');
     });
 });

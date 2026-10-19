@@ -46,6 +46,20 @@ export interface ToWebRequestOptions {
     readonly maxBodyBytes?: number;
 }
 
+/**
+ * The request line and headers only, as a Web `Request` without a body (A-015): the Host / Origin
+ * and bearer guards run on it BEFORE the body is buffered, so a foreign or unauthenticated client
+ * cannot make the server read up to 256 MiB first.
+ */
+export function toWebHead(req: IncomingMessage, origin: string): Request {
+    const headers = new Headers();
+    for (const [key, value] of Object.entries(req.headers)) {
+        if (value === undefined) continue;
+        headers.set(key, Array.isArray(value) ? value.join(', ') : value);
+    }
+    return new Request(new URL(req.url ?? '/', origin), { method: 'GET', headers });
+}
+
 export async function toWebRequest(req: IncomingMessage, origin: string, res?: ServerResponse, opts?: ToWebRequestOptions): Promise<Request> {
     const maxBodyBytes = opts?.maxBodyBytes ?? MAX_REQUEST_BODY_BYTES;
     const headers = new Headers();
@@ -85,6 +99,41 @@ export async function toWebRequest(req: IncomingMessage, origin: string, res?: S
 }
 
 /**
+ * Headers set on every HTTP response, whatever produced it (the MCP handler,
+ * the loopback / token guards, the 404 / 413 / 500 paths): a JSON-RPC answer
+ * is never content-sniffed by a browser nor stored by an intermediary.
+ */
+export const SECURITY_HEADERS: Readonly<Record<string, string>> = {
+    'X-Content-Type-Options': 'nosniff',
+    'Cache-Control': 'no-store',
+};
+
+/**
+ * Node `http.Server` timeouts (1.1.0): a client that trickles its headers or
+ * its body can no longer hold a socket open indefinitely (slowloris). The
+ * request timeout leaves room for a 256 MiB body on a slow loopback.
+ */
+export const HTTP_SERVER_LIMITS = {
+    headersTimeoutMs: 30_000,
+    requestTimeoutMs: 300_000,
+    keepAliveTimeoutMs: 5_000,
+    maxHeadersCount: 100,
+} as const;
+
+/** Apply {@link HTTP_SERVER_LIMITS} to a Node HTTP server. */
+export function hardenHttpServer(server: { headersTimeout: number; requestTimeout: number; keepAliveTimeout: number; maxHeadersCount: number | null }): void {
+    server.headersTimeout = HTTP_SERVER_LIMITS.headersTimeoutMs;
+    server.requestTimeout = HTTP_SERVER_LIMITS.requestTimeoutMs;
+    server.keepAliveTimeout = HTTP_SERVER_LIMITS.keepAliveTimeoutMs;
+    server.maxHeadersCount = HTTP_SERVER_LIMITS.maxHeadersCount;
+}
+
+/** Set {@link SECURITY_HEADERS} on a Node response before anything is written. */
+export function applySecurityHeaders(res: ServerResponse): void {
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) res.setHeader(name, value);
+}
+
+/**
  * Write a web-standard `Response` to a Node response. Streams (SSE) are piped
  * chunk by chunk; the Node side closing cancels the web stream.
  */
@@ -93,6 +142,9 @@ export async function sendWebResponse(res: ServerResponse, response: Response): 
     response.headers.forEach((value, key) => {
         headers[key] = value;
     });
+    // The SDK sets its own Cache-Control on a legacy-era 200 (`no-cache, no-transform`); the
+    // documented promise is `no-store` on every response, so the security headers win (R-027).
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) headers[name.toLowerCase()] = value;
     res.writeHead(response.status, headers);
     if (response.body === null) {
         res.end();

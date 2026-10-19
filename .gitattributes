@@ -14,3 +14,11 @@ tests/fixtures/** binary
 *.epub binary
 *.vsix binary
 *.png binary
+
+# Generated or machine-maintained files: collapsed in review, never hand-edited.
+.claude/rules/*.md                      linguist-generated=true
+tests/_fixtures/samples.sha256.json     linguist-generated=true -diff
+tests/_fixtures/tool-shape.json         linguist-generated=true
+tests/_fixtures/tool-shape.v1.0.0.json  linguist-generated=true
+tests/_fixtures/server.schema.*.json    linguist-generated=true
+package-lock.json                       linguist-generated=true

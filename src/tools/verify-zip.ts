@@ -4,14 +4,24 @@
  * local-header checks, every diagnostic collected. The contract that makes it
  * agent-grade: the tool NEVER fails for a problem with the archive — a
  * structural refusal lands in `error` (with the frozen ZIP_* code), an
- * unverifiable entry (encrypted, stream-only codec) is `skipped` with its
- * reason. Only caller mistakes (bad limits, bad input) are `isError`.
+ * unverifiable entry carries `skipped` with its reason (zipnative 1.1.0:
+ * 'encrypted', 'stream-only-codec', 'unsupported-method'). Only caller
+ * mistakes (bad limits, bad input) are `isError`.
+ *
+ * The counts follow the engine's archive rule: an entry passes when it is ok,
+ * or when it is a design-time skip (encrypted, stream-only codec) whose local
+ * header agrees with the central directory. `skippedCount` counts those;
+ * every other entry that is not ok is FAILED — an unknown method (skipped:
+ * 'unsupported-method', as in 1.0.0 failed) and, since 1.1.0, an encrypted
+ * entry whose local header contradicts the central directory (1.0.0 trusted a
+ * fabricated localHeaderMatch).
  */
 import { z } from 'zod';
-import { verifyZip, type VerifiedEntry } from 'zipnative';
+import { verifyZip, type VerifiedEntry, type ZipVerificationReport as VerifyZipReport } from 'zipnative';
 
 import { ARCHIVE_INPUT_PROPERTIES, ARCHIVE_INPUT_SHAPE, loadArchive, refineArchiveInput } from '../archive-input.js';
-import { DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticRow } from '../diagnostics.js';
+import { NO_CONTEXT, throwIfCancelled, type CallContext } from '../call-context.js';
+import { createDiagnosticSink, DIAGNOSTICS_OUTPUT_PROPERTIES, type DiagnosticRow } from '../diagnostics.js';
 import { LIMITS_INPUT_SCHEMA, LimitsSchema, resolveCallLimits } from '../limits.js';
 import { PROJECTION_INPUT_PROPERTIES } from '../projection.js';
 import { guard } from '../zip-errors.js';
@@ -56,6 +66,7 @@ export interface VerifyZipResult {
     readonly entries: readonly VerifiedEntry[];
     readonly entriesTruncated?: true;
     readonly diagnostics: readonly DiagnosticRow[];
+    readonly diagnosticsTruncated?: true;
 }
 
 export const VERIFY_ZIP_OUTPUT_SCHEMA = {
@@ -73,8 +84,8 @@ export const VERIFY_ZIP_OUTPUT_SCHEMA = {
         },
         entryCount: { type: 'integer', minimum: 0 },
         verifiedCount: { type: 'integer', minimum: 0, description: 'Entries that passed every check.' },
-        failedCount: { type: 'integer', minimum: 0, description: 'Entries with a CRC / size / local-header mismatch.' },
-        skippedCount: { type: 'integer', minimum: 0, description: 'Entries that could not be verified (encrypted, stream-only codec).' },
+        failedCount: { type: 'integer', minimum: 0, description: 'Entries that fail the archive: a CRC / size / local-header mismatch, an unknown compression method, or a design-time skip whose local header contradicts the central directory.' },
+        skippedCount: { type: 'integer', minimum: 0, description: 'Entries that could not be verified by design (encrypted, stream-only codec) and whose local header agrees with the central directory.' },
         entries: {
             type: 'array',
             items: {
@@ -86,35 +97,44 @@ export const VERIFY_ZIP_OUTPUT_SCHEMA = {
                     crcMatch: { type: 'boolean' },
                     sizeMatch: { type: 'boolean' },
                     localHeaderMatch: { type: 'boolean' },
-                    skipped: { type: 'string', enum: ['encrypted', 'stream-only-codec'] },
+                    skipped: { type: 'string', enum: ['encrypted', 'stream-only-codec', 'unsupported-method'], description: 'Why the payload was not verified (zipnative 1.1.0 adds unsupported-method, which still fails the archive).' },
                 },
             },
         },
         entriesTruncated: { type: 'boolean' },
         diagnostics: DIAGNOSTICS_OUTPUT_PROPERTIES.diagnostics,
+        diagnosticsTruncated: { type: 'boolean', description: 'Present (true) when more than 200 distinct diagnostics were raised and the list was cut.' },
     },
 } as const;
 
-export async function verifyZipTool(rawInput: unknown): Promise<VerifyZipResult> {
+/** The engine's archive rule for a non-ok entry: a design-time skip passes when its local header agrees. */
+function passesAsSkipped(e: VerifiedEntry): boolean {
+    return (e.skipped === 'encrypted' || e.skipped === 'stream-only-codec') && e.localHeaderMatch;
+}
+
+export async function verifyZipTool(rawInput: unknown, context: CallContext = NO_CONTEXT): Promise<VerifyZipResult> {
     const input = parseInput(InputSchema, rawInput);
     const { bytes } = await loadArchive(input);
     const limits = resolveCallLimits(input.limits);
+    // zipnative's verifyZip is synchronous and takes no signal (A-003): a cancellation is honoured
+    // up to the start of the verification, which then runs to completion.
+    throwIfCancelled(context);
     // Only caller mistakes throw here (invalid limits) — mapped like every other engine error.
     const report = guard('Failed to verify archive', () => verifyZip(bytes, limits !== undefined ? { limits } : undefined));
     let verifiedCount = 0;
     let failedCount = 0;
     let skippedCount = 0;
     for (const e of report.entries) {
-        if (e.skipped !== undefined) skippedCount++;
-        else if (e.ok) verifiedCount++;
+        if (e.ok) verifiedCount++;
+        else if (passesAsSkipped(e)) skippedCount++;
         else failedCount++;
     }
     const selected = input.entries === 'none'
         ? []
         : input.entries === 'failed'
-            ? report.entries.filter((e) => e.skipped === undefined && !e.ok)
+            ? report.entries.filter((e) => !e.ok && !passesAsSkipped(e))
             : input.entries === 'skipped'
-                ? report.entries.filter((e) => e.skipped !== undefined)
+                ? report.entries.filter((e) => !e.ok && passesAsSkipped(e))
                 : report.entries;
     const truncated = selected.length > input.maxEntries;
     return {
@@ -126,8 +146,19 @@ export async function verifyZipTool(rawInput: unknown): Promise<VerifyZipResult>
         skippedCount,
         entries: truncated ? selected.slice(0, input.maxEntries) : [...selected],
         ...(truncated ? { entriesTruncated: true as const } : {}),
-        diagnostics: report.diagnostics.map((d) => ({ code: d.code, severity: d.severity, message: d.message, ...(d.entryName !== undefined ? { entryName: d.entryName } : {}) })),
+        ...diagnosticsOf(report.diagnostics),
     };
+}
+
+/**
+ * The report's diagnostics through the shared sink (B-009): de-duplicated by code + entry and capped at
+ * 200 rows like every other tool. `diagnosticCounts` stays out to keep the 1.0.0 result shape;
+ * `diagnosticsTruncated` appears only when the cap bites.
+ */
+function diagnosticsOf(raised: VerifyZipReport['diagnostics']): { diagnostics: DiagnosticRow[]; diagnosticsTruncated?: true } {
+    const sink = createDiagnosticSink();
+    for (const d of raised) sink.options.onDiagnostic?.(d);
+    return { diagnostics: [...sink.diagnostics], ...(sink.truncated ? { diagnosticsTruncated: true as const } : {}) };
 }
 
 export function verifySummary(r: VerifyZipResult): Record<string, unknown> {

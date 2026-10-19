@@ -12,7 +12,7 @@ import { callToolDirect, ensureEngineReady } from '../src/server.js';
 import { buildExtraField } from './_fixtures/raw-zip-builder.js';
 import { b64, basicZip, bytesOf, highRatioZip, raw } from './_zip-fixtures.js';
 
-const DEFAULT_CEILINGS: Ceilings = { maxUncompressedBytes: 8 * 1024 * 1024 * 1024, maxEntries: 100_000, maxWorkers: 8 };
+const DEFAULT_CEILINGS: Ceilings = { maxUncompressedBytes: 8 * 1024 * 1024 * 1024, maxEntries: 100_000, maxWorkers: 8, maxFileOutputBytes: 4 * 1024 * 1024 * 1024 };
 
 describe('limits', () => {
     afterEach(() => {
@@ -21,8 +21,9 @@ describe('limits', () => {
         __resetCeilingsForTests();
     });
 
-    it('the schema fragments cover the eight engine keys', () => {
-        expect(LIMIT_KEYS).toHaveLength(8);
+    it('the schema fragments cover the nine engine keys (maxEntryCompressedSize since zipnative 1.1.0)', () => {
+        expect(LIMIT_KEYS).toHaveLength(9);
+        expect(LIMIT_KEYS[2]).toBe('maxEntryCompressedSize');
         expect(Object.keys(LIMITS_INPUT_SCHEMA.properties)).toEqual([...LIMIT_KEYS]);
         expect(Object.keys(LimitsSchema.shape)).toEqual([...LIMIT_KEYS]);
         expect(Object.keys(DEFAULT_ZIP_LIMITS).sort()).toEqual([...LIMIT_KEYS].sort());
@@ -45,9 +46,9 @@ describe('limits', () => {
     });
 
     it('a ceiling below the engine default tightens the default silently', () => {
-        const tight: Ceilings = { maxUncompressedBytes: 1024 * 1024, maxEntries: 50, maxWorkers: 8 };
-        expect(resolveCallLimits(undefined, tight)).toEqual({ maxEntries: 50, maxEntryUncompressedSize: 1024 * 1024, maxTotalUncompressedSize: 1024 * 1024 });
-        expect(resolveCallLimits({ maxEntries: 20 }, tight)).toEqual({ maxEntries: 20, maxEntryUncompressedSize: 1024 * 1024, maxTotalUncompressedSize: 1024 * 1024 });
+        const tight: Ceilings = { maxUncompressedBytes: 1024 * 1024, maxEntries: 50, maxWorkers: 8, maxFileOutputBytes: 4 * 1024 * 1024 * 1024 };
+        expect(resolveCallLimits(undefined, tight)).toEqual({ maxEntries: 50, maxEntryUncompressedSize: 1024 * 1024, maxEntryCompressedSize: 1024 * 1024, maxTotalUncompressedSize: 1024 * 1024 });
+        expect(resolveCallLimits({ maxEntries: 20 }, tight)).toEqual({ maxEntries: 20, maxEntryUncompressedSize: 1024 * 1024, maxEntryCompressedSize: 1024 * 1024, maxTotalUncompressedSize: 1024 * 1024 });
         process.env[MAX_ENTRIES_ENV] = '7';
         __resetCeilingsForTests();
         expect(resolveCallLimits(undefined)).toEqual({ maxEntries: 7 });
@@ -57,6 +58,7 @@ describe('limits', () => {
         for (const [key, ceiling, env] of [
             ['maxEntries', 100_000, MAX_ENTRIES_ENV],
             ['maxEntryUncompressedSize', DEFAULT_CEILINGS.maxUncompressedBytes, MAX_UNCOMPRESSED_ENV],
+            ['maxEntryCompressedSize', DEFAULT_CEILINGS.maxUncompressedBytes, MAX_UNCOMPRESSED_ENV],
             ['maxTotalUncompressedSize', DEFAULT_CEILINGS.maxUncompressedBytes, MAX_UNCOMPRESSED_ENV],
         ] as const) {
             try {
@@ -109,8 +111,8 @@ describe('B-018: every ZipLimits key produces ZIP_LIMIT_EXCEEDED naming itself w
         ['maxCentralDirectoryBytes', { maxCentralDirectoryBytes: 50 }, basicZip, 225, ['inspect_zip', 'list_zip_entries', 'modify_zip']],
     ];
 
-    it('the table covers the eight keys exactly once', () => {
-        expect(ROWS.map((r) => r[0]).sort()).toEqual([...LIMIT_KEYS].sort());
+    it('the table covers the in-memory keys exactly once (maxEntryCompressedSize is the byte-range reader, see tests/range-access.test.ts)', () => {
+        expect(ROWS.map((r) => r[0]).sort()).toEqual(LIMIT_KEYS.filter((k) => k !== 'maxEntryCompressedSize').sort());
     });
 
     for (const [key, limits, make, observed, tools] of ROWS) {

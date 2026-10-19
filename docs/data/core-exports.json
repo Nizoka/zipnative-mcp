@@ -1,21 +1,56 @@
 {
-  "$comment": "Derived from zipnative docs/assets/api.json (1.0.0). One row per export of the two entry points; docs/KNOWLEDGE_BASE.md section 8 maps every name to an MCP touchpoint (tool + input/output field). Enforced by tests/docs-consistency.test.ts: the name + subpath pairs equal the engine api.json when it is reachable, every name appears in backticks in KNOWLEDGE_BASE.md section 8, the reach counts add up to 62 capability / 9 type / 6 unexposed = 77, UNEXPOSED_EXPORTS (src/tools/describe-engine.ts) is a subset of the unexposed rows, and zipnativeVersion equals the installed engine VERSION. kind is derived from the export signature. reach grades the row per the 1.0.0 coverage audit: \"capability\" = the behaviour behind the export is exercisable through a tool, \"type\" = re-exported (or aliased) upstream for typing only, \"unexposed\" = deliberately not reachable from a tool argument (via names the reason; describe_engine.unexposed reports the same list at runtime); via names the touchpoint.",
-  "zipnativeVersion": "1.0.0",
-  "exportCount": 77,
+  "$comment": "Derived from zipnative docs/assets/api.json (1.1.0). One row per export of the two entry points; docs/KNOWLEDGE_BASE.md section 8 maps every name to an MCP touchpoint (tool + input/output field). Enforced by tests/docs-consistency.test.ts: the name + subpath pairs equal the engine api.json when it is reachable, every name appears in backticks in KNOWLEDGE_BASE.md section 8, the reach counts add up to 88 capability / 9 type / 9 unexposed = 106, every whole export named in UNEXPOSED_EXPORTS (src/tools/describe-engine.ts) is an unexposed row (a member or field of an exposed export is called unexposed on its owner's row), and zipnativeVersion equals the installed engine VERSION. kind is derived from the export signature. reach grades the row: \"capability\" = the behaviour behind the export is exercisable through a tool, \"type\" = re-exported (or aliased) upstream for typing only, \"unexposed\" = deliberately not reachable from a tool argument (via names the reason; describe_engine.unexposed reports the same list at runtime); via names the touchpoint.",
+  "zipnativeVersion": "1.1.0",
+  "exportCount": 106,
   "exports": [
     {
       "name": "AddEntryOptions",
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "create_zip entries[] and modify_zip add/replace: compression, date, comment, externalAttributes | unixMode (mode bits → (S_IFREG|mode)<<16), extraFields[] { id, dataBase64 } (toAddEntryOptions in src/entry-spec.ts)"
+      "via": "create_zip entries[] and modify_zip add/replace: compression, date (read as UTC), comment, externalAttributes | unixMode (externalAttributesFromUnixMode), extraFields[] { id, dataBase64 }, zip64 (create_zip stream:true entries only; the APPNOTE 4.3.9.2 streaming layout) (toAddEntryOptions in src/entry-spec.ts)"
+    },
+    {
+      "name": "AddFromReaderOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "merge_zip.verify → addFromReader(reader, entry, { verify }) (default true: every entry CRC- and size-checked before it is copied; an entry with no registered codec is refused with ZIP_UNSUPPORTED_METHOD instead of being copied unchecked)"
+    },
+    {
+      "name": "AnalyzeDeterminismOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip canonicalDate → analyzeDeterminism(bytes, { date, limits, dosTimeMode: 'utc' }); canonicalize_zip summary.canonicalForm runs it with the pinned date"
+    },
+    {
+      "name": "ByteRangeSource",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "access 'range' | 'auto' on inspect_zip, list_zip_entries, read_zip_entry: built from the sandbox file's own handle (zipPath) or from inline bytes; a remote / URL source is unexposed (no network path)"
     },
     {
       "name": "ByteSource",
       "kind": "type",
       "subpath": ".",
       "reach": "capability",
-      "via": "built internally by openArchiveSource (zipBase64 chunked / zipPath streamed) for scan_zip_forward and by fileChunks() for create_zip stream:true entries; an external ByteSource / ReadableStream is unexposed (JSON-RPC has no stream channel)"
+      "via": "built internally by openArchiveSource (zipBase64 chunked / zipPath streamed through the one sandbox handle) for scan_zip_forward and by the sandbox file chunks for create_zip stream:true entries; an external ByteSource / ReadableStream is unexposed (JSON-RPC has no stream channel)"
+    },
+    {
+      "name": "CanonicalOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "canonicalize_zip date / keepComments / keepExternalAttributes and modify_zip canonical {...} (toCanonicalOptions in src/canonical.ts)"
+    },
+    {
+      "name": "CanonicalizeOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "canonicalize_zip: the canonical options + limits / strict and the diagnostic sink"
     },
     {
       "name": "CodecCompressOptions",
@@ -25,11 +60,18 @@
       "via": "unexposed: only handed to an injected codec's compressSync, and no codec can be injected (registerCodec is unexposed)"
     },
     {
+      "name": "CompactOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "modify_zip mode:'compact' with canonical {...} → saveCompact({ canonical })"
+    },
+    {
       "name": "CreateZipOptions",
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "create_zip: order, defaultDate (ISO instant | 'now'), compression, comment, limits, strict (+ the always-installed diagnostics sink)"
+      "via": "create_zip: order, defaultDate (ISO instant | 'now', read as UTC), compression, comment, limits, strict (+ the always-installed diagnostics sink with dosTimeMode 'utc', signal and onProgress)"
     },
     {
       "name": "DEFAULT_ZIP_LIMITS",
@@ -46,11 +88,53 @@
       "via": "the value set of create_zip summary.deflateTier and describe_engine engine.deflateTier { default, deterministic } ('injected' never occurs in this server)"
     },
     {
+      "name": "DeterminismConcern",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the value set of inspect_zip determinismReport.offenders[].concern and of the canonical-form check detail"
+    },
+    {
+      "name": "DeterminismOffender",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip determinismReport.offenders[] { name, concern } (capped at 200)"
+    },
+    {
+      "name": "DeterminismReport",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip determinism sub-checks (default verdict keeps the 1.0.0 formula), opt-in determinismReport and checks canonical-form / canonical-extras / canonical-version-made-by; canonicalize_zip summary.canonicalForm"
+    },
+    {
+      "name": "DosTimeMode",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "fixed to 'utc' on every engine call by the diagnostic sink (a pinned date is the same DOS fields on every host); 'local' is not offered as an input"
+    },
+    {
+      "name": "EntrySkipReason",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "verify_zip entries[].skipped and read_zip_entry verification.skipped ('encrypted' | 'stream-only-codec' | 'unsupported-method'); skippedCount"
+    },
+    {
       "name": "EntryVerification",
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "read_zip_entry mode:'verify' → verification { ok, crcMatch, sizeMatch, localHeaderMatch }"
+      "via": "read_zip_entry mode:'verify' → verification { ok, crcMatch, sizeMatch, localHeaderMatch, skipped? } (the engine's real localHeaderMatch and skip reason)"
+    },
+    {
+      "name": "ExtendedTimestamps",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "list_zip_entries / read_zip_entry extendedTimestamps: true → the row field extendedTimestamps { mtime, atime, ctime, source: 'ut' | 'ntfs' | 'dos' }"
     },
     {
       "name": "ExtractOptions",
@@ -134,14 +218,28 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "inspect_zip.validate ('eager' default) and list_zip_entries.validate ('lazy' default); limits / strict / onDiagnostic on every random-access tool"
+      "via": "inspect_zip.validate ('eager' default) and list_zip_entries.validate ('lazy' default); modify_zip and extract_zip open with validate 'eager'; limits / strict / onDiagnostic on every random-access tool; also the options of openZipRange (access 'range')"
+    },
+    {
+      "name": "RawEntryMeta",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: the metadata of ZipWriter.addRaw, where the caller vouches for the CRC and the sizes (an agent could forge an inconsistent archive); merge_zip exposes the checked addFromReader instead"
+    },
+    {
+      "name": "RawEntryReader",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the read side merge_zip hands to addFromReader (each opened source ZipReader satisfies it)"
     },
     {
       "name": "ReadEntryOptions",
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "read_zip_entry.verifyCrc → readEntry(entry, { verifyCrc }); { verifyCrc:false } on readEntryStream for a range"
+      "via": "read_zip_entry.verifyCrc → readEntry(entry, { verifyCrc }) on the in-memory and the byte-range reader; { verifyCrc:false } on readEntryStream for a range"
     },
     {
       "name": "StreamOptions",
@@ -165,6 +263,20 @@
       "via": "viewFromHeader() → scan_zip_forward.entries[] (isSymlink / usesZip64 / unixMode null; rawName → rawNameHex; descriptor headers carry zero sizes)"
     },
     {
+      "name": "UnixIds",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "list_zip_entries / read_zip_entry unixIds: true → the row field unixIds { uid, gid } or null (Info-ZIP 0x7875)"
+    },
+    {
+      "name": "UnixModeOptions",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the { directory } option toAddEntryOptions passes with unixMode (create_zip entries, modify_zip add/replace)"
+    },
+    {
       "name": "VERSION",
       "kind": "const",
       "subpath": ".",
@@ -176,7 +288,7 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "verify_zip.entries[] (name, ok, crcMatch, sizeMatch, localHeaderMatch, skipped?: 'encrypted' | 'stream-only-codec'), selected by entries:'all'|'failed'|'skipped'|'none'"
+      "via": "verify_zip.entries[] (name, ok, crcMatch, sizeMatch, localHeaderMatch, skipped?: 'encrypted' | 'stream-only-codec' | 'unsupported-method'), selected by entries:'all'|'failed'|'skipped'|'none'"
     },
     {
       "name": "VerifyZipOptions",
@@ -204,7 +316,7 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "strict and limits on every engine-touching tool (EngineOptionsShape); onDiagnostic is unexposed — the server always installs its own sink so every result carries diagnostics[]"
+      "via": "strict and limits on every engine-touching tool (EngineOptionsShape); dosTimeMode pinned to 'utc', signal (MCP cancellation) and onProgress (notifications/progress with a progressToken) installed by the diagnostic sink on every engine call that takes ZipCommonOptions (verifyZip takes only limits, so verify_zip cannot be interrupted once it starts); onDiagnostic is unexposed — the server always installs its own sink so every archive tool's result carries diagnostics[]; nameDecoder is unexposed in 1.1.0 (a decoder is a function; a label-based, closed-enum input is a later candidate)"
     },
     {
       "name": "ZipCompressionOptions",
@@ -225,7 +337,14 @@
       "kind": "type",
       "subpath": ".",
       "reach": "type",
-      "via": "the 5 data-code rows of ZIP_ERROR_CLASS (all reachable)"
+      "via": "the 5 data-code rows of ZIP_ERROR_CLASS (ZIP_DECOMPRESSION_FAILED unreachable since zipnative 1.1.0 normalises every inflate tier to ZIP_DEFLATE_*)"
+    },
+    {
+      "name": "ZipDecompressor",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: part of the codec contract (ZipCodec.createDecompressor); no codec can be registered here — describe_engine codecs[].incremental reports it for the built-in store and deflate"
     },
     {
       "name": "ZipDiagnostic",
@@ -239,7 +358,7 @@
       "kind": "type",
       "subpath": ".",
       "reach": "capability",
-      "via": "ZIP_DIAGNOSTIC_CODES → describe_engine.diagnosticCodes; diagnostics[].code; inspect_zip.prependedData / multipleEocd derived from two of them"
+      "via": "ZIP_DIAGNOSTIC_CODES (12) → describe_engine.diagnosticCodes; diagnostics[].code; inspect_zip.prependedData / multipleEocd derived from two of them; ZIP_TIMESTAMP_CLAMPED is listed but unreachable (an out-of-range date is VALIDATION_ERROR first)"
     },
     {
       "name": "ZipDiagnosticHandler",
@@ -253,7 +372,7 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "viewFromEntry() → EntryView rows (list_zip_entries, read_zip_entry.entry, extract_zip) incl. rawNameHex / commentHex; inspect_zip statistics and determinism verdict; modify_zip planning"
+      "via": "viewFromEntry() → EntryView rows (list_zip_entries, read_zip_entry.entry, extract_zip) incl. rawNameHex / commentHex / nameEncoding, opt-in extendedTimestamps / unixIds; inspect_zip statistics and determinism verdict; modify_zip planning; merge_zip filter and conflict planning"
     },
     {
       "name": "ZipError",
@@ -309,14 +428,14 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "the limits input (eight keys) on every engine-touching tool; describe_engine.defaultLimits; the operator ceilings ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES / ZIPNATIVE_MCP_MAX_ENTRIES bound three of the keys"
+      "via": "the limits input (nine keys) on every engine-touching tool; describe_engine.defaultLimits; the operator ceilings bound four keys: ZIPNATIVE_MCP_MAX_UNCOMPRESSED_BYTES (maxEntryUncompressedSize, maxEntryCompressedSize, maxTotalUncompressedSize) and ZIPNATIVE_MCP_MAX_ENTRIES (maxEntries)"
     },
     {
       "name": "ZipModifier",
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "modify_zip.operations[]: addEntry (add), replaceEntry (replace), removeEntry (remove), renameEntry (rename), setComment (setComment), save (mode:'append') / saveCompact (mode:'compact'); .reader is unexposed (the input itself)"
+      "via": "modify_zip.operations[]: addEntry (add), replaceEntry (replace), removeEntry (remove), renameEntry (rename), setComment (setComment), save (mode:'append') / saveCompact (mode:'compact', with canonical {...} → saveCompact({ canonical })); .reader is unexposed (the input itself)"
     },
     {
       "name": "ZipModifierOptions",
@@ -326,11 +445,46 @@
       "via": "modify_zip: compression, defaultDate (new payloads), limits, strict"
     },
     {
+      "name": "ZipNameDecoder",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "unexposed",
+      "via": "unexposed: a decoder is a function (ZipCommonOptions.nameDecoder); legacy code-page names stay CP437-decoded with rawNameHex kept for forensics"
+    },
+    {
+      "name": "ZipNameEncoding",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "nameEncoding on every EntryView row ('utf-8' | 'cp437'; 'custom' never occurs, nameDecoder being unexposed)"
+    },
+    {
+      "name": "ZipProgress",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the engine snapshots progressReporter (src/call-context.ts) turns into notifications/progress when the request carries _meta.progressToken (strictly increasing, throttled at 200 ms)"
+    },
+    {
+      "name": "ZipProgressHandler",
+      "kind": "type",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "the onProgress the diagnostic sink installs on every engine call when the request asked for progress"
+    },
+    {
+      "name": "ZipRangeReader",
+      "kind": "interface",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "access 'range' (or a zipPath above the 1 GiB in-memory cap under 'auto') on inspect_zip, list_zip_entries, read_zip_entry → results carry access: 'range'; limits.maxEntryCompressedSize bounds one fetched payload"
+    },
+    {
       "name": "ZipReader",
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "entries() (every read tool), getEntry (read_zip_entry.name), readEntry / readEntryStream / readEntryRaw (read_zip_entry data / range / raw), verifyEntry (read_zip_entry mode:'verify'), entryCount / isZip64 / comment (inspect_zip, list_zip_entries; comment → commentHex); .bytes only for modify_zip summary.noOp — unexposed as a field"
+      "via": "entries() (every read tool), getEntry (read_zip_entry.name), readEntry / readEntryStream / readEntryRaw (read_zip_entry data / range / raw), verifyEntry (read_zip_entry mode:'verify'), entryCount / isZip64 / comment (inspect_zip, list_zip_entries; comment → commentHex); each merge_zip source is a ZipReader handed to addFromReader; .bytes only for modify_zip summary.noOp — unexposed as a field"
     },
     {
       "name": "ZipSecurityError",
@@ -358,14 +512,14 @@
       "kind": "type",
       "subpath": ".",
       "reach": "type",
-      "via": "the 6 unsupported-code rows of ZIP_ERROR_CLASS (ZIP_UNSUPPORTED_ZIP64_STREAMING needs a streamed sourcePath > 4 GiB)"
+      "via": "the 6 unsupported-code rows of ZIP_ERROR_CLASS (ZIP_UNSUPPORTED_ZIP64_STREAMING needs a streamed sourcePath > 4 GiB without zip64: true)"
     },
     {
       "name": "ZipUnsupportedFeature",
       "kind": "type",
       "subpath": ".",
       "reach": "capability",
-      "via": "_meta.error.data.feature ('zipcrypto' | 'strong-encryption' | 'multi-disk' | 'zip64-streaming' | 'cd-less-descriptor' | 'method:<n>')"
+      "via": "_meta.error.data.feature ('zipcrypto' | 'strong-encryption' | 'aes' | 'multi-disk' | 'zip64-streaming' | 'cd-less-descriptor' | 'method:<n>')"
     },
     {
       "name": "ZipVerificationReport",
@@ -379,7 +533,7 @@
       "kind": "interface",
       "subpath": ".",
       "reach": "capability",
-      "via": "create_zip.entries[] → add / addDirectory (directory:true) / addStream (stream:true) / toBytes (base64 mode) / stream({ chunkSize }) (file mode or when an entry is streamed); the comment via CreateZipOptions.comment"
+      "via": "create_zip.entries[] → add / addDirectory (directory:true) / addStream (stream:true, zip64 opt-in) / toBytes (base64 mode) / stream({ chunkSize }) (file mode or when an entry is streamed); addFromReader (merge_zip, the checked transplant); addRaw is unexposed (the caller would vouch for the CRC and the sizes); the comment via CreateZipOptions.comment"
     },
     {
       "name": "activeDeflateTier",
@@ -387,6 +541,20 @@
       "subpath": ".",
       "reach": "capability",
       "via": "create_zip summary.deflateTier (activeDeflateTier(compression.deterministic === true)); describe_engine engine.deflateTier { default, deterministic }"
+    },
+    {
+      "name": "analyzeDeterminism",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip determinism sub-checks, determinismReport, canonicalDate, checks canonical-form / canonical-extras / canonical-version-made-by (in-memory access only); canonicalize_zip summary.canonicalForm"
+    },
+    {
+      "name": "canonicalizeZip",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "canonicalize_zip (the canonical deterministic form without recompression; idempotent)"
     },
     {
       "name": "crc32",
@@ -417,6 +585,13 @@
       "via": "modify_zip over the opened reader"
     },
     {
+      "name": "externalAttributesFromUnixMode",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "unixMode on create_zip entries and modify_zip add/replace (parseUnixMode → externalAttributesFromUnixMode(mode, { directory }))"
+    },
+    {
       "name": "extractZip",
       "kind": "function",
       "subpath": ".",
@@ -436,6 +611,20 @@
       "subpath": ".",
       "reach": "capability",
       "via": "inflate_raw numeric method (decompressSync), methodName() on EntryView rows, describe_engine.codecs[] { sync, stream }"
+    },
+    {
+      "name": "getExtendedTimestamps",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "list_zip_entries / read_zip_entry extendedTimestamps: true (opt-in row field)"
+    },
+    {
+      "name": "getUnixIds",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "list_zip_entries / read_zip_entry unixIds: true (opt-in row field)"
     },
     {
       "name": "getUnixMode",
@@ -470,7 +659,21 @@
       "kind": "function",
       "subpath": ".",
       "reach": "capability",
-      "via": "inspect_zip, list_zip_entries, read_zip_entry, extract_zip (index pre-flight), modify_zip — every random-access tool"
+      "via": "inspect_zip, list_zip_entries, read_zip_entry (access memory, the default up to the 1 GiB in-memory cap), extract_zip (index pre-flight), modify_zip, merge_zip (each source), canonicalize_zip (re-open of the output)"
+    },
+    {
+      "name": "openZipRange",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "inspect_zip, list_zip_entries, read_zip_entry with access 'range', or 'auto' on a zipPath above the 1 GiB in-memory cap — over the sandbox file's own handle (never a URL); a remote ByteRangeSource is unexposed"
+    },
+    {
+      "name": "rangeSourceFromBytes",
+      "kind": "function",
+      "subpath": ".",
+      "reach": "capability",
+      "via": "access 'range' on inline zipBase64 input (the same byte-range reader on bytes already in memory)"
     },
     {
       "name": "registerCodec",
@@ -543,5 +746,5 @@
       "via": "create_zip.parallel via dynamic import('zipnative/worker'); byte-identical to createZip per tier"
     }
   ],
-  "verifiedOn": "2026-09-07"
+  "verifiedOn": "2026-10-20"
 }

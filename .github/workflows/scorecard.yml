@@ -1,11 +1,15 @@
 name: Scorecard supply-chain security
 
 on:
+  # Run on a schedule to keep the public security posture report fresh.
   schedule:
     - cron: '27 3 * * 1'
+  # Run on changes to branch protection / workflows / security files.
   push:
     branches: [main, master]
 
+# The workflow shape scorecard-action requires when `publish_results` is on:
+# read-all at the top, the writes on the one job.
 permissions: read-all
 
 concurrency:
@@ -18,32 +22,40 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
+      # Needed to upload the SARIF results to the Security tab.
       security-events: write
+      # Needed to publish signed results to the OpenSSF public dataset.
       id-token: write
       contents: read
       actions: read
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Run analysis
-        uses: ossf/scorecard-action@05b42c624433fc40578a4040d5cf5e36ddca8cde # v2.4.2
+        uses: ossf/scorecard-action@2d1146689b8cda280b9bc96326124645441f03bc # v2.4.4
         with:
           results_file: results.sarif
           results_format: sarif
+          # Publish the results to the OpenSSF Scorecard public API.
           publish_results: true
 
       - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: SARIF file
           path: results.sarif
           retention-days: 5
 
       - name: Upload to code-scanning
-        uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: results.sarif

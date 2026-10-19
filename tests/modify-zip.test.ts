@@ -16,7 +16,7 @@ import { verifyZipTool } from '../src/tools/verify-zip.js';
 import { callToolDirect } from '../src/server.js';
 import { assertValidZip } from './_zip-assert.js';
 import { cleanupSandbox, makeSandbox, patternBytes } from './_sandbox.js';
-import { b64, basicZip, richZip, raw, SFX_PREFIXED } from './_zip-fixtures.js';
+import { b64, basicZip, OVERLAP, richZip, raw, SFX_PREFIXED } from './_zip-fixtures.js';
 
 const README = '# Hello\n\nA small archive for the tests.\n';
 const RICH_COMMENT = 'archive comment — ünïcödé';
@@ -305,5 +305,15 @@ describe('modify_zip', () => {
             assertValidZip(resource.resource.blob, 'wire');
             expect(r.structuredContent).toMatchObject({ mode: 'base64', summary: { saveMode: 'append', operationsApplied: 1 } });
         });
+    });
+});
+
+describe('modify_zip input validation (1.1.0)', () => {
+    it('F-001: the append path refuses an overlapping (smuggling) archive instead of re-emitting it', async () => {
+        for (const mode of ['append', 'compact'] as const) {
+            const r = await callToolDirect('modify_zip', { zipBase64: b64(OVERLAP()), mode, operations: [{ op: 'setComment', comment: 'x' }] });
+            expect(r.isError, mode).toBe(true);
+            expect((r._meta as { error?: { code?: string } } | undefined)?.error?.code, mode).toBe('ZIP_ENTRY_OVERLAP');
+        }
     });
 });

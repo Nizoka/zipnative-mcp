@@ -5,6 +5,7 @@ on:
     branches: [main, master]
     paths-ignore:
       - '**.md'
+      - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/*.md'
       - '.github/FUNDING.yml'
@@ -15,6 +16,7 @@ on:
     branches: [main, master]
     paths-ignore:
       - '**.md'
+      - 'docs/**'
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/*.md'
       - '.github/FUNDING.yml'
@@ -24,9 +26,9 @@ on:
   schedule:
     - cron: '27 3 * * 1'
 
+# Least privilege: the workflow grants read only; the one job that uploads
+# SARIF receives `security-events: write` (Scorecard Token-Permissions).
 permissions:
-  security-events: write
-  actions: read
   contents: read
 
 concurrency:
@@ -38,6 +40,10 @@ jobs:
     name: Analyze
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      security-events: write
 
     strategy:
       fail-fast: false
@@ -45,20 +51,30 @@ jobs:
         language: [javascript-typescript]
 
     steps:
+      - name: Harden the runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: audit
+
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      # Every codeql-action sub-action is pinned to the same SHA: a mixed
+      # init / analyze pair is unsupported.
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           languages: ${{ matrix.language }}
+          # The same suite as zipnative and the other *native MCP servers.
+          queries: security-extended
+          config-file: ./.github/codeql/codeql-config.yml
 
       - name: Autobuild
-        uses: github/codeql-action/autobuild@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        uses: github/codeql-action/autobuild@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
 
       - name: Perform CodeQL Analysis
-        uses: github/codeql-action/analyze@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
+        uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           category: /language:${{ matrix.language }}

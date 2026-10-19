@@ -1,5 +1,14 @@
 version: 2
 
+# Why the groups look the way they do (1.1.0, after the 1.0.0 triage):
+# - runtime dependencies (zipnative, @modelcontextprotocol/server, zod) get
+#   their own group: a bump raises the floor every user installs, so it is
+#   reviewed apart from tooling churn;
+# - security updates land in one group per ecosystem instead of one PR per
+#   advisory (1.0.0 received separate vitest and js-yaml PRs);
+# - every github/codeql-action sub-action moves together: init, autobuild,
+#   analyze and upload-sarif on different SHAs is an unsupported combination;
+# - a cooldown lets a fresh release age before it is proposed.
 updates:
   - package-ecosystem: npm
     directory: /
@@ -7,6 +16,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
     commit-message:
@@ -16,32 +27,59 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "eslint"
         update-types: ["version-update:semver-major"]
+      # @eslint/js moves with eslint: a lone major (10 while eslint is 9)
+      # brings a recommended set the pinned eslint does not run.
+      - dependency-name: "@eslint/js"
+        update-types: ["version-update:semver-major"]
       - dependency-name: "vitest"
         update-types: ["version-update:semver-major"]
       - dependency-name: "@vitest/coverage-v8"
         update-types: ["version-update:semver-major"]
       - dependency-name: "typescript-eslint"
         update-types: ["version-update:semver-major"]
-      # Exact-pinned SBOM generator run inside the publish job (publish.yml):
-      # majors are reviewed by hand, minors/patches flow through the group.
-      - dependency-name: "@cyclonedx/cyclonedx-npm"
+      - dependency-name: "tsx"
+        update-types: ["version-update:semver-major"]
+      # engines.node is >= 22 and .nvmrc pins 22: the type definitions follow
+      # the Node line, not the newest major (verify-docs rule node-pin-parity).
+      - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
     groups:
-      dev-dependencies:
-        patterns:
-          - "*"
+      runtime:
+        dependency-type: production
+        applies-to: version-updates
         update-types:
           - minor
           - patch
+      dev-dependencies:
+        dependency-type: development
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+      security:
+        applies-to: security-updates
+        patterns:
+          - "*"
 
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
       day: monday
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 10
+    cooldown:
+      default-days: 7
     labels:
       - dependencies
       - ci
     commit-message:
       prefix: "chore(ci):"
+    groups:
+      codeql-action:
+        patterns:
+          - "github/codeql-action*"
+      actions:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "github/codeql-action*"

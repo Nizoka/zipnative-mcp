@@ -34,6 +34,12 @@ export interface McpTestClient {
     callTool<T = Record<string, unknown>>(name: string, args?: Record<string, unknown>): Promise<T>;
     readResource<T = Record<string, unknown>>(uri: string): Promise<T>;
     getPrompt<T = Record<string, unknown>>(name: string): Promise<T>;
+    /** Every server notification received so far (progress, logging, …), in order. */
+    readonly notifications: Array<{ readonly method: string; readonly params?: Record<string, unknown> }>;
+    /** Send a request and get its id with the pending result (to cancel it with notifications/cancelled). */
+    start<T = Record<string, unknown>>(method: string, params?: Record<string, unknown>): { readonly id: number; readonly result: Promise<T> };
+    /** Send a client notification. */
+    notify(method: string, params?: Record<string, unknown>): Promise<void>;
     close(): Promise<void>;
 }
 
@@ -46,8 +52,12 @@ export async function connectLegacy(server: Server = createServer(), protocolVer
     const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
     let nextId = 1;
 
+    const notifications: Array<{ method: string; params?: Record<string, unknown> }> = [];
     clientSide.onmessage = (message) => {
-        if (!('id' in message) || message.id === undefined || message.id === null) return;
+        if (!('id' in message) || message.id === undefined || message.id === null) {
+            if ('method' in message) notifications.push({ method: message.method, ...('params' in message && message.params !== undefined ? { params: message.params as Record<string, unknown> } : {}) });
+            return;
+        }
         const entry = pending.get(Number(message.id));
         if (entry === undefined) return;
         pending.delete(Number(message.id));
@@ -61,13 +71,15 @@ export async function connectLegacy(server: Server = createServer(), protocolVer
     await server.connect(serverSide);
     await clientSide.start();
 
-    const request = <T,>(method: string, params: Record<string, unknown> = {}): Promise<T> => {
+    const start = <T,>(method: string, params: Record<string, unknown> = {}): { id: number; result: Promise<T> } => {
         const id = nextId++;
-        return new Promise<T>((resolve, reject) => {
+        const result = new Promise<T>((resolve, reject) => {
             pending.set(id, { resolve: (v) => resolve(v as T), reject });
             void clientSide.send({ jsonrpc: '2.0', id, method, params });
         });
+        return { id, result };
     };
+    const request = <T,>(method: string, params: Record<string, unknown> = {}): Promise<T> => start<T>(method, params).result;
 
     await request('initialize', {
         protocolVersion,
@@ -82,6 +94,9 @@ export async function connectLegacy(server: Server = createServer(), protocolVer
         callTool: (name, args = {}) => request('tools/call', { name, arguments: args }),
         readResource: (uri) => request('resources/read', { uri }),
         getPrompt: (name) => request('prompts/get', { name }),
+        notifications,
+        start,
+        notify: (method, params) => clientSide.send({ jsonrpc: '2.0', method, ...(params !== undefined ? { params } : {}) }),
         close: async () => {
             await clientSide.close();
             await server.close();

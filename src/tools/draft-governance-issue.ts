@@ -18,6 +18,7 @@
 import os from 'node:os';
 import { z } from 'zod';
 
+import { MAX_ISSUE_TEXT_CHARS } from '../caps.js';
 import { GovernanceError, ToolError } from '../errors.js';
 import { parseInput } from './_shared.js';
 import {
@@ -47,6 +48,7 @@ export const DRAFT_GOVERNANCE_ISSUE_INPUT_SCHEMA = {
         summary: {
             type: 'string',
             minLength: 16,
+            maxLength: MAX_ISSUE_TEXT_CHARS,
             description: 'One or two paragraphs describing the problem or proposal.',
         },
         issueType: {
@@ -71,11 +73,13 @@ export const DRAFT_GOVERNANCE_ISSUE_INPUT_SCHEMA = {
                 command: {
                     type: 'string',
                     minLength: 1,
+                    maxLength: MAX_ISSUE_TEXT_CHARS,
                     description: 'The exact command or MCP tool call you ran.',
                 },
                 result: {
                     type: 'string',
                     minLength: 1,
+                    maxLength: MAX_ISSUE_TEXT_CHARS,
                     description: 'The observed failure, error, or regression.',
                 },
             },
@@ -83,10 +87,12 @@ export const DRAFT_GOVERNANCE_ISSUE_INPUT_SCHEMA = {
         expectedBehavior: {
             type: 'string',
             minLength: 4,
+            maxLength: MAX_ISSUE_TEXT_CHARS,
             description: 'What you expected to happen instead.',
         },
         actualBehavior: {
             type: 'string',
+            maxLength: MAX_ISSUE_TEXT_CHARS,
             description: "What actually happened (defaults to the reproduction result when omitted).",
         },
         affectedPackages: {
@@ -168,15 +174,15 @@ export const DRAFT_GOVERNANCE_ISSUE_OUTPUT_SCHEMA = {
 
 const InputSchema = z.strictObject({
     title: z.string().min(8).max(160),
-    summary: z.string().min(16),
+    summary: z.string().min(16).max(MAX_ISSUE_TEXT_CHARS),
     issueType: z.enum(ISSUE_TYPES),
     targetRepo: z.string().min(1).max(100).default('zipnative-mcp'),
     reproduction: z.strictObject({
-        command: z.string().min(1),
-        result: z.string().min(1),
+        command: z.string().min(1).max(MAX_ISSUE_TEXT_CHARS),
+        result: z.string().min(1).max(MAX_ISSUE_TEXT_CHARS),
     }),
-    expectedBehavior: z.string().min(4),
-    actualBehavior: z.string().optional(),
+    expectedBehavior: z.string().min(4).max(MAX_ISSUE_TEXT_CHARS),
+    actualBehavior: z.string().max(MAX_ISSUE_TEXT_CHARS).optional(),
     affectedPackages: z.array(z.string().min(1)).max(16).default(['zipnative-mcp']),
     duplicateSearchPerformed: z.boolean(),
     outputMode: z.enum(['inline', 'file']).default('inline'),

@@ -1,0 +1,17 @@
+# CodeQL configuration (referenced by .github/workflows/codeql.yml).
+#
+# The shipped code — src/ (the server), scripts/ (the gate, the corpus
+# generator, the vendored veraZIP validator, the verifiers) and the
+# configuration — is analysed with the `security-extended` suite, the one
+# zipnative and the other *native MCP servers run (codeql.yml `queries`).
+#
+# tests/ is NOT excluded: it holds no secret material (the server has no
+# credential input), and the one finding CodeQL ever raised there — a
+# polynomial regex in tests/governance.test.ts (code-scanning alert #8) — was
+# real and was fixed. Only generated or third-party output is skipped.
+name: zipnative-mcp
+paths-ignore:
+  - dist
+  - coverage
+  - test-output
+  - node_modules

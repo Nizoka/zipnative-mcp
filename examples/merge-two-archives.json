@@ -1,0 +1,16 @@
+{
+  "description": "Merge two archives without recompressing anything: every entry is transplanted with its compressed bytes, CRC, timestamp and attributes after a CRC / size check (verify: true by default). Both archives contain README.md: onConflict 'last' keeps the second one and summary.dropped names what was not kept (the default 'error' would refuse with ZIP_DUPLICATE_ENTRY_NAME).",
+  "tool": "merge_zip",
+  "arguments": {
+    "sources": [
+      {
+        "zipBase64": "<zip-base64>"
+      },
+      {
+        "zipBase64": "<rich-zip-base64>"
+      }
+    ],
+    "onConflict": "last",
+    "includeSha256": true
+  }
+}
